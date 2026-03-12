@@ -30,7 +30,7 @@ jobs:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GITHUB_REPOSITORY: ${{ github.repository }}
       GITHUB_API_URL: ${{ github.api_url }}
-      ISSUE_BOT_STATE_DIR: ${{ runner.temp }}/rk_gb-issue-bot
+      ISSUE_BOT_STATE_DIR: /tmp/rk_gb-issue-bot-${{ github.run_id }}-${{ github.run_attempt }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
