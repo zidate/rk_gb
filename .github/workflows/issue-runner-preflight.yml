@@ -1,0 +1,72 @@
+name: issue-runner-preflight
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_local_smoke:
+        description: Run local smoke test after basic preflight
+        required: false
+        default: true
+        type: boolean
+      run_build_verify:
+        description: Run RK830 isolated build verify after basic preflight
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-runner-preflight
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    runs-on:
+      - self-hosted
+      - linux
+      - rk830-builder
+    env:
+      ISSUE_FIX_COMMAND: ${{ vars.ISSUE_FIX_COMMAND }}
+      RK_TOOLCHAIN_BIN: ${{ vars.RK_TOOLCHAIN_BIN }}
+      CMAKE_BIN: ${{ vars.CMAKE_BIN }}
+      ISSUE_BOT_STATE_DIR: ${{ runner.temp }}/rk_gb-issue-bot
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run runner preflight
+        run: |
+          set -euo pipefail
+          args=(--repo-dir "$GITHUB_WORKSPACE")
+          if [ "${{ inputs.run_local_smoke }}" = "true" ]; then
+            args+=(--with-local-smoke)
+          fi
+          if [ "${{ inputs.run_build_verify }}" = "true" ]; then
+            args+=(--with-build-verify)
+          fi
+          bash tools/issue_bot/runner_preflight.sh "${args[@]}"
+
+      - name: Append preflight summary
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          if [ -f "$ISSUE_BOT_STATE_DIR/preflight-summary.md" ]; then
+            cat "$ISSUE_BOT_STATE_DIR/preflight-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '# Runner Preflight Summary\n\n- summary: no preflight summary file found\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f "$ISSUE_BOT_STATE_DIR/smoke-test/last-run-summary.md" ]; then
+            printf '\n' >> "$GITHUB_STEP_SUMMARY"
+            cat "$ISSUE_BOT_STATE_DIR/smoke-test/last-run-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload preflight state
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-runner-preflight-state-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.ISSUE_BOT_STATE_DIR }}
+          if-no-files-found: warn
+          retention-days: 7

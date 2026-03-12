@@ -1,0 +1,81 @@
+name: issue-triage
+
+on:
+  schedule:
+    - cron: "17 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Optional single issue number to triage
+        required: false
+        type: string
+      dry_run:
+        description: Do not write labels/comments back to GitHub
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: issue-triage
+  cancel-in-progress: false
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      GITHUB_API_URL: ${{ github.api_url }}
+      ISSUE_BOT_STATE_DIR: ${{ runner.temp }}/rk_gb-issue-bot
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Triage open issues on schedule
+        if: ${{ github.event_name != 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          python3 tools/issue_bot/triage_issues.py --write
+
+      - name: Triage issue from workflow_dispatch
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            args+=(--dry-run)
+          else
+            args+=(--write)
+          fi
+          if [ -n "${{ inputs.issue_number }}" ]; then
+            args+=(--issue-number "${{ inputs.issue_number }}")
+          fi
+          python3 tools/issue_bot/triage_issues.py "${args[@]}"
+
+      - name: Append triage summary
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          if [ -f "$ISSUE_BOT_STATE_DIR/triage-last-run-summary.md" ]; then
+            cat "$ISSUE_BOT_STATE_DIR/triage-last-run-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '# Issue Triage Summary\n\n- summary: no triage summary file found\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload triage state
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-triage-state-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.ISSUE_BOT_STATE_DIR }}
+          if-no-files-found: warn
+          retention-days: 7

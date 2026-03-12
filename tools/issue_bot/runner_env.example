@@ -1,0 +1,7 @@
+# Example runner-side environment for rk_gb issue automation.
+# Do not commit real secrets or machine-specific private paths outside controlled infra.
+
+RK_TOOLCHAIN_BIN=/opt/rk/arm-rockchip830-linux-uclibcgnueabihf/bin
+CMAKE_BIN=/opt/cmake/bin/cmake
+ISSUE_FIX_COMMAND=/opt/issue-bot/bin/rk_gb_fix_issue.sh
+ISSUE_BOT_STATE_DIR=/var/tmp/rk-gb-issue-bot

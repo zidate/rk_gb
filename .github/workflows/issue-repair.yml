@@ -1,0 +1,96 @@
+name: issue-repair
+
+on:
+  schedule:
+    - cron: "43 */2 * * *"
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Optional issue number. Empty means auto-pick next ha-candidate issue.
+        required: false
+        type: string
+      dry_run:
+        description: Do not push branch or create PR
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: issue-repair
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on:
+      - self-hosted
+      - linux
+      - rk830-builder
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      GITHUB_API_URL: ${{ github.api_url }}
+      ISSUE_FIX_COMMAND: ${{ vars.ISSUE_FIX_COMMAND }}
+      RK_TOOLCHAIN_BIN: ${{ vars.RK_TOOLCHAIN_BIN }}
+      CMAKE_BIN: ${{ vars.CMAKE_BIN }}
+      ISSUE_BOT_STATE_DIR: ${{ runner.temp }}/rk_gb-issue-bot
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Runner preflight
+        run: |
+          set -euo pipefail
+          bash tools/issue_bot/runner_preflight.sh --repo-dir "$GITHUB_WORKSPACE"
+
+      - name: Run repair executor on schedule
+        if: ${{ github.event_name != 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          args=(--repo-dir "$GITHUB_WORKSPACE" --pick-next)
+          python3 tools/issue_bot/repair_executor.py "${args[@]}"
+
+      - name: Run repair executor from workflow_dispatch
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          args=(--repo-dir "$GITHUB_WORKSPACE")
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            args+=(--dry-run)
+          fi
+          if [ -n "${{ inputs.issue_number }}" ]; then
+            args+=(--issue-number "${{ inputs.issue_number }}")
+          else
+            args+=(--pick-next)
+          fi
+          python3 tools/issue_bot/repair_executor.py "${args[@]}"
+
+      - name: Append repair summary
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          if [ -f "$ISSUE_BOT_STATE_DIR/last-run-summary.md" ]; then
+            cat "$ISSUE_BOT_STATE_DIR/last-run-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '# Issue Repair Summary\n\n- summary: no repair summary file found\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload repair state
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-repair-state-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.ISSUE_BOT_STATE_DIR }}
+          if-no-files-found: warn
+          retention-days: 7
