@@ -75,6 +75,9 @@ def list_pull_requests(client: GitHubClient, *, state: str) -> list[dict]:
 
 
 def pr_matches_issue(pr: dict, issue_number: int) -> bool:
+    head_ref = pr.get("head", {}).get("ref", "") or ""
+    if head_ref.startswith("automation/issue-sync-"):
+        return False
     body = pr.get("body") or ""
     title = pr.get("title") or ""
     haystack = f"{title}\n{body}"
