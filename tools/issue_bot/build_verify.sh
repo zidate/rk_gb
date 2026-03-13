@@ -86,6 +86,7 @@ run_step middleware-config \
     -DRV1106_DUAL_IPC=ON \
     -DRC0240_LGV10=ON \
     -Drelease=ON \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_C_COMPILER="${CC_BIN}" \
     -DCMAKE_CXX_COMPILER="${CXX_BIN}"
 
@@ -102,6 +103,7 @@ run_step app-config \
     -DRC0240_LGV10=ON \
     -DAIC8800DL=ON \
     -Drelease=ON \
+    -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DCMAKE_C_COMPILER="${CC_BIN}" \
     -DCMAKE_CXX_COMPILER="${CXX_BIN}"
 
