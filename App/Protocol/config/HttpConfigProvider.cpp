@@ -1,10 +1,28 @@
 ﻿#include "HttpConfigProvider.h"
 
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
 
 namespace
 {
+
+struct HttpUrlParts
+{
+    std::string host;
+    int port;
+    std::string path;
+
+    HttpUrlParts() : port(80), path("/") {}
+};
 
 bool FindStringField(const std::string& src, const std::string& key, std::string& out)
 {
@@ -126,6 +144,221 @@ std::string JoinConfigList(const std::vector<std::string>& values)
     return out;
 }
 
+bool ParseHttpUrl(const std::string& url, HttpUrlParts& out)
+{
+    const std::string prefix = "http://";
+    if (url.compare(0, prefix.size(), prefix) != 0) {
+        return false;
+    }
+
+    size_t hostBegin = prefix.size();
+    size_t pathBegin = url.find('/', hostBegin);
+    std::string hostPort = (pathBegin == std::string::npos) ? url.substr(hostBegin) : url.substr(hostBegin, pathBegin - hostBegin);
+    if (hostPort.empty()) {
+        return false;
+    }
+
+    out.path = (pathBegin == std::string::npos) ? "/" : url.substr(pathBegin);
+
+    size_t colon = hostPort.rfind(':');
+    if (colon != std::string::npos) {
+        out.host = hostPort.substr(0, colon);
+        const std::string portText = hostPort.substr(colon + 1);
+        if (out.host.empty() || portText.empty()) {
+            return false;
+        }
+        out.port = atoi(portText.c_str());
+        if (out.port <= 0 || out.port > 65535) {
+            return false;
+        }
+    } else {
+        out.host = hostPort;
+        out.port = 80;
+    }
+
+    return !out.host.empty();
+}
+
+int WaitForSocketWritable(int sockfd, int timeoutMs)
+{
+    fd_set wfds;
+    FD_ZERO(&wfds);
+    FD_SET(sockfd, &wfds);
+
+    struct timeval tv;
+    tv.tv_sec = timeoutMs / 1000;
+    tv.tv_usec = (timeoutMs % 1000) * 1000;
+
+    const int ret = select(sockfd + 1, NULL, &wfds, NULL, &tv);
+    if (ret <= 0) {
+        return -1;
+    }
+    return FD_ISSET(sockfd, &wfds) ? 0 : -1;
+}
+
+int ConnectWithTimeout(const HttpUrlParts& url, int timeoutMs)
+{
+    char portText[16] = {0};
+    snprintf(portText, sizeof(portText), "%d", url.port);
+
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    struct addrinfo* result = NULL;
+    if (getaddrinfo(url.host.c_str(), portText, &hints, &result) != 0 || result == NULL) {
+        return -1;
+    }
+
+    int sockfd = -1;
+    for (struct addrinfo* item = result; item != NULL; item = item->ai_next) {
+        sockfd = socket(item->ai_family, item->ai_socktype, item->ai_protocol);
+        if (sockfd < 0) {
+            continue;
+        }
+
+        const int flags = fcntl(sockfd, F_GETFL, 0);
+        if (flags >= 0) {
+            fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+        }
+
+        int ret = connect(sockfd, item->ai_addr, item->ai_addrlen);
+        if (ret != 0 && errno == EINPROGRESS) {
+            ret = WaitForSocketWritable(sockfd, timeoutMs);
+            if (ret == 0) {
+                int soError = 0;
+                socklen_t soLen = sizeof(soError);
+                if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &soError, &soLen) != 0 || soError != 0) {
+                    ret = -1;
+                }
+            }
+        }
+
+        if (flags >= 0) {
+            fcntl(sockfd, F_SETFL, flags);
+        }
+
+        if (ret == 0) {
+            struct timeval recvTimeout;
+            recvTimeout.tv_sec = 3;
+            recvTimeout.tv_usec = 0;
+            setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &recvTimeout, sizeof(recvTimeout));
+            setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &recvTimeout, sizeof(recvTimeout));
+            break;
+        }
+
+        close(sockfd);
+        sockfd = -1;
+    }
+
+    freeaddrinfo(result);
+    return sockfd;
+}
+
+int SendHttpBytes(int sockfd, const std::string& data)
+{
+    size_t sent = 0;
+    while (sent < data.size()) {
+        const int ret = send(sockfd, data.data() + sent, data.size() - sent, 0);
+        if (ret <= 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        sent += static_cast<size_t>(ret);
+    }
+    return 0;
+}
+
+int ParseHttpResponseBody(const std::string& response, std::string& outBody)
+{
+    size_t headerEnd = response.find("\r\n\r\n");
+    size_t skip = 4;
+    if (headerEnd == std::string::npos) {
+        headerEnd = response.find("\n\n");
+        skip = 2;
+    }
+    if (headerEnd == std::string::npos) {
+        return -1;
+    }
+
+    size_t lineEnd = response.find("\r\n");
+    if (lineEnd == std::string::npos) {
+        lineEnd = response.find('\n');
+    }
+    if (lineEnd == std::string::npos) {
+        return -1;
+    }
+
+    const std::string statusLine = response.substr(0, lineEnd);
+    if (statusLine.find("200") == std::string::npos && statusLine.find("201") == std::string::npos && statusLine.find("204") == std::string::npos) {
+        return -2;
+    }
+
+    outBody = response.substr(headerEnd + skip);
+    return 0;
+}
+
+int HttpRequest(const std::string& method, const std::string& url, const std::string* body, std::string& outBody)
+{
+    outBody.clear();
+
+    HttpUrlParts parts;
+    if (!ParseHttpUrl(url, parts)) {
+        return -1;
+    }
+
+    const int sockfd = ConnectWithTimeout(parts, 2000);
+    if (sockfd < 0) {
+        return -2;
+    }
+
+    std::string request = method + " " + parts.path + " HTTP/1.1\r\n";
+    request += "Host: " + parts.host + "\r\n";
+    request += "Accept: application/json\r\n";
+    request += "Connection: close\r\n";
+    if (body != NULL) {
+        char lenText[32] = {0};
+        snprintf(lenText, sizeof(lenText), "%u", (unsigned int)body->size());
+        request += "Content-Type: application/json\r\n";
+        request += "Content-Length: ";
+        request += lenText;
+        request += "\r\n";
+    }
+    request += "\r\n";
+    if (body != NULL) {
+        request += *body;
+    }
+
+    int ret = SendHttpBytes(sockfd, request);
+    if (ret != 0) {
+        close(sockfd);
+        return -3;
+    }
+
+    std::string response;
+    char buffer[512];
+    while (1) {
+        const int bytes = recv(sockfd, buffer, sizeof(buffer), 0);
+        if (bytes == 0) {
+            break;
+        }
+        if (bytes < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            close(sockfd);
+            return -4;
+        }
+        response.append(buffer, bytes);
+    }
+
+    close(sockfd);
+    return ParseHttpResponseBody(response, outBody);
+}
+
 }
 std::string BuildConfigLogSummary(const protocol::ProtocolExternalConfig& cfg)
 {
@@ -244,56 +477,14 @@ std::string HttpConfigProvider::BuildUrl(const std::string& suffix) const
     return m_endpoint + suffix;
 }
 
-std::string HttpConfigProvider::EscapeSingleQuote(const std::string& input)
-{
-    std::string out;
-    out.reserve(input.size() + 8);
-    for (size_t i = 0; i < input.size(); ++i) {
-        if (input[i] == '\'') {
-            out += "'\\''";
-        } else {
-            out.push_back(input[i]);
-        }
-    }
-    return out;
-}
-
 int HttpConfigProvider::HttpGet(const std::string& url, std::string& outBody) const
 {
-    outBody.clear();
-    const std::string cmd = "curl -sS --connect-timeout 2 --max-time 3 '" + EscapeSingleQuote(url) + "'";
-    FILE* fp = popen(cmd.c_str(), "r");
-    if (fp == NULL) {
-        return -1;
-    }
-
-    char buf[512] = {0};
-    while (fgets(buf, sizeof(buf), fp) != NULL) {
-        outBody += buf;
-    }
-
-    const int rc = pclose(fp);
-    return rc == 0 ? 0 : -2;
+    return HttpRequest("GET", url, NULL, outBody);
 }
 
 int HttpConfigProvider::HttpPostJson(const std::string& url, const std::string& jsonBody, std::string& outBody) const
 {
-    outBody.clear();
-    const std::string cmd = "curl -sS --connect-timeout 2 --max-time 3 -H 'Content-Type: application/json' -X POST -d '" +
-        EscapeSingleQuote(jsonBody) + "' '" + EscapeSingleQuote(url) + "'";
-
-    FILE* fp = popen(cmd.c_str(), "r");
-    if (fp == NULL) {
-        return -1;
-    }
-
-    char buf[512] = {0};
-    while (fgets(buf, sizeof(buf), fp) != NULL) {
-        outBody += buf;
-    }
-
-    const int rc = pclose(fp);
-    return rc == 0 ? 0 : -2;
+    return HttpRequest("POST", url, &jsonBody, outBody);
 }
 
 std::string HttpConfigProvider::ToMinimalJson(const ProtocolExternalConfig& cfg) const

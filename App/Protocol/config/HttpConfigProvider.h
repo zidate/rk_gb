@@ -24,7 +24,6 @@ public:
 private:
     void InitDefaultConfig();
     std::string BuildUrl(const std::string& suffix) const;
-    static std::string EscapeSingleQuote(const std::string& input);
     int HttpGet(const std::string& url, std::string& outBody) const;
     int HttpPostJson(const std::string& url, const std::string& jsonBody, std::string& outBody) const;
     std::string ToMinimalJson(const ProtocolExternalConfig& cfg) const;
