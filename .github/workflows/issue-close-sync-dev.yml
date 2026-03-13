@@ -1,0 +1,106 @@
+name: issue-close-sync-dev
+
+on:
+  issues:
+    types:
+      - closed
+  workflow_dispatch:
+    inputs:
+      issue_numbers:
+        description: Optional comma-separated issue numbers to sync into dev
+        required: false
+        type: string
+      target_branch:
+        description: Target integration branch
+        required: false
+        default: dev
+        type: string
+      base_branch:
+        description: Source branch used only when target branch does not exist yet
+        required: false
+        default: main
+        type: string
+      write_comments:
+        description: Comment sync result back to matching issues
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: issue-close-sync-dev
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+      GITHUB_API_URL: ${{ github.api_url }}
+      ISSUE_BOT_STATE_DIR: /tmp/rk_gb-issue-sync-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Configure git identity
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Run closed issue sync from issues event
+        if: ${{ github.event_name == 'issues' }}
+        run: |
+          set -euo pipefail
+          python3 tools/issue_bot/sync_closed_issues_to_dev.py \
+            --repo-dir "$GITHUB_WORKSPACE" \
+            --target-branch "dev" \
+            --base-branch "main" \
+            --write-comments
+
+      - name: Run closed issue sync from workflow_dispatch
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          set -euo pipefail
+          args=(
+            --repo-dir "$GITHUB_WORKSPACE"
+            --target-branch "${{ inputs.target_branch }}"
+            --base-branch "${{ inputs.base_branch }}"
+          )
+          if [ -n "${{ inputs.issue_numbers }}" ]; then
+            args+=(--issue-numbers "${{ inputs.issue_numbers }}")
+          fi
+          if [ "${{ inputs.write_comments }}" = "true" ]; then
+            args+=(--write-comments)
+          fi
+          python3 tools/issue_bot/sync_closed_issues_to_dev.py "${args[@]}"
+
+      - name: Append sync summary
+        if: ${{ always() }}
+        run: |
+          set -euo pipefail
+          if [ -f "$ISSUE_BOT_STATE_DIR/closed-issue-sync-summary.md" ]; then
+            cat "$ISSUE_BOT_STATE_DIR/closed-issue-sync-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          else
+            printf '# Closed Issue Sync Summary\n\n- summary: no sync summary file found\n' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload sync state
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: issue-close-sync-dev-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.ISSUE_BOT_STATE_DIR }}
+          if-no-files-found: warn
+          retention-days: 7
