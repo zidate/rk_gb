@@ -183,10 +183,6 @@ def push_sync_branch(repo_dir: Path, sync_branch: str) -> None:
     run_checked(["git", "-C", str(repo_dir), "push", "--force-with-lease", "-u", "origin", sync_branch])
 
 
-def push_sync_branch_to_target(repo_dir: Path, sync_branch: str, target_branch: str) -> None:
-    run_checked(["git", "-C", str(repo_dir), "push", "origin", f"{sync_branch}:{target_branch}"])
-
-
 def ensure_sync_pull_request(
     client: GitHubClient,
     *,
@@ -332,21 +328,18 @@ def main() -> int:
 
     sync_pr_url = ""
     if merged_any:
-        if client.is_branch_protected(args.target_branch):
-            push_sync_branch(repo_dir, sync_branch)
-            sync_pr = ensure_sync_pull_request(
-                client,
-                sync_branch=sync_branch,
-                target_branch=args.target_branch,
-                issue_numbers=issue_numbers,
-                results=results,
-            )
-            sync_pr_url = sync_pr.get("html_url", "")
-            for item in results:
-                if item.status == "merged":
-                    item.message = f"{item.message}; sync PR: {sync_pr_url or 'created'}"
-        else:
-            push_sync_branch_to_target(repo_dir, sync_branch, args.target_branch)
+        push_sync_branch(repo_dir, sync_branch)
+        sync_pr = ensure_sync_pull_request(
+            client,
+            sync_branch=sync_branch,
+            target_branch=args.target_branch,
+            issue_numbers=issue_numbers,
+            results=results,
+        )
+        sync_pr_url = sync_pr.get("html_url", "")
+        for item in results:
+            if item.status == "merged":
+                item.message = f"{item.message}; sync PR: {sync_pr_url or 'created'}"
 
     write_summary(
         state_dir,
