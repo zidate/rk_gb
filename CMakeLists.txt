@@ -3,10 +3,8 @@ project(dgiot)
 
 #add_definitions(-Werror)
 #add_definitions(-Wno-error=deprecated-declarations)
-add_definitions(-o3)
-
-#add_definitions(-Wall -o3)
-add_definitions(-w -Wno-psabi)
+# Keep compiler options out of add_definitions so newer CMake versions pass them through correctly.
+add_compile_options(-O3 -w -Wno-psabi)
 option(release "compile for release" ON)
 option(debug "compile for debug" OFF)
 

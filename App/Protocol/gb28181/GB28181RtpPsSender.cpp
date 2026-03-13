@@ -14,9 +14,17 @@
 
 extern "C"
 {
+#if defined(__has_include)
+#if __has_include("mpeg-ps.h") && __has_include("rtp-payload.h") && __has_include("rtp-profile.h")
 #include "mpeg-ps.h"
 #include "rtp-payload.h"
 #include "rtp-profile.h"
+#else
+#include "MediaServerCompat.h"
+#endif
+#else
+#include "MediaServerCompat.h"
+#endif
 }
 
 namespace
@@ -646,5 +654,4 @@ int GB28181RtpPsSender::OnRtpPacketWrite(void* param,
 }
 
 }
-
 
