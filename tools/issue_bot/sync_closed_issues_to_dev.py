@@ -327,19 +327,32 @@ def main() -> int:
             results.append(SyncResult(issue_number, pr_number, source_label, status, message))
 
     sync_pr_url = ""
+    manual_pr_needed = False
     if merged_any:
         push_sync_branch(repo_dir, sync_branch)
-        sync_pr = ensure_sync_pull_request(
-            client,
-            sync_branch=sync_branch,
-            target_branch=args.target_branch,
-            issue_numbers=issue_numbers,
-            results=results,
-        )
-        sync_pr_url = sync_pr.get("html_url", "")
-        for item in results:
-            if item.status == "merged":
-                item.message = f"{item.message}; sync PR: {sync_pr_url or 'created'}"
+        try:
+            sync_pr = ensure_sync_pull_request(
+                client,
+                sync_branch=sync_branch,
+                target_branch=args.target_branch,
+                issue_numbers=issue_numbers,
+                results=results,
+            )
+            sync_pr_url = sync_pr.get("html_url", "")
+            for item in results:
+                if item.status == "merged":
+                    item.message = f"{item.message}; sync PR: {sync_pr_url or 'created'}"
+        except RuntimeError as exc:
+            detail = str(exc)
+            if "GitHub Actions is not permitted to create or approve pull requests" not in detail:
+                raise
+            manual_pr_needed = True
+            for item in results:
+                if item.status == "merged":
+                    item.message = (
+                        f"{item.message}; sync branch pushed to `{sync_branch}`, "
+                        f"but PR creation requires a manual `gh pr create --base {args.target_branch} --head {sync_branch}`"
+                    )
 
     write_summary(
         state_dir,
@@ -354,6 +367,8 @@ def main() -> int:
         comment_results(client, args.target_branch, results, sync_pr_url=sync_pr_url)
 
     failures = [item for item in results if item.status == "failed"]
+    if manual_pr_needed:
+        failures = []
     return 1 if failures else 0
 
 
