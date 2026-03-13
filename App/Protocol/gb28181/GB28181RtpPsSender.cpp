@@ -1,7 +1,6 @@
 ﻿#include "GB28181RtpPsSender.h"
 
 #include <arpa/inet.h>
-#include <dlfcn.h>
 #include <errno.h>
 #include <map>
 #include <stdio.h>
@@ -68,20 +67,6 @@ static int SendAll(int sockfd, const void* data, size_t bytes)
     return 0;
 }
 
-static int LoadSymbol(void* handle, const char* name, void** outFn)
-{
-    if (handle == NULL || name == NULL || outFn == NULL) {
-        return -1;
-    }
-
-    *outFn = dlsym(handle, name);
-    if (*outFn == NULL) {
-        return -2;
-    }
-
-    return 0;
-}
-
 } 
 
 namespace protocol
@@ -113,9 +98,6 @@ struct GB28181RtpPsSender::RuntimeState
 
     struct MediaServerApi
     {
-        void* libmpeg;
-        void* librtp;
-
         PsMuxerCreateFn ps_muxer_create;
         PsMuxerDestroyFn ps_muxer_destroy;
         PsMuxerAddStreamFn ps_muxer_add_stream;
@@ -128,9 +110,7 @@ struct GB28181RtpPsSender::RuntimeState
         RtpPacketSetSizeFn rtp_packet_setsize;
 
         MediaServerApi()
-            : libmpeg(NULL),
-              librtp(NULL),
-              ps_muxer_create(NULL),
+            : ps_muxer_create(NULL),
               ps_muxer_destroy(NULL),
               ps_muxer_add_stream(NULL),
               ps_muxer_input(NULL),
@@ -187,16 +167,6 @@ GB28181RtpPsSender::~GB28181RtpPsSender()
     CloseSession();
 
     if (m_state != NULL) {
-        if (m_state->api.libmpeg != NULL) {
-            dlclose(m_state->api.libmpeg);
-            m_state->api.libmpeg = NULL;
-        }
-
-        if (m_state->api.librtp != NULL) {
-            dlclose(m_state->api.librtp);
-            m_state->api.librtp = NULL;
-        }
-
         delete m_state;
         m_state = NULL;
     }
@@ -219,46 +189,15 @@ int GB28181RtpPsSender::EnsureLibrariesLoaded()
         return 0;
     }
 
-    const char* mpegCandidates[] = {
-        "libmpeg.so",
-        "libmpeg.so.0",
-        NULL,
-    };
-
-    const char* rtpCandidates[] = {
-        "librtp.so",
-        "librtp.so.0",
-        NULL,
-    };
-
-    for (int i = 0; mpegCandidates[i] != NULL && m_state->api.libmpeg == NULL; ++i) {
-        m_state->api.libmpeg = dlopen(mpegCandidates[i], RTLD_LAZY | RTLD_LOCAL);
-    }
-
-    for (int i = 0; rtpCandidates[i] != NULL && m_state->api.librtp == NULL; ++i) {
-        m_state->api.librtp = dlopen(rtpCandidates[i], RTLD_LAZY | RTLD_LOCAL);
-    }
-
-    if (m_state->api.libmpeg == NULL || m_state->api.librtp == NULL) {
-        printf("[GB28181][RtpPs] load media-server libs failed libmpeg=%p librtp=%p\n",
-               m_state->api.libmpeg,
-               m_state->api.librtp);
-        return -2;
-    }
-
-    if (0 != LoadSymbol(m_state->api.libmpeg, "ps_muxer_create", (void**)&m_state->api.ps_muxer_create) ||
-        0 != LoadSymbol(m_state->api.libmpeg, "ps_muxer_destroy", (void**)&m_state->api.ps_muxer_destroy) ||
-        0 != LoadSymbol(m_state->api.libmpeg, "ps_muxer_add_stream", (void**)&m_state->api.ps_muxer_add_stream) ||
-        0 != LoadSymbol(m_state->api.libmpeg, "ps_muxer_input", (void**)&m_state->api.ps_muxer_input) ||
-        0 != LoadSymbol(m_state->api.librtp, "rtp_payload_encode_create", (void**)&m_state->api.rtp_payload_encode_create) ||
-        0 != LoadSymbol(m_state->api.librtp, "rtp_payload_encode_destroy", (void**)&m_state->api.rtp_payload_encode_destroy) ||
-        0 != LoadSymbol(m_state->api.librtp, "rtp_payload_encode_input", (void**)&m_state->api.rtp_payload_encode_input) ||
-        0 != LoadSymbol(m_state->api.librtp, "rtp_payload_encode_getinfo", (void**)&m_state->api.rtp_payload_encode_getinfo)) {
-        printf("[GB28181][RtpPs] load media-server symbols failed\n");
-        return -3;
-    }
-
-    LoadSymbol(m_state->api.librtp, "rtp_packet_setsize", (void**)&m_state->api.rtp_packet_setsize);
+    m_state->api.ps_muxer_create = &ps_muxer_create;
+    m_state->api.ps_muxer_destroy = &ps_muxer_destroy;
+    m_state->api.ps_muxer_add_stream = &ps_muxer_add_stream;
+    m_state->api.ps_muxer_input = &ps_muxer_input;
+    m_state->api.rtp_payload_encode_create = &rtp_payload_encode_create;
+    m_state->api.rtp_payload_encode_destroy = &rtp_payload_encode_destroy;
+    m_state->api.rtp_payload_encode_input = &rtp_payload_encode_input;
+    m_state->api.rtp_payload_encode_getinfo = &rtp_payload_encode_getinfo;
+    m_state->api.rtp_packet_setsize = &rtp_packet_setsize;
     return 0;
 }
 
@@ -654,4 +593,3 @@ int GB28181RtpPsSender::OnRtpPacketWrite(void* param,
 }
 
 }
-

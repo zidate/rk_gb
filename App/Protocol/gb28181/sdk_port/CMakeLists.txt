@@ -200,6 +200,17 @@ set(ProductCof_SRC ProductCof/ProductCof.cpp)
 
 set(PLATFORM_PORT_ROOT ${PROJECT_SOURCE_DIR}/third_party/platform_sdk_port)
 set(GB_SIP_ROOT ${PROJECT_SOURCE_DIR}/third_party/gb_sip/install)
+set(MEDIA_SERVER_ROOT ${PROJECT_SOURCE_DIR}/third_party/media-server)
+
+file(GLOB MEDIA_SERVER_MPEG_SRC
+	${MEDIA_SERVER_ROOT}/libmpeg/source/*.c
+)
+
+file(GLOB MEDIA_SERVER_RTP_SRC
+	${MEDIA_SERVER_ROOT}/librtp/source/*.c
+	${MEDIA_SERVER_ROOT}/librtp/payload/*.c
+	${MEDIA_SERVER_ROOT}/librtp/rtpext/*.c
+)
 
 set(GB_SHARE_SHIM_SRC
 	Protocol/gb28181/sdk_port/ShareSdkShim.cpp
@@ -344,6 +355,26 @@ set_target_properties(gb28181_client_sdk_port PROPERTIES
 	BUILD_RPATH "$ORIGIN"
 	INSTALL_RPATH "$ORIGIN"
 )
+
+add_library(media_server_mpeg STATIC ${MEDIA_SERVER_MPEG_SRC})
+target_include_directories(media_server_mpeg BEFORE PUBLIC
+	${MEDIA_SERVER_ROOT}/libmpeg/include
+	${MEDIA_SERVER_ROOT}/libmpeg/source
+)
+target_compile_definitions(media_server_mpeg PRIVATE
+	MPEG_H26X_VERIFY
+	MPEG_ZERO_PAYLOAD_LENGTH
+	MPEG_DAHUA_AAC_FROM_G711
+	MPEG_KEDA_H265_FROM_H264
+)
+
+add_library(media_server_rtp STATIC ${MEDIA_SERVER_RTP_SRC})
+target_include_directories(media_server_rtp BEFORE PUBLIC
+	${MEDIA_SERVER_ROOT}/librtp/include
+	${MEDIA_SERVER_ROOT}/librtp/source
+	${MEDIA_SERVER_ROOT}/librtp/payload
+	${MEDIA_SERVER_ROOT}/librtp/rtpext
+)
 #可执行文件
 add_executable(${PROJECT_NAME} ./Main.cpp ./Common.cpp ./Inifile.cpp
 	${Media_SRC} 
@@ -423,6 +454,8 @@ target_link_libraries(
 #	${LIBFDKAAC_DIR}
 #	${LIBEVENT_DIR}
 	${LIB_TESTMODULEV2}
+	media_server_mpeg
+	media_server_rtp
 	gb28181_client_sdk_port
 	sip_sdk_port
 	dl
