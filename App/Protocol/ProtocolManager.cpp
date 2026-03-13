@@ -2181,7 +2181,7 @@ int ProtocolManager::Init(const std::string& configEndpoint)
 
 {
 
-    m_provider.reset(new HttpConfigProvider(configEndpoint));
+    m_provider.reset(new LocalConfigProvider(configEndpoint));
 
     return ReloadExternalConfig();
 

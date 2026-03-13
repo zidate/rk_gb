@@ -22,7 +22,7 @@
 
 #include "ProtocolService.h"
 
-#include "HttpConfigProvider.h"
+#include "LocalConfigProvider.h"
 
 #include "GB28181BroadcastBridge.h"
 

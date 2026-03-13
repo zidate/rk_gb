@@ -16,7 +16,7 @@ extern int TestModuleV2_start();
 extern int g_iKeyboardReport;//add on 2025.01.02 按键上报标志位
 
 #ifndef PROTOCOL_CONFIG_ENDPOINT
-#define PROTOCOL_CONFIG_ENDPOINT "http://127.0.0.1:18080/openapi/v1/ipc/protocol"
+#define PROTOCOL_CONFIG_ENDPOINT "local-provider"
 #endif
 
 

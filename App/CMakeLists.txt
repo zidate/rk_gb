@@ -188,7 +188,7 @@ set(Onvif Onvif/Onvif.cpp)
 set(Update Update/update.cpp)
 set(Protocol_SRC
 	Protocol/ProtocolManager.cpp
-	Protocol/config/HttpConfigProvider.cpp
+	Protocol/config/LocalConfigProvider.cpp
 	Protocol/gb28181/GB28181BroadcastBridge.cpp
 	Protocol/gb28181/GB28181ListenBridge.cpp
 	Protocol/gb28181/GB28181RtpPsSender.cpp
