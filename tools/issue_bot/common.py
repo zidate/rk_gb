@@ -222,3 +222,39 @@ class GitHubClient:
             f"/repos/{self.context.owner}/{self.context.repo}/pulls",
             body={"title": title, "head": head, "base": base, "body": body},
         )
+
+    def list_pull_requests(
+        self,
+        *,
+        state: str = "open",
+        base: str | None = None,
+        head: str | None = None,
+        per_page: int = 100,
+    ) -> list[dict[str, Any]]:
+        query: dict[str, Any] = {
+            "state": state,
+            "per_page": per_page,
+            "sort": "updated",
+            "direction": "desc",
+        }
+        if base:
+            query["base"] = base
+        if head:
+            query["head"] = head
+        return self._request(
+            "GET",
+            f"/repos/{self.context.owner}/{self.context.repo}/pulls",
+            query=query,
+        )
+
+    def is_branch_protected(self, branch: str) -> bool:
+        try:
+            self._request(
+                "GET",
+                f"/repos/{self.context.owner}/{self.context.repo}/branches/{branch}/protection",
+            )
+            return True
+        except RuntimeError as exc:
+            if "404" in str(exc):
+                return False
+            raise
