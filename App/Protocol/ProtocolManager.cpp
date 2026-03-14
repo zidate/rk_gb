@@ -2928,6 +2928,16 @@ int ProtocolManager::RegisterGbClient(bool force)
 
 
 
+    std::string authUser = m_cfg.gb_register.username;
+
+    if (authUser.empty() || authUser == connectGbCode) {
+
+        authUser = localGbCode;
+
+    }
+
+
+
     GBRegistParam registerParam;
 
     memset(&registerParam, 0, sizeof(registerParam));
@@ -2938,7 +2948,7 @@ int ProtocolManager::RegisterGbClient(bool force)
 
                                 (uint32_t)3600;
 
-    CopyBounded(registerParam.username, sizeof(registerParam.username), m_cfg.gb_register.username);
+    CopyBounded(registerParam.username, sizeof(registerParam.username), authUser);
 
     CopyBounded(registerParam.password, sizeof(registerParam.password), m_cfg.gb_register.password);
 
@@ -2974,7 +2984,7 @@ int ProtocolManager::RegisterGbClient(bool force)
 
                connectGbCode.c_str(),
 
-               m_cfg.gb_register.username.c_str(),
+               authUser.c_str(),
 
                MaskSecret(m_cfg.gb_register.password).c_str());
 
@@ -3005,7 +3015,7 @@ int ProtocolManager::RegisterGbClient(bool force)
 
            (unsigned int)registerParam.expires,
 
-           m_cfg.gb_register.username.c_str());
+           authUser.c_str());
 
     return 0;
 

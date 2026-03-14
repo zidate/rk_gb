@@ -1,6 +1,7 @@
 #include "SipEventManager.h"
 #include "eXosip2/eXosip.h"
 #include "eXosip2/eX_call.h"
+#include "eXosip2/eX_setup.h"
 #include "SipUtil.h"
 #include "WaiterManager.h"
 #include "ShareSDK.h"
@@ -39,6 +40,11 @@ static void custom_osip_trace(const char *fi, int li, osip_trace_level_t level, 
 	vsnprintf(buffer + in, MAX_LENGTH_TR - 1 - in, chfr, ap);
 
 	TVT_LOG_INFO(buffer);
+}
+
+static bool NeedResolveLocalSipIp(const char* ip)
+{
+    return ip == NULL || ip[0] == '\0' || strcmp(ip, "0.0.0.0") == 0;
 }
 
 void FreeSipData(SipData* data)
@@ -221,10 +227,22 @@ int CSipEventManager::StartSipListen(  SipTransportType type , const NetAddress*
     }
    
 	osip_trace_initialize_func(TRACE_LEVEL3, custom_osip_trace);
-    m_local_ip = local->ip;
-    m_local_port = local->port;
-    m_local_name = local_name;
-    m_listen_flag.SetValue(1);
+        if (NeedResolveLocalSipIp(local->ip)) {
+            char guessed_ip[64] = {0};
+            if (eXosip_guess_localip(m_sip_context, AF_INET, guessed_ip, sizeof(guessed_ip)) == 0 &&
+                guessed_ip[0] != '\0') {
+                m_local_ip = guessed_ip;
+            }
+            else {
+                m_local_ip = "0.0.0.0";
+            }
+        }
+        else {
+	    m_local_ip = local->ip;
+        }
+	    m_local_port = local->port;
+	    m_local_name = local_name;
+	    m_listen_flag.SetValue(1);
     return kSipSuccess;
 
 }
