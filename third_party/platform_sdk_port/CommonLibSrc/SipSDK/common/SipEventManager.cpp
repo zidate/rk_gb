@@ -6,6 +6,10 @@
 #include "WaiterManager.h"
 #include "ShareSDK.h"
 #include "common/ClientInfoManager.h"
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 
 #define WAITTIME		50				     //SIP事件监听时间间隔
@@ -45,6 +49,50 @@ static void custom_osip_trace(const char *fi, int li, osip_trace_level_t level, 
 static bool NeedResolveLocalSipIp(const char* ip)
 {
     return ip == NULL || ip[0] == '\0' || strcmp(ip, "0.0.0.0") == 0;
+}
+
+static bool ResolveOutboundLocalSipIp(const char* remote_ip, int remote_port, std::string& local_ip)
+{
+    if (NeedResolveLocalSipIp(remote_ip) || remote_port <= 0 || remote_port > 65535) {
+        return false;
+    }
+
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        return false;
+    }
+
+    sockaddr_in remote_addr;
+    memset(&remote_addr, 0, sizeof(remote_addr));
+    remote_addr.sin_family = AF_INET;
+    remote_addr.sin_port = htons((uint16_t)remote_port);
+    if (inet_pton(AF_INET, remote_ip, &remote_addr.sin_addr) != 1) {
+        close(sockfd);
+        return false;
+    }
+
+    if (connect(sockfd, (sockaddr*)&remote_addr, sizeof(remote_addr)) != 0) {
+        close(sockfd);
+        return false;
+    }
+
+    sockaddr_in local_addr;
+    memset(&local_addr, 0, sizeof(local_addr));
+    socklen_t local_addr_len = sizeof(local_addr);
+    if (getsockname(sockfd, (sockaddr*)&local_addr, &local_addr_len) != 0) {
+        close(sockfd);
+        return false;
+    }
+
+    char ipbuf[INET_ADDRSTRLEN] = {0};
+    const char* ipstr = inet_ntop(AF_INET, &local_addr.sin_addr, ipbuf, sizeof(ipbuf));
+    close(sockfd);
+    if (ipstr == NULL || NeedResolveLocalSipIp(ipstr)) {
+        return false;
+    }
+
+    local_ip = ipstr;
+    return true;
 }
 
 void FreeSipData(SipData* data)
@@ -795,6 +843,25 @@ void CSipEventManager::SipEventProcess()
 int CSipEventManager::Register(ClientInfo* client_info , int timeout , SipData** result )
 {
        osip_message_t *pMsg = NULL;
+
+       if (NeedResolveLocalSipIp(client_info->LocalIp.c_str())) {
+           std::string resolved_local_ip;
+           if (ResolveOutboundLocalSipIp(client_info->RemoteIp.c_str(), client_info->RemotePort, resolved_local_ip)) {
+               client_info->LocalIp = resolved_local_ip;
+               client_info->SetFromeAndTo();
+               if (NeedResolveLocalSipIp(m_local_ip.c_str())) {
+                   m_local_ip = resolved_local_ip;
+               }
+               TVT_LOG_INFO("sip register resolved local ip by remote"
+                            << " remote=" << client_info->RemoteIp << ":" << client_info->RemotePort
+                            << " local=" << client_info->LocalIp);
+           }
+           else {
+               TVT_LOG_ERROR("sip register resolve local ip failed"
+                             << " remote=" << client_info->RemoteIp << ":" << client_info->RemotePort
+                             << " local=" << client_info->LocalIp);
+           }
+       }
 
        TVT_LOG_INFO("sip register enter"
                     << " new_reg=" << (client_info->new_reg ? 1 : 0)
