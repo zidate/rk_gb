@@ -926,19 +926,32 @@ int CSipEventManager::Register(ClientInfo* client_info , int timeout , SipData**
        }
        else{
 
-           eXosip_lock(m_sip_context);
-           int res = eXosip_register_build_register(m_sip_context, client_info->RegId, client_info->Expire, &pMsg);
-           eXosip_unlock(m_sip_context);
+           int res = OSIP_WRONG_STATE;
+           int attempt = 0;
+           for (; attempt < 10; ++attempt) {
+               eXosip_lock(m_sip_context);
+               res = eXosip_register_build_register(m_sip_context, client_info->RegId, client_info->Expire, &pMsg);
+               eXosip_unlock(m_sip_context);
+               if (res != OSIP_WRONG_STATE) {
+                   break;
+               }
+               TVT_LOG_INFO("sip build register waiting previous transaction"
+                            << " regid=" << client_info->RegId
+                            << " attempt=" << (attempt + 1));
+               usleep(50 * 1000);
+           }
            if( res !=  OSIP_SUCCESS ) {
                TVT_LOG_ERROR("sip build register failed"
                              << " res=" << res
                              << " regid=" << client_info->RegId
-                             << " expire=" << client_info->Expire);
+                             << " expire=" << client_info->Expire
+                             << " attempts=" << attempt);
                return kSipBuildRegisterFailed;
            }
            TVT_LOG_INFO("sip build register ok"
                         << " regid=" << client_info->RegId
-                        << " expire=" << client_info->Expire);
+                        << " expire=" << client_info->Expire
+                        << " attempts=" << attempt);
        }
 
         CResponseWaiter *pCond = NULL;
