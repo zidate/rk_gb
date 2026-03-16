@@ -817,6 +817,70 @@ static bool ExtractStreamEndpoint(const MediaInfo* input,
 
 
 
+static const char* GbNetTransportName(NetTransType type)
+
+{
+
+    switch (type) {
+
+    case kRtpOverUdp:
+
+        return "udp";
+
+    case kRtpOverTcp:
+
+        return "tcp";
+
+    case kRtpOverTcpActive:
+
+        return "tcp-active";
+
+    case kRtpOverTcpPassive:
+
+        return "tcp-passive";
+
+    default:
+
+        return "unknown";
+
+    }
+
+}
+
+static NetTransType ResolveGbAnswerTransportType(NetTransType requestType,
+
+                                                 const std::string& defaultTransport)
+
+{
+
+    switch (requestType) {
+
+    case kRtpOverTcpActive:
+
+        return kRtpOverTcpPassive;
+
+    case kRtpOverTcpPassive:
+
+    case kRtpOverTcp:
+
+        return kRtpOverTcpActive;
+
+    case kRtpOverUdp:
+
+        return kRtpOverUdp;
+
+    default:
+
+        break;
+
+    }
+
+
+
+    return (ToLowerCopy(defaultTransport) == "tcp") ? kRtpOverTcpActive : kRtpOverUdp;
+
+}
+
 static uint64_t TimestampMsToPts90k(uint64_t timestampMs)
 
 {
@@ -2225,8 +2289,6 @@ int ProtocolManager::Start()
 
     }
 
-
-
     ret = m_rtp_ps_sender.OpenSession();
 
     if (ret != 0) {
@@ -2302,7 +2364,6 @@ int ProtocolManager::Start()
     m_started = true;
 
     printf("[ProtocolManager] start success, config version=%s\n", m_cfg.version.c_str());
-
     return 0;
 
 }
@@ -3535,6 +3596,12 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
 
 {
 
+    std::string remoteIp;
+
+    int remotePort = 0;
+
+    const bool endpointKnown = ExtractStreamEndpoint(input, remoteIp, remotePort);
+
     const bool audioRequested = IsLiveAudioRequested(input);
 
     const bool audioEnabled = audioRequested;
@@ -3542,6 +3609,24 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
     const int requestedStreamNum = ResolveGbStreamNumber(input, m_cfg);
 
     const bool preferSubStream = (requestedStreamNum > 0);
+
+
+
+    printf("[ProtocolManager] gb live request enter gb=%s handle=%p offered_transport=%s remote=%s:%d stream_num=%d audio_requested=%d\n",
+
+           gbCode != NULL ? gbCode : "",
+
+           handle,
+
+           (input != NULL) ? GbNetTransportName(input->RtpType) : "null",
+
+           endpointKnown ? remoteIp.c_str() : "",
+
+           endpointKnown ? remotePort : 0,
+
+           requestedStreamNum,
+
+           audioRequested ? 1 : 0);
 
 
 
@@ -3744,6 +3829,26 @@ int ProtocolManager::HandleGbStreamAck(StreamHandle handle)
             m_gb_live_session.stream_handle != NULL &&
 
             handle == m_gb_live_session.stream_handle) {
+
+            if (!m_rtp_ps_sender.IsOpened()) {
+
+                const int openRet = m_rtp_ps_sender.OpenSession();
+
+                if (openRet != 0) {
+
+                    printf("[ProtocolManager] gb live ack open sender failed ret=%d gb=%s handle=%p\n",
+
+                           openRet,
+
+                           m_gb_live_session.gb_code.c_str(),
+
+                           handle);
+
+                    return openRet;
+
+                }
+
+            }
 
             m_gb_live_session.acked = true;
 
@@ -6323,6 +6428,26 @@ int ProtocolManager::ReconfigureGbLiveSender(const MediaInfo* input, const char*
 
 
 
+    if (requestType == kLiveStream) {
+
+        printf("[ProtocolManager] gb %s stream sender prepared target=%s:%d gb=%s transport=%s open=deferred_until_ack\n",
+
+               StreamRequestTypeName(requestType),
+
+               remoteIp.c_str(),
+
+               remotePort,
+
+               gbCode != NULL ? gbCode : "",
+
+               runtimeParam.transport.c_str());
+
+        return 0;
+
+    }
+
+
+
     ret = m_rtp_ps_sender.OpenSession();
 
     if (ret != 0) {
@@ -6427,11 +6552,11 @@ int ProtocolManager::BuildGbResponseMediaInfo(const char* gbCode,
 
         input->RtpType == kRtpOverTcpPassive) {
 
-        out.RtpType = input->RtpType;
+        out.RtpType = ResolveGbAnswerTransportType(input->RtpType, m_cfg.gb_live.transport);
 
     } else if (ToLowerCopy(m_cfg.gb_live.transport) == "tcp") {
 
-        out.RtpType = kRtpOverTcp;
+        out.RtpType = kRtpOverTcpActive;
 
     } else {
 
@@ -6584,6 +6709,22 @@ int ProtocolManager::RespondGbMediaPlayInfo(StreamHandle handle,
         return -32;
 
     }
+
+
+
+    printf("[ProtocolManager] gb media response sent gb=%s type=%s answer_transport=%s answer_ip=%s answer_port=%u ssrc=%s\n",
+
+           gbCode != NULL ? gbCode : "",
+
+           StreamRequestTypeName(requestType),
+
+           GbNetTransportName(answer.RtpType),
+
+           answer.IP,
+
+           answer.Port,
+
+           answer.Ssrc);
 
 
 
