@@ -2,6 +2,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <map>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +44,71 @@ static std::string ToLowerCopy(const std::string& text)
 static uint32_t NowSeconds()
 {
     return static_cast<uint32_t>(time(NULL));
+}
+
+static int WaitForSocketWritable(int sockfd, int timeoutMs)
+{
+    if (sockfd < 0 || timeoutMs <= 0) {
+        return -1;
+    }
+
+    fd_set wfds;
+    FD_ZERO(&wfds);
+    FD_SET(sockfd, &wfds);
+
+    struct timeval tv;
+    tv.tv_sec = timeoutMs / 1000;
+    tv.tv_usec = (timeoutMs % 1000) * 1000;
+
+    const int ret = select(sockfd + 1, NULL, &wfds, NULL, &tv);
+    if (ret <= 0) {
+        return -1;
+    }
+
+    return FD_ISSET(sockfd, &wfds) ? 0 : -1;
+}
+
+static int ConnectTcpWithTimeout(int sockfd, const struct sockaddr_in* remoteAddr, int timeoutMs)
+{
+    if (sockfd < 0 || remoteAddr == NULL || timeoutMs <= 0) {
+        return -1;
+    }
+
+    const int flags = fcntl(sockfd, F_GETFL, 0);
+    if (flags >= 0) {
+        fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+    }
+
+    int ret = connect(sockfd, (const struct sockaddr*)remoteAddr, sizeof(*remoteAddr));
+    int savedErrno = (ret == 0) ? 0 : errno;
+
+    if (ret != 0 && (savedErrno == EINPROGRESS || savedErrno == EALREADY || savedErrno == EWOULDBLOCK)) {
+        ret = WaitForSocketWritable(sockfd, timeoutMs);
+        if (ret == 0) {
+            int soError = 0;
+            socklen_t soLen = sizeof(soError);
+            if (getsockopt(sockfd, SOL_SOCKET, SO_ERROR, &soError, &soLen) != 0) {
+                savedErrno = errno;
+                ret = -1;
+            } else if (soError != 0) {
+                savedErrno = soError;
+                ret = -1;
+            }
+        } else if (savedErrno == EINPROGRESS || savedErrno == EALREADY) {
+            savedErrno = ETIMEDOUT;
+        }
+    }
+
+    if (flags >= 0) {
+        fcntl(sockfd, F_SETFL, flags);
+    }
+
+    if (ret != 0) {
+        errno = savedErrno;
+        return -1;
+    }
+
+    return 0;
 }
 
 static int SendAll(int sockfd, const void* data, size_t bytes)
@@ -231,14 +297,6 @@ int GB28181RtpPsSender::OpenTransportSocket()
         return -4;
     }
 
-    const int sendTimeoutMs = 50;
-    struct timeval sndTimeout;
-    sndTimeout.tv_sec = sendTimeoutMs / 1000;
-    sndTimeout.tv_usec = (sendTimeoutMs % 1000) * 1000;
-    if (setsockopt(m_state->sockfd, SOL_SOCKET, SO_SNDTIMEO, &sndTimeout, sizeof(sndTimeout)) != 0) {
-        printf("[GB28181][RtpPs] set SO_SNDTIMEO failed errno=%d\n", errno);
-    }
-
     memset(&m_state->remote_addr, 0, sizeof(m_state->remote_addr));
     m_state->remote_addr.sin_family = AF_INET;
     m_state->remote_addr.sin_port = htons(static_cast<uint16_t>(m_param.target_port));
@@ -250,7 +308,8 @@ int GB28181RtpPsSender::OpenTransportSocket()
     }
 
     if (isTcp) {
-        if (connect(m_state->sockfd, (struct sockaddr*)&m_state->remote_addr, sizeof(m_state->remote_addr)) != 0) {
+        const int connectTimeoutMs = 3000;
+        if (ConnectTcpWithTimeout(m_state->sockfd, &m_state->remote_addr, connectTimeoutMs) != 0) {
             printf("[GB28181][RtpPs] tcp connect failed errno=%d target=%s:%d\n",
                    errno,
                    m_param.target_ip.c_str(),
@@ -259,6 +318,14 @@ int GB28181RtpPsSender::OpenTransportSocket()
             m_state->sockfd = -1;
             return -6;
         }
+    }
+
+    const int sendTimeoutMs = 50;
+    struct timeval sndTimeout;
+    sndTimeout.tv_sec = sendTimeoutMs / 1000;
+    sndTimeout.tv_usec = (sendTimeoutMs % 1000) * 1000;
+    if (setsockopt(m_state->sockfd, SOL_SOCKET, SO_SNDTIMEO, &sndTimeout, sizeof(sndTimeout)) != 0) {
+        printf("[GB28181][RtpPs] set SO_SNDTIMEO failed errno=%d\n", errno);
     }
 
     return 0;
