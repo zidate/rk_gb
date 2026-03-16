@@ -34,6 +34,7 @@ struct GbLiveParam
     std::string transport;
     std::string target_ip;
     int target_port;
+    int local_port;
     std::string video_stream_id;
     std::string video_codec;
     std::string audio_codec;
@@ -46,6 +47,7 @@ struct GbLiveParam
         : transport("udp"),
           target_ip("127.0.0.1"),
           target_port(30000),
+          local_port(0),
           video_stream_id("main"),
           video_codec("h264"),
           audio_codec("g711a"),
@@ -265,4 +267,3 @@ struct ProtocolExternalConfig
 }
 
 #endif
-

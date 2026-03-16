@@ -6871,8 +6871,12 @@ int ProtocolManager::ReconfigureGbLiveSender(const MediaInfo* input, const char*
     runtimeParam.target_ip = remoteIp;
 
     runtimeParam.target_port = remotePort;
+    runtimeParam.local_port = 0;
 
     runtimeParam.transport = (input->RtpType == kRtpOverUdp) ? "udp" : "tcp";
+    if (runtimeParam.transport == "tcp" && m_cfg.gb_register.server_port > 0) {
+        runtimeParam.local_port = m_cfg.gb_register.server_port;
+    }
     runtimeParam.ssrc = (m_cfg.gb_live.ssrc > 0)
                             ? m_cfg.gb_live.ssrc
                             : static_cast<int>(GenerateGbMediaSsrc(remotePort));

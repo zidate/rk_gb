@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <vector>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <time.h>
@@ -309,6 +310,27 @@ int GB28181RtpPsSender::OpenTransportSocket()
         return -4;
     }
 
+    const int reuse = 1;
+    if (setsockopt(m_state->sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) != 0) {
+        printf("[GB28181][RtpPs] set SO_REUSEADDR failed errno=%d\n", errno);
+    }
+
+    if (isTcp && m_param.local_port > 0) {
+        struct sockaddr_in localAddr;
+        memset(&localAddr, 0, sizeof(localAddr));
+        localAddr.sin_family = AF_INET;
+        localAddr.sin_port = htons(static_cast<uint16_t>(m_param.local_port));
+        localAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+        if (bind(m_state->sockfd, (const struct sockaddr*)&localAddr, sizeof(localAddr)) != 0) {
+            printf("[GB28181][RtpPs] bind local port failed errno=%d local_port=%d\n",
+                   errno,
+                   m_param.local_port);
+            close(m_state->sockfd);
+            m_state->sockfd = -1;
+            return -5;
+        }
+    }
+
     memset(&m_state->remote_addr, 0, sizeof(m_state->remote_addr));
     m_state->remote_addr.sin_family = AF_INET;
     m_state->remote_addr.sin_port = htons(static_cast<uint16_t>(m_param.target_port));
@@ -316,7 +338,7 @@ int GB28181RtpPsSender::OpenTransportSocket()
         printf("[GB28181][RtpPs] invalid target ip: %s\n", m_param.target_ip.c_str());
         close(m_state->sockfd);
         m_state->sockfd = -1;
-        return -5;
+        return -6;
     }
 
     if (isTcp) {
@@ -328,7 +350,7 @@ int GB28181RtpPsSender::OpenTransportSocket()
                    m_param.target_port);
             close(m_state->sockfd);
             m_state->sockfd = -1;
-            return -6;
+            return -7;
         }
     }
 
@@ -643,23 +665,38 @@ int GB28181RtpPsSender::OnRtpPacket(const void* packet, int bytes, uint32_t time
         return -1;
     }
 
-    const int n = sendto(m_state->sockfd,
-                         packet,
-                         bytes,
-                         0,
-                         (struct sockaddr*)&m_state->remote_addr,
-                         sizeof(m_state->remote_addr));
-    if (n != bytes) {
-        printf("[GB28181][RtpPs] transport send failed n=%d expect=%d errno=%d transport=%s\n",
-               n,
-               bytes,
-               errno,
-               m_param.transport.c_str());
-        return -2;
+    const bool isTcp = (ToLowerCopy(m_param.transport) == "tcp");
+    if (isTcp) {
+        std::vector<uint8_t> framed(static_cast<size_t>(bytes) + 2U);
+        framed[0] = static_cast<uint8_t>((bytes >> 8) & 0xFF);
+        framed[1] = static_cast<uint8_t>(bytes & 0xFF);
+        memcpy(&framed[2], packet, static_cast<size_t>(bytes));
+        if (SendAll(m_state->sockfd, &framed[0], framed.size()) != 0) {
+            printf("[GB28181][RtpPs] tcp framed send failed bytes=%d errno=%d transport=%s\n",
+                   bytes,
+                   errno,
+                   m_param.transport.c_str());
+            return -2;
+        }
+    } else {
+        const int n = sendto(m_state->sockfd,
+                             packet,
+                             bytes,
+                             0,
+                             (struct sockaddr*)&m_state->remote_addr,
+                             sizeof(m_state->remote_addr));
+        if (n != bytes) {
+            printf("[GB28181][RtpPs] transport send failed n=%d expect=%d errno=%d transport=%s\n",
+                   n,
+                   bytes,
+                   errno,
+                   m_param.transport.c_str());
+            return -2;
+        }
     }
 
     m_state->total_packets += 1;
-    m_state->total_bytes += static_cast<unsigned long long>(bytes);
+    m_state->total_bytes += static_cast<unsigned long long>(isTcp ? (bytes + 2) : bytes);
 
     const uint32_t now = NowSeconds();
     if (now != m_state->last_log_sec) {
