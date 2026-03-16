@@ -2,6 +2,7 @@
 #include "gbutil.h"
 #include "SdpMessage.h"
 #include <stdlib.h>
+#include <string>
 
 static StreamRequestType  String2Enum( const std::string& str   )
 {
@@ -36,6 +37,36 @@ static std::string  Enum2String( StreamRequestType type   )
        return " ";
 }
 
+static std::string StripGbSdpExtensions(const char* str, std::string* ssrc)
+{
+      std::string input = str ? str : "";
+      std::string normalized;
+      size_t start = 0;
+
+      while (start < input.size()) {
+           size_t end = input.find('\n', start);
+           std::string line = input.substr(start, end == std::string::npos ? std::string::npos : end - start);
+           while (!line.empty() && (line[line.size() - 1] == '\r' || line[line.size() - 1] == '\0')) {
+                line.erase(line.size() - 1);
+           }
+
+           if (line.size() > 2 && line[1] == '=' && (line[0] == 'y' || line[0] == 'f')) {
+                if (line[0] == 'y' && ssrc && ssrc->empty()) {
+                     *ssrc = line.substr(2);
+                }
+           } else if (!line.empty() || !normalized.empty()) {
+                normalized.append(line).append("\r\n");
+           }
+
+           if (end == std::string::npos) {
+                break;
+           }
+           start = end + 1;
+      }
+
+      return normalized;
+}
+
 CSdpUtil::CSdpUtil()
 {
 
@@ -44,10 +75,17 @@ CSdpUtil::CSdpUtil()
 bool CSdpUtil::String2MediaInfo(const char* str, MediaInfo* output )
 {
     CSdpMessage sdp;
+    std::string ssrc;
+    std::string normalized = StripGbSdpExtensions(str, &ssrc);
     if ( sdp.Parse(str)) {
-        return false;
+        if (normalized.empty() || sdp.Parse(normalized.c_str())) {
+            return false;
+        }
     }
     output->StreamNum = -1;
+    if (!ssrc.empty()) {
+         GBUtil::memcpy_safe(output->Ssrc, SSRC_LEN, ssrc);
+    }
 
     const char* username = NULL;
 
@@ -59,6 +97,13 @@ bool CSdpUtil::String2MediaInfo(const char* str, MediaInfo* output )
 	const char* ip = NULL;
 
 	ip = sdp.GetAddress();
+	if(!ip || ip[0] == '\0'){
+		ip = sdp.GetConnection().GetAddress();
+	}
+    CSdpMedia& media = sdp.GetMedia(0);
+	if((!ip || ip[0] == '\0')){
+		ip = media.GetConnection(0).GetAddress();
+	}
 	if(!ip){
 		return false;
 	}
@@ -80,9 +125,6 @@ bool CSdpUtil::String2MediaInfo(const char* str, MediaInfo* output )
         output->EndTime = atol( time_descr.GetStopTime());
    }
 
-
-
-    CSdpMedia& media = sdp.GetMedia(0);
     output->Port = media.GetPort();
 
     std::string streamnumber = media.GetAttrValue("streamnumber");

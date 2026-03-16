@@ -1514,8 +1514,7 @@ SipData* CSipEventManager::GetSipData(bool isRequest, const eXosip_event_t *even
         char *temp =NULL;
         size_t Len = 0;
         if(  0== osip_body_to_str(pBody, &temp, &Len) ) {
-            std::string content= std::string(temp, Len+1);
-            content.at(Len) = '\0';
+            std::string content= std::string(temp, Len);
             CSipUtil::memcpy_safe( &(data->messgae.content) ,content);
             osip_free(temp);
         }

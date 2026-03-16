@@ -3104,7 +3104,9 @@ void  CGBClientImpl::OnInvite(const SipData* data)
 
 		  TVT_LOG_ERROR("gb invite rejected because sdp parse failed"
 			<< " call_id=" << data->Dialog.CallId
-			<< " dialog_id=" << data->Dialog.DialogId);
+			<< " dialog_id=" << data->Dialog.DialogId
+			<< " content_len=" << (data->messgae.content ? strlen(data->messgae.content) : 0)
+			<< " sdp=" << (data->messgae.content ? data->messgae.content : ""));
 
 
 		  message.code = kBadRequest;
