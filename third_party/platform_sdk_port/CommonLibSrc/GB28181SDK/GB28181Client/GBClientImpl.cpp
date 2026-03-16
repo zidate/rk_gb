@@ -3250,38 +3250,29 @@ void  CGBClientImpl::OnACK(const SipData* data)
 		<< " call_id=" << data->Dialog.CallId
 		<< " dialog_id=" << data->Dialog.DialogId);
 
-
-    /*
-
-
-    StreamHandle  handle =  m_stream_manager->FindStreamHandle( data->Dialog.CallId , data->Dialog.DialogId    );
-
-
     if(!handle){
-
-
+		TVT_LOG_ERROR("gb invite ack ignored because stream handle not found"
+			<< " call_id=" << data->Dialog.CallId
+			<< " dialog_id=" << data->Dialog.DialogId);
         return ;
-
-
     }
-
 
     PlayCtrlCmd cmd;
-
-
+	memset(&cmd, 0, sizeof(cmd));
     cmd.Type = kPlayStart;
 
-
-    if(  m_gb_receiver && m_gb_receiver->OnPlayControl(handle,&cmd)) {
-
-
-
-
-
+    if(  !m_gb_receiver || !m_gb_receiver->OnPlayControl(handle,&cmd)) {
+		TVT_LOG_ERROR("gb invite ack failed to trigger play start"
+			<< " handle=" << handle
+			<< " call_id=" << data->Dialog.CallId
+			<< " dialog_id=" << data->Dialog.DialogId);
+		return;
     }
 
-
-    */
+	TVT_LOG_INFO("gb invite ack triggered play start"
+		<< " handle=" << handle
+		<< " call_id=" << data->Dialog.CallId
+		<< " dialog_id=" << data->Dialog.DialogId);
 
 
 }
