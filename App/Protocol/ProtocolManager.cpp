@@ -14,7 +14,10 @@
 #include <vector>
 #include <errno.h>
 #include <stdlib.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
 #include <sys/stat.h>
+#include <sys/socket.h>
 #include <unistd.h>
 
 
@@ -810,6 +813,96 @@ static bool ExtractStreamEndpoint(const MediaInfo* input,
     }
 
 
+
+    return true;
+
+}
+
+static bool ResolveGbResponseLocalIp(const std::string& remoteIp,
+
+                                     int remotePort,
+
+                                     std::string& localIp)
+
+{
+
+    if (remoteIp.empty() || remotePort <= 0 || remotePort > 65535) {
+
+        return false;
+
+    }
+
+
+
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+
+    if (sockfd < 0) {
+
+        return false;
+
+    }
+
+
+
+    sockaddr_in remoteAddr;
+
+    memset(&remoteAddr, 0, sizeof(remoteAddr));
+
+    remoteAddr.sin_family = AF_INET;
+
+    remoteAddr.sin_port = htons((uint16_t)remotePort);
+
+    if (inet_pton(AF_INET, remoteIp.c_str(), &remoteAddr.sin_addr) != 1) {
+
+        close(sockfd);
+
+        return false;
+
+    }
+
+
+
+    if (connect(sockfd, (sockaddr*)&remoteAddr, sizeof(remoteAddr)) != 0) {
+
+        close(sockfd);
+
+        return false;
+
+    }
+
+
+
+    sockaddr_in localAddr;
+
+    memset(&localAddr, 0, sizeof(localAddr));
+
+    socklen_t localAddrLen = sizeof(localAddr);
+
+    if (getsockname(sockfd, (sockaddr*)&localAddr, &localAddrLen) != 0) {
+
+        close(sockfd);
+
+        return false;
+
+    }
+
+
+
+    char ipbuf[INET_ADDRSTRLEN] = {0};
+
+    const char* ipstr = inet_ntop(AF_INET, &localAddr.sin_addr, ipbuf, sizeof(ipbuf));
+
+    close(sockfd);
+
+    if (ipstr == NULL || ipstr[0] == '\0' || strcmp(ipstr, "0.0.0.0") == 0) {
+
+        return false;
+
+    }
+
+
+
+    localIp = ipstr;
 
     return true;
 
@@ -6897,13 +6990,13 @@ int ProtocolManager::BuildGbResponseMediaInfo(const char* gbCode,
 
     const std::string requestIp = SafeStr(input->IP, sizeof(input->IP));
 
-    const std::string resolvedIp = requestIp.empty() ? m_cfg.gb_live.target_ip : requestIp;
+    std::string resolvedIp = requestIp.empty() ? m_cfg.gb_live.target_ip : requestIp;
 
-    const unsigned int resolvedPort = (input->Port > 0)
+    unsigned int resolvedPort = (input->Port > 0)
 
-                                          ? input->Port
+                                    ? input->Port
 
-                                          : (unsigned int)((m_cfg.gb_live.target_port > 0) ? m_cfg.gb_live.target_port : 0);
+                                    : (unsigned int)((m_cfg.gb_live.target_port > 0) ? m_cfg.gb_live.target_port : 0);
 
 
 
@@ -6929,8 +7022,6 @@ int ProtocolManager::BuildGbResponseMediaInfo(const char* gbCode,
 
     out.StreamNum = ResolveGbStreamNumber(input, m_cfg);
 
-    out.Port = resolvedPort;
-
     out.StartTime = input->StartTime;
 
     out.EndTime = input->EndTime;
@@ -6941,11 +7032,39 @@ int ProtocolManager::BuildGbResponseMediaInfo(const char* gbCode,
 
 
 
+    // For downstream media answers, advertise the device-side address rather than
+
+    // echoing the platform offer endpoint back in the 200 OK SDP.
+
+    if (requestType == kLiveStream || requestType == kPlayback || requestType == kDownload) {
+
+        std::string localIp;
+
+        if (ResolveGbResponseLocalIp(requestIp, (int)input->Port, localIp)) {
+
+            resolvedIp = localIp;
+
+        }
+
+        if ((out.RtpType == kRtpOverTcpActive || out.RtpType == kRtpOverTcp) &&
+
+            m_cfg.gb_register.server_port > 0) {
+
+            resolvedPort = (unsigned int)m_cfg.gb_register.server_port;
+
+        }
+
+    }
+
+
+
     CopyBounded(out.DeviceID,
 
                 sizeof(out.DeviceID),
 
                 (gbCode != NULL && gbCode[0] != '\0') ? gbCode : m_cfg.gb_register.device_id);
+
+    out.Port = resolvedPort;
 
     CopyBounded(out.IP, sizeof(out.IP), resolvedIp);
 

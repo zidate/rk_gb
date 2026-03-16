@@ -37,6 +37,11 @@ static std::string  Enum2String( StreamRequestType type   )
        return " ";
 }
 
+static bool IsDownstreamMediaRequest(StreamRequestType type)
+{
+      return type == kLiveStream || type == kPlayback || type == kDownload;
+}
+
 static std::string StripGbSdpExtensions(const char* str, std::string* ssrc)
 {
       std::string input = str ? str : "";
@@ -198,10 +203,6 @@ void CSdpUtil::ToString(const MediaInfo*  gb_meida,  std::string& result )
     }
 
 
-    media.AddPayload("96");
-    media.AddPayload("98");
-    media.AddPayload("97");
-
     if( gb_meida->RtpDescri.type ==  kGBVideo) {
         media.SetType("video");
     }else{
@@ -243,6 +244,7 @@ void CSdpUtil::ToString(const MediaInfo*  gb_meida,  std::string& result )
     char format[128];
     char sample[128];
 
+    bool added_payload = false;
     if(gb_meida->RtpDescri.DescriNum >=1 && gb_meida->RtpDescri.mapDescri ) {
 
         for(; i < (int)gb_meida->RtpDescri.DescriNum; i++) {
@@ -253,6 +255,8 @@ void CSdpUtil::ToString(const MediaInfo*  gb_meida,  std::string& result )
 
             sprintf(format,"%d",gb_meida->RtpDescri.mapDescri[i].MediaFormat );
             sprintf(sample,"%d",gb_meida->RtpDescri.mapDescri[i].SampleRate );
+            media.AddPayload(format);
+            added_payload = true;
             descri.append(  format     )
                      .append(" ")
                      .append(gb_meida->RtpDescri.mapDescri[i].MimeType)
@@ -262,6 +266,10 @@ void CSdpUtil::ToString(const MediaInfo*  gb_meida,  std::string& result )
             media.AddAttribute(a1);
         }
 
+    }
+
+    if (!added_payload) {
+        media.AddPayload("96");
     }
 
 	if (gb_meida->Url[0] != '\0') {
@@ -277,7 +285,12 @@ void CSdpUtil::ToString(const MediaInfo*  gb_meida,  std::string& result )
     }
 
     CSdpAttribute a;
-    a.SetAttribute("recvonly");
+    if (IsDownstreamMediaRequest(gb_meida->RequestType)) {
+        a.SetAttribute("sendonly");
+    }
+    else {
+        a.SetAttribute("recvonly");
+    }
     media.AddAttribute(a);
 
     //添加y字段，TVT的IPC如果没有y字段无法建立会话
