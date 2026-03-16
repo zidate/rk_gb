@@ -660,11 +660,22 @@ void CSipEventManager::HandleResquestCallback(SipSessionHandle handle,  SipData*
 
         PeerInfo*  peer =  m_client_manager->GetPeerInfo( event->request , true);
          if(!peer) {
+             TVT_LOG_ERROR("sip request peer parse failed"
+                           << " method=" << event->request->sip_method
+                           << " tid=" << event->tid);
              return ;
          }
          ClientInfo*  client =  m_client_manager->FindClient(peer);
+         const std::string peer_name = peer->name;
+         const std::string peer_ip = peer->ip;
+         const int peer_port = peer->port;
          delete peer;
          if(!client) {
+             TVT_LOG_ERROR("sip request dropped because client was not matched"
+                           << " method=" << event->request->sip_method
+                           << " peer_name=" << peer_name
+                           << " peer=" << peer_ip << ":" << peer_port
+                           << " tid=" << event->tid);
              return ;
          }
 
