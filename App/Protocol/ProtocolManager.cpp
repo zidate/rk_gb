@@ -132,6 +132,16 @@ static std::string ToLowerCopy(const std::string& text)
 
 }
 
+static unsigned int GenerateGbMediaSsrc(int remotePort)
+{
+    unsigned int seed = static_cast<unsigned int>(time(NULL));
+    seed ^= static_cast<unsigned int>(getpid() & 0xFFFF);
+    seed ^= static_cast<unsigned int>(remotePort & 0xFFFF);
+    seed ^= static_cast<unsigned int>(rand() & 0x7FFFFFFF);
+    seed &= 0x3FFFFFFF;
+    return (seed == 0U) ? 1U : seed;
+}
+
 
 
 static std::string NormalizeCodec(const std::string& codecIn)
@@ -2473,6 +2483,8 @@ ProtocolManager::ProtocolManager()
       m_gb_alarm_subscribe_handle(NULL),
 
       m_gb_mobile_position_subscribe_handle(NULL),
+
+      m_gb_current_media_ssrc(0),
 
       m_gb_live_capture_started(false),
 
@@ -6790,6 +6802,10 @@ void ProtocolManager::HandleGbStopStreamRequest(StreamHandle handle, const char*
 
     }
 
+    if (needStopReplay || needStopLive) {
+        m_gb_current_media_ssrc = 0;
+    }
+
 
 
     printf("[ProtocolManager] gb stop stream gb=%s handle=%p\n", gbCode != NULL ? gbCode : "", handle);
@@ -6857,6 +6873,10 @@ int ProtocolManager::ReconfigureGbLiveSender(const MediaInfo* input, const char*
     runtimeParam.target_port = remotePort;
 
     runtimeParam.transport = (input->RtpType == kRtpOverUdp) ? "udp" : "tcp";
+    runtimeParam.ssrc = (m_cfg.gb_live.ssrc > 0)
+                            ? m_cfg.gb_live.ssrc
+                            : static_cast<int>(GenerateGbMediaSsrc(remotePort));
+    m_gb_current_media_ssrc = static_cast<uint32_t>(runtimeParam.ssrc);
 
 
 
@@ -7029,6 +7049,7 @@ int ProtocolManager::BuildGbResponseMediaInfo(const char* gbCode,
     out.DownloadSpeed = input->DownloadSpeed;
 
     out.FileSize = input->FileSize;
+    CopyBounded(out.MediaF, sizeof(out.MediaF), input->MediaF);
 
 
 
@@ -7070,7 +7091,9 @@ int ProtocolManager::BuildGbResponseMediaInfo(const char* gbCode,
 
 
 
-    const unsigned int ssrcValue = (m_cfg.gb_live.ssrc > 0) ? (unsigned int)m_cfg.gb_live.ssrc : 1u;
+    const unsigned int ssrcValue = (m_gb_current_media_ssrc > 0)
+                                       ? m_gb_current_media_ssrc
+                                       : ((m_cfg.gb_live.ssrc > 0) ? (unsigned int)m_cfg.gb_live.ssrc : 1u);
 
     snprintf(out.Ssrc, sizeof(out.Ssrc), "%010u", ssrcValue);
 

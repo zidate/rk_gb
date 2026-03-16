@@ -479,6 +479,8 @@ private:
 
     GbLiveSession m_gb_live_session;
 
+    uint32_t m_gb_current_media_ssrc;
+
     bool m_gb_live_capture_started;
 
 

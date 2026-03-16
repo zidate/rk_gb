@@ -137,6 +137,11 @@ bool CSdpUtil::String2MediaInfo(const char* str, MediaInfo* output )
          output->StreamNum = atoi(streamnumber.c_str());
     }
 
+    std::string mediaF = media.GetAttrValue("f");
+    if (!mediaF.empty()) {
+         GBUtil::memcpy_safe(output->MediaF, STR_LEN, mediaF);
+    }
+
     if(media.GetProtocol().find("TCP") != std::string::npos){
 
 		 std::string setup =  media.GetAttrValue("setup");
@@ -276,7 +281,7 @@ void CSdpUtil::ToString(const MediaInfo*  gb_meida,  std::string& result )
 		sdp.SetUri(gb_meida->Url);
 	}
 
-    if (gb_meida->StreamNum >= 0) {
+    if (gb_meida->StreamNum >= 0 && !IsDownstreamMediaRequest(gb_meida->RequestType)) {
         char stream_num[32] = {0};
         sprintf(stream_num, "%d", gb_meida->StreamNum);
         CSdpAttribute stream_attr;
@@ -299,4 +304,10 @@ void CSdpUtil::ToString(const MediaInfo*  gb_meida,  std::string& result )
 	std::string ssrcstr = "y=";
 	ssrcstr.append(gb_meida->Ssrc).append("\r\n");
     result+= ssrcstr;
+
+    if (IsDownstreamMediaRequest(gb_meida->RequestType) && gb_meida->MediaF[0] != '\0') {
+        std::string fstr = "f=";
+        fstr.append(gb_meida->MediaF).append("\r\n");
+        result += fstr;
+    }
 }
