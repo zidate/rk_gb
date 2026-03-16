@@ -142,6 +142,153 @@ static unsigned int GenerateGbMediaSsrc(int remotePort)
     return (seed == 0U) ? 1U : seed;
 }
 
+enum GbVideoStartState
+{
+    kGbVideoStartNone = 0,
+    kGbVideoStartConfig = 1,
+    kGbVideoStartIdr = 2
+};
+
+static bool FindAnnexBStartCode(const uint8_t* data,
+                                size_t size,
+                                size_t offset,
+                                size_t* startOffset,
+                                size_t* prefixSize)
+{
+    if (data == NULL || startOffset == NULL || prefixSize == NULL || offset >= size) {
+        return false;
+    }
+
+    for (size_t i = offset; i + 3 < size; ++i) {
+        if (data[i] == 0x00 && data[i + 1] == 0x00) {
+            if (data[i + 2] == 0x01) {
+                *startOffset = i;
+                *prefixSize = 3;
+                return true;
+            }
+
+            if (i + 4 < size && data[i + 2] == 0x00 && data[i + 3] == 0x01) {
+                *startOffset = i;
+                *prefixSize = 4;
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+static GbVideoStartState DetectH264GbVideoStartState(const uint8_t* data, size_t size)
+{
+    bool sawConfig = false;
+    bool sawStartCode = false;
+    size_t offset = 0;
+    size_t startOffset = 0;
+    size_t prefixSize = 0;
+
+    while (FindAnnexBStartCode(data, size, offset, &startOffset, &prefixSize)) {
+        sawStartCode = true;
+        const size_t nalOffset = startOffset + prefixSize;
+        if (nalOffset >= size) {
+            break;
+        }
+
+        const uint8_t nalType = data[nalOffset] & 0x1F;
+        if (nalType == 5) {
+            return kGbVideoStartIdr;
+        }
+
+        if (nalType == 7 || nalType == 8) {
+            sawConfig = true;
+        }
+
+        offset = nalOffset + 1;
+    }
+
+    if (!sawStartCode && size > 0) {
+        const uint8_t nalType = data[0] & 0x1F;
+        if (nalType == 5) {
+            return kGbVideoStartIdr;
+        }
+
+        if (nalType == 7 || nalType == 8) {
+            return kGbVideoStartConfig;
+        }
+    }
+
+    return sawConfig ? kGbVideoStartConfig : kGbVideoStartNone;
+}
+
+static GbVideoStartState DetectH265GbVideoStartState(const uint8_t* data, size_t size)
+{
+    bool sawConfig = false;
+    bool sawStartCode = false;
+    size_t offset = 0;
+    size_t startOffset = 0;
+    size_t prefixSize = 0;
+
+    while (FindAnnexBStartCode(data, size, offset, &startOffset, &prefixSize)) {
+        sawStartCode = true;
+        const size_t nalOffset = startOffset + prefixSize;
+        if (nalOffset >= size) {
+            break;
+        }
+
+        const uint8_t nalType = static_cast<uint8_t>((data[nalOffset] >> 1) & 0x3F);
+        if (nalType == 19 || nalType == 20) {
+            return kGbVideoStartIdr;
+        }
+
+        if (nalType == 32 || nalType == 33 || nalType == 34) {
+            sawConfig = true;
+        }
+
+        offset = nalOffset + 1;
+    }
+
+    if (!sawStartCode && size > 1) {
+        const uint8_t nalType = static_cast<uint8_t>((data[0] >> 1) & 0x3F);
+        if (nalType == 19 || nalType == 20) {
+            return kGbVideoStartIdr;
+        }
+
+        if (nalType == 32 || nalType == 33 || nalType == 34) {
+            return kGbVideoStartConfig;
+        }
+    }
+
+    return sawConfig ? kGbVideoStartConfig : kGbVideoStartNone;
+}
+
+static GbVideoStartState DetectGbVideoStartState(int mediaType, const uint8_t* data, size_t size)
+{
+    if (data == NULL || size == 0) {
+        return kGbVideoStartNone;
+    }
+
+    if (mediaType == DMC_MEDIA_TYPE_H264) {
+        return DetectH264GbVideoStartState(data, size);
+    }
+
+    if (mediaType == DMC_MEDIA_TYPE_H265) {
+        return DetectH265GbVideoStartState(data, size);
+    }
+
+    return kGbVideoStartNone;
+}
+
+static const char* GbVideoStartStateName(GbVideoStartState state)
+{
+    switch (state) {
+        case kGbVideoStartConfig:
+            return "config";
+        case kGbVideoStartIdr:
+            return "idr";
+        default:
+            return "none";
+    }
+}
+
 
 
 static std::string NormalizeCodec(const std::string& codecIn)
@@ -3643,7 +3790,11 @@ const ProtocolExternalConfig& ProtocolManager::GetConfig() const
 
 
 
-int ProtocolManager::PushLiveVideoEsFrame(const uint8_t* data, size_t size, uint64_t pts90k, bool keyFrame)
+int ProtocolManager::PushLiveVideoEsFrame(const uint8_t* data,
+                                         size_t size,
+                                         uint64_t pts90k,
+                                         int mediaType,
+                                         bool keyFrame)
 
 {
 
@@ -3664,6 +3815,12 @@ int ProtocolManager::PushLiveVideoEsFrame(const uint8_t* data, size_t size, uint
     uint32_t sentVideo = 0;
     uint32_t sentAudio = 0;
     const uint64_t nowMs = GetNowMs();
+    const GbVideoStartState startState = DetectGbVideoStartState(mediaType, data, size);
+    bool waitingFirstIdr = false;
+    bool passConfigBeforeIdr = false;
+    bool firstIdrAccepted = false;
+    bool dropBeforeIdr = false;
+    bool logDropBeforeIdr = false;
 
     {
 
@@ -3678,6 +3835,22 @@ int ProtocolManager::PushLiveVideoEsFrame(const uint8_t* data, size_t size, uint
             recvAudio = m_gb_live_session.recv_audio_frames;
             sentVideo = m_gb_live_session.sent_video_frames;
             sentAudio = m_gb_live_session.sent_audio_frames;
+            waitingFirstIdr = m_gb_live_session.wait_first_idr;
+            if (m_gb_live_session.wait_first_idr) {
+                if (startState == kGbVideoStartIdr) {
+                    m_gb_live_session.wait_first_idr = false;
+                    firstIdrAccepted = true;
+                } else if (startState == kGbVideoStartConfig) {
+                    passConfigBeforeIdr = true;
+                } else {
+                    dropBeforeIdr = true;
+                    if (m_gb_live_session.last_wait_idr_log_ms == 0 ||
+                        nowMs >= m_gb_live_session.last_wait_idr_log_ms + 1000ULL) {
+                        m_gb_live_session.last_wait_idr_log_ms = nowMs;
+                        logDropBeforeIdr = true;
+                    }
+                }
+            }
             if (m_gb_live_session.last_capture_log_ms == 0 ||
                 nowMs >= m_gb_live_session.last_capture_log_ms + 1000ULL) {
                 m_gb_live_session.last_capture_log_ms = nowMs;
@@ -3688,9 +3861,11 @@ int ProtocolManager::PushLiveVideoEsFrame(const uint8_t* data, size_t size, uint
     }
 
     if (logFrame) {
-        printf("[ProtocolManager] gb live video es handle=%p acked=%d recv_video=%u recv_audio=%u sent_video=%u sent_audio=%u size=%lu key=%d pts90k=%llu\n",
+        printf("[ProtocolManager] gb live video es handle=%p acked=%d wait_first_idr=%d start=%s recv_video=%u recv_audio=%u sent_video=%u sent_audio=%u size=%lu key=%d pts90k=%llu\n",
                handle,
                acked ? 1 : 0,
+               waitingFirstIdr ? 1 : 0,
+               GbVideoStartStateName(startState),
                recvVideo,
                recvAudio,
                sentVideo,
@@ -3704,9 +3879,34 @@ int ProtocolManager::PushLiveVideoEsFrame(const uint8_t* data, size_t size, uint
         return 0;
     }
 
+    if (dropBeforeIdr) {
+        if (logDropBeforeIdr) {
+            printf("[ProtocolManager] gb live drop pre-idr frame handle=%p start=%s size=%lu pts90k=%llu\n",
+                   handle,
+                   GbVideoStartStateName(startState),
+                   (unsigned long)size,
+                   (unsigned long long)pts90k);
+        }
+        return 0;
+    }
 
+    if (passConfigBeforeIdr) {
+        printf("[ProtocolManager] gb live pass config before first idr handle=%p start=%s size=%lu pts90k=%llu\n",
+               handle,
+               GbVideoStartStateName(startState),
+               (unsigned long)size,
+               (unsigned long long)pts90k);
+    } else if (firstIdrAccepted) {
+        printf("[ProtocolManager] gb live first idr accepted handle=%p size=%lu pts90k=%llu\n",
+               handle,
+               (unsigned long)size,
+               (unsigned long long)pts90k);
+    }
 
-    const int ret = m_rtp_ps_sender.SendVideoFrame(data, size, pts90k, keyFrame);
+    const int ret = m_rtp_ps_sender.SendVideoFrame(data,
+                                                   size,
+                                                   pts90k,
+                                                   keyFrame || startState == kGbVideoStartIdr);
 
     if (ret == 0) {
 
@@ -4286,6 +4486,12 @@ int ProtocolManager::HandleGbStreamAck(StreamHandle handle)
 
 
 
+    std::string gbCode;
+    bool preferSubStream = false;
+    bool audioRequested = false;
+    bool audioEnabled = false;
+    int forceIdrChannel = -1;
+
     {
 
         std::lock_guard<std::mutex> lock(m_gb_live_mutex);
@@ -4317,23 +4523,32 @@ int ProtocolManager::HandleGbStreamAck(StreamHandle handle)
             }
 
             m_gb_live_session.acked = true;
+            m_gb_live_session.wait_first_idr = true;
+            m_gb_live_session.last_wait_idr_log_ms = 0;
+            gbCode = m_gb_live_session.gb_code;
+            preferSubStream = m_gb_live_session.prefer_sub_stream;
+            audioRequested = m_gb_live_session.audio_requested;
+            audioEnabled = m_gb_live_session.audio_enabled;
+            forceIdrChannel = m_gb_live_session.prefer_sub_stream ? 1 : 0;
 
-            printf("[ProtocolManager] gb live acked gb=%s handle=%p stream=%s audio_requested=%d audio_enabled=%d\n",
-
-                   m_gb_live_session.gb_code.c_str(),
-
-                   handle,
-
-                   m_gb_live_session.prefer_sub_stream ? "sub" : "main",
-
-                   m_gb_live_session.audio_requested ? 1 : 0,
-
-                   m_gb_live_session.audio_enabled ? 1 : 0);
-
-            return 0;
+        } else {
+            forceIdrChannel = -1;
 
         }
 
+    }
+
+    if (forceIdrChannel >= 0) {
+        const int forceRet = CaptureForceIFrame(forceIdrChannel, 0);
+        printf("[ProtocolManager] gb live acked gb=%s handle=%p stream=%s audio_requested=%d audio_enabled=%d force_idr_channel=%d force_idr_ret=%d\n",
+               gbCode.c_str(),
+               handle,
+               preferSubStream ? "sub" : "main",
+               audioRequested ? 1 : 0,
+               audioEnabled ? 1 : 0,
+               forceIdrChannel,
+               forceRet);
+        return 0;
     }
 
 
@@ -8118,7 +8333,11 @@ int ProtocolManager::HandleGbLiveCaptureInternal(int media_chn,
 
         const bool keyFrame = (media_subtype == DMC_MEDIA_SUBTYPE_IFRAME);
 
-        return PushLiveVideoEsFrame(frame_data, static_cast<size_t>(frame_len), pts90k, keyFrame);
+        return PushLiveVideoEsFrame(frame_data,
+                                    static_cast<size_t>(frame_len),
+                                    pts90k,
+                                    media_type,
+                                    keyFrame);
 
     }
 

@@ -94,7 +94,7 @@ public:
 
 
 
-    int PushLiveVideoEsFrame(const uint8_t* data, size_t size, uint64_t pts90k, bool keyFrame);
+    int PushLiveVideoEsFrame(const uint8_t* data, size_t size, uint64_t pts90k, int mediaType, bool keyFrame);
 
     int PushLiveAudioEsFrame(const uint8_t* data, size_t size, uint64_t pts90k);
 
@@ -256,6 +256,8 @@ private:
 
         bool acked;
 
+        bool wait_first_idr;
+
         uint32_t recv_video_frames;
 
         uint32_t recv_audio_frames;
@@ -265,6 +267,8 @@ private:
         uint32_t sent_audio_frames;
 
         uint64_t last_capture_log_ms;
+
+        uint64_t last_wait_idr_log_ms;
 
 
 
@@ -282,6 +286,8 @@ private:
 
               acked(false),
 
+              wait_first_idr(false),
+
               recv_video_frames(0),
 
               recv_audio_frames(0),
@@ -290,7 +296,9 @@ private:
 
               sent_audio_frames(0),
 
-              last_capture_log_ms(0)
+              last_capture_log_ms(0),
+
+              last_wait_idr_log_ms(0)
 
         {
 
