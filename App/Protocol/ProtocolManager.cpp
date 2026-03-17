@@ -1215,6 +1215,14 @@ static bool IsVideoPsMimeType(const std::string& mime)
 
 }
 
+static bool IsPsMuxMimeType(const std::string& mime)
+
+{
+
+    return ToLowerCopy(mime) == "ps";
+
+}
+
 
 
 static bool IsLiveAudioRequested(const MediaInfo* input)
@@ -1244,6 +1252,38 @@ static bool IsLiveAudioRequested(const MediaInfo* input)
 
 
         if (!mime.empty() && !IsVideoPsMimeType(mime) && map.SampleRate > 0 && map.SampleRate != 90000) {
+
+            return true;
+
+        }
+
+    }
+
+
+
+    return false;
+
+}
+
+static bool HasLivePsMuxOffer(const MediaInfo* input)
+
+{
+
+    if (input == NULL || input->RtpDescri.DescriNum == 0 || input->RtpDescri.mapDescri == NULL) {
+
+        return false;
+
+    }
+
+
+
+    for (unsigned int i = 0; i < input->RtpDescri.DescriNum; ++i) {
+
+        const RtpMap& map = input->RtpDescri.mapDescri[i];
+
+        const std::string mime = SafeStr(map.MimeType, sizeof(map.MimeType));
+
+        if (IsPsMuxMimeType(mime)) {
 
             return true;
 
@@ -4271,7 +4311,9 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
 
     const bool audioRequested = IsLiveAudioRequested(input);
 
-    const bool audioEnabled = audioRequested;
+    const bool psMuxOffer = HasLivePsMuxOffer(input);
+
+    const bool audioEnabled = audioRequested || psMuxOffer;
 
     const int requestedStreamNum = ResolveGbStreamNumber(input, m_cfg);
 
@@ -4279,7 +4321,7 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
 
 
 
-    printf("[ProtocolManager] gb live request enter gb=%s handle=%p offered_transport=%s remote=%s:%d stream_num=%d audio_requested=%d\n",
+    printf("[ProtocolManager] gb live request enter gb=%s handle=%p offered_transport=%s remote=%s:%d stream_num=%d audio_requested=%d ps_mux_offer=%d audio_enabled=%d\n",
 
            gbCode != NULL ? gbCode : "",
 
@@ -4293,7 +4335,11 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
 
            requestedStreamNum,
 
-           audioRequested ? 1 : 0);
+           audioRequested ? 1 : 0,
+
+           psMuxOffer ? 1 : 0,
+
+           audioEnabled ? 1 : 0);
 
 
 
@@ -4327,7 +4373,7 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
 
         m_gb_live_session.acked = false;
 
-        printf("[ProtocolManager] gb live request gb=%s handle=%p stream_num=%d stream=%s audio_requested=%d\n",
+        printf("[ProtocolManager] gb live request gb=%s handle=%p stream_num=%d stream=%s audio_requested=%d audio_enabled=%d\n",
 
                m_gb_live_session.gb_code.c_str(),
 
@@ -4337,7 +4383,9 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
 
                preferSubStream ? "sub" : "main",
 
-               audioRequested ? 1 : 0);
+               audioRequested ? 1 : 0,
+
+               audioEnabled ? 1 : 0);
 
     }
 
@@ -4385,7 +4433,7 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
 
 
 
-    printf("[ProtocolManager] gb live stream accepted gb=%s handle=%p stream=%s audio_requested=%d audio_enabled=%d audio_codec=%s\n",
+    printf("[ProtocolManager] gb live stream accepted gb=%s handle=%p stream=%s audio_requested=%d ps_mux_offer=%d audio_enabled=%d audio_codec=%s\n",
 
            gbCode != NULL ? gbCode : "",
 
@@ -4394,6 +4442,8 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
            preferSubStream ? "sub" : "main",
 
            audioRequested ? 1 : 0,
+
+           psMuxOffer ? 1 : 0,
 
            audioEnabled ? 1 : 0,
 
