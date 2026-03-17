@@ -5,3 +5,13 @@ RK_TOOLCHAIN_BIN=/opt/rk/arm-rockchip830-linux-uclibcgnueabihf/bin
 CMAKE_BIN=/opt/cmake/bin/cmake
 ISSUE_FIX_COMMAND=/opt/issue-bot/bin/rk_gb_fix_issue.sh
 ISSUE_BOT_STATE_DIR=/var/tmp/rk-gb-issue-bot
+ISSUE_BOT_BASE_BRANCH=silver
+ISSUE_BOT_AUTOFIX_REPO_DIR=/srv/rk_gb
+ISSUE_BOT_AUTOFIX_MIRROR_DIR=/var/tmp/rk-gb-issue-bot/repo
+ISSUE_BOT_LOCK_FILE=/var/tmp/rk-gb-issue-bot/issue-bot.lock
+ISSUE_BOT_WRITE=1
+ISSUE_BOT_SKIP_BUILD_VERIFY=0
+
+# Optional for local cron/self-hosted execution outside GitHub Actions.
+# GITHUB_REPOSITORY=zidate/rk_gb
+# GITHUB_TOKEN=ghp_xxx

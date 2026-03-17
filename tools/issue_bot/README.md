@@ -79,6 +79,16 @@ bash tools/issue_bot/runner_preflight.sh \
   runner 上的修复命令。命令会在独立 worktree 中执行。
 - `ISSUE_BOT_STATE_DIR`
   可选，指定 issue bot 的临时状态目录。
+- `ISSUE_BOT_BASE_BRANCH`
+  自动修复默认基线分支。当前建议固定为 `silver`。
+- `ISSUE_BOT_AUTOFIX_REPO_DIR`
+  本机定时任务启动时用来发现 `origin` 的引导仓库路径。
+- `ISSUE_BOT_AUTOFIX_MIRROR_DIR`
+  本机定时任务使用的隔离仓库目录。建议放在 `/tmp` 或专用缓存目录。
+- `ISSUE_BOT_LOCK_FILE`
+  本机定时任务的互斥锁文件，避免并发巡检互相踩环境。
+- `ISSUE_BOT_WRITE`
+  设为 `1` 时允许 triage / repair 回写 GitHub；设为 `0` 时按 dry-run 演练。
 - `ISSUE_BOT_RUNNER_READY`
   GitHub repo variable。设置为 `true` 后，`issue-runner-preflight.yml` 和 `issue-repair.yml` 才会进入 self-hosted runner 作业。
 - `ISSUE_BOT_REPAIR_ENABLED`
@@ -167,6 +177,46 @@ bash tools/issue_bot/regression_suite.sh \
 ```
 
 脚本会输出 triage 摘要、preflight 摘要、smoke repair 摘要和可选 build verify 日志目录。
+
+## 本机定时巡检
+
+如果你希望在当前机器上定时查看 issue、自动分析并修复，同时不污染人工开发和其他 SoC 的编译环境，建议使用仓库内置的本机巡检脚本:
+
+```bash
+bash tools/issue_bot/local_cycle.sh --dry-run
+```
+
+脚本会执行以下动作:
+
+- 从 `ISSUE_BOT_AUTOFIX_REPO_DIR` 读取 `origin` 地址
+- 在 `ISSUE_BOT_AUTOFIX_MIRROR_DIR` 下维护一个独立仓库副本
+- 对独立副本执行 `fetch/reset/clean/worktree prune`
+- 先跑 `triage_issues.py`，再跑 `repair_executor.py`
+- 自动把修复基线固定到 `silver`，除非显式通过 `--base-branch` 或 `ISSUE_BOT_BASE_BRANCH` 覆盖
+
+注意:
+
+- 真正执行自动修复前，仍然必须提供 `ISSUE_FIX_COMMAND`。仓库只负责调度，不内置具体“AI 修复器”实现。
+- `local_cycle.sh` 会优先读取环境里的 `GITHUB_TOKEN`；如果未设置且机器上已登录 `gh`，会自动回退到 `gh auth token`。
+- 隔离仓库位于独立目录，不会复用你手工开发中的工作区。
+
+如果需要安装为当前用户的 cron 定时任务，可以先预演:
+
+```bash
+bash tools/issue_bot/install_local_timer.sh
+```
+
+确认输出无误后再执行:
+
+```bash
+bash tools/issue_bot/install_local_timer.sh --apply
+```
+
+默认每 15 分钟跑一次，并将日志写入 `${ISSUE_BOT_STATE_DIR}/cron.log`。如需单独处理某个 issue，可手工执行:
+
+```bash
+bash tools/issue_bot/local_cycle.sh --issue-number 27 --allow-manual
+```
 
 ## 本地演练
 
