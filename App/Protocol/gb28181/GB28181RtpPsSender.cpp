@@ -213,6 +213,7 @@ struct GB28181RtpPsSender::RuntimeState
     uint32_t last_es_log_sec;
     uint32_t last_ps_log_sec;
     uint32_t last_log_sec;
+    int local_port;
 
     RuntimeState()
         : sockfd(-1),
@@ -230,7 +231,8 @@ struct GB28181RtpPsSender::RuntimeState
           total_packets(0),
           last_es_log_sec(0),
           last_ps_log_sec(0),
-          last_log_sec(0)
+          last_log_sec(0),
+          local_port(0)
     {
         memset(&remote_addr, 0, sizeof(remote_addr));
     }
@@ -302,6 +304,7 @@ int GB28181RtpPsSender::OpenTransportSocket()
         close(m_state->sockfd);
         m_state->sockfd = -1;
     }
+    m_state->local_port = 0;
 
     const int sockType = isTcp ? SOCK_STREAM : SOCK_DGRAM;
     m_state->sockfd = socket(AF_INET, sockType, 0);
@@ -352,6 +355,15 @@ int GB28181RtpPsSender::OpenTransportSocket()
             m_state->sockfd = -1;
             return -7;
         }
+    }
+
+    struct sockaddr_in localAddr;
+    socklen_t localAddrLen = sizeof(localAddr);
+    memset(&localAddr, 0, sizeof(localAddr));
+    if (getsockname(m_state->sockfd, (struct sockaddr*)&localAddr, &localAddrLen) == 0) {
+        m_state->local_port = static_cast<int>(ntohs(localAddr.sin_port));
+    } else {
+        printf("[GB28181][RtpPs] getsockname failed errno=%d\n", errno);
     }
 
     const int sendTimeoutMs = 50;
@@ -442,9 +454,10 @@ int GB28181RtpPsSender::OpenSession()
     m_state->last_log_sec = 0;
     m_state->opened = true;
 
-    printf("[GB28181][RtpPs] session opened target=%s:%d payload=%d mtu=%d ssrc=%u\n",
+    printf("[GB28181][RtpPs] session opened target=%s:%d local_port=%d payload=%d mtu=%d ssrc=%u\n",
            m_param.target_ip.c_str(),
            m_param.target_port,
+           m_state->local_port,
            payloadType,
            m_param.mtu,
            m_state->ssrc);
@@ -477,6 +490,7 @@ void GB28181RtpPsSender::CloseSession()
         close(m_state->sockfd);
         m_state->sockfd = -1;
     }
+    m_state->local_port = 0;
 
     if (m_state->opened) {
         printf("[GB28181][RtpPs] session closed es_video=%u es_audio=%u ps_packets=%u ps_bytes=%llu rtp_packets=%u rtp_bytes=%llu seq=%hu ts=%u\n",
@@ -620,6 +634,15 @@ int GB28181RtpPsSender::SendAudioFrame(const uint8_t* data, size_t size, uint64_
 bool GB28181RtpPsSender::IsOpened() const
 {
     return m_state != NULL && m_state->opened;
+}
+
+int GB28181RtpPsSender::GetLocalPort() const
+{
+    if (m_state == NULL) {
+        return 0;
+    }
+
+    return m_state->local_port;
 }
 
 int GB28181RtpPsSender::OnPsPacket(int stream, void* packet, size_t bytes)

@@ -2632,6 +2632,7 @@ ProtocolManager::ProtocolManager()
       m_gb_mobile_position_subscribe_handle(NULL),
 
       m_gb_current_media_ssrc(0),
+      m_gb_current_media_port(0),
 
       m_gb_live_capture_started(false),
 
@@ -4345,6 +4346,9 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
     ret = StartGbLiveCapture();
 
     if (ret != 0) {
+        m_rtp_ps_sender.CloseSession();
+        m_gb_current_media_ssrc = 0;
+        m_gb_current_media_port = 0;
 
         std::lock_guard<std::mutex> lock(m_gb_live_mutex);
 
@@ -4367,6 +4371,9 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
     if (ret != 0) {
 
         StopGbLiveCapture();
+        m_rtp_ps_sender.CloseSession();
+        m_gb_current_media_ssrc = 0;
+        m_gb_current_media_port = 0;
 
         std::lock_guard<std::mutex> lock(m_gb_live_mutex);
 
@@ -7019,6 +7026,7 @@ void ProtocolManager::HandleGbStopStreamRequest(StreamHandle handle, const char*
 
     if (needStopReplay || needStopLive) {
         m_gb_current_media_ssrc = 0;
+        m_gb_current_media_port = 0;
     }
 
 
@@ -7089,13 +7097,14 @@ int ProtocolManager::ReconfigureGbLiveSender(const MediaInfo* input, const char*
     runtimeParam.local_port = 0;
 
     runtimeParam.transport = (input->RtpType == kRtpOverUdp) ? "udp" : "tcp";
-    if (runtimeParam.transport == "tcp" && m_cfg.gb_register.server_port > 0) {
-        runtimeParam.local_port = m_cfg.gb_register.server_port;
+    if (runtimeParam.transport == "tcp" && m_cfg.gb_live.local_port > 0) {
+        runtimeParam.local_port = m_cfg.gb_live.local_port;
     }
     runtimeParam.ssrc = (m_cfg.gb_live.ssrc > 0)
                             ? m_cfg.gb_live.ssrc
                             : static_cast<int>(GenerateGbMediaSsrc(remotePort));
     m_gb_current_media_ssrc = static_cast<uint32_t>(runtimeParam.ssrc);
+    m_gb_current_media_port = 0;
 
 
 
@@ -7121,15 +7130,43 @@ int ProtocolManager::ReconfigureGbLiveSender(const MediaInfo* input, const char*
 
 
 
+    if (requestType == kLiveStream && runtimeParam.transport == "tcp") {
+        ret = m_rtp_ps_sender.OpenSession();
+        if (ret != 0) {
+            printf("[ProtocolManager] gb %s stream sender open failed ret=%d gb=%s remote=%s:%d\n",
+                   StreamRequestTypeName(requestType),
+                   ret,
+                   gbCode != NULL ? gbCode : "",
+                   remoteIp.c_str(),
+                   remotePort);
+
+            m_rtp_ps_sender.Init(m_cfg.gb_live);
+            m_rtp_ps_sender.OpenSession();
+            return -24;
+        }
+
+        m_gb_current_media_port = m_rtp_ps_sender.GetLocalPort();
+        printf("[ProtocolManager] gb %s stream sender prepared target=%s:%d local_port=%d gb=%s transport=%s open=pre_response\n",
+               StreamRequestTypeName(requestType),
+               remoteIp.c_str(),
+               remotePort,
+               m_gb_current_media_port,
+               gbCode != NULL ? gbCode : "",
+               runtimeParam.transport.c_str());
+        return 0;
+    }
+
     if (requestType == kLiveStream) {
 
-        printf("[ProtocolManager] gb %s stream sender prepared target=%s:%d gb=%s transport=%s open=deferred_until_ack\n",
+        printf("[ProtocolManager] gb %s stream sender prepared target=%s:%d local_port=%d gb=%s transport=%s open=deferred_until_ack\n",
 
                StreamRequestTypeName(requestType),
 
                remoteIp.c_str(),
 
                remotePort,
+
+               runtimeParam.local_port,
 
                gbCode != NULL ? gbCode : "",
 
@@ -7169,13 +7206,17 @@ int ProtocolManager::ReconfigureGbLiveSender(const MediaInfo* input, const char*
 
 
 
-    printf("[ProtocolManager] gb %s stream sender target=%s:%d gb=%s\n",
+    m_gb_current_media_port = m_rtp_ps_sender.GetLocalPort();
+
+    printf("[ProtocolManager] gb %s stream sender target=%s:%d local_port=%d gb=%s\n",
 
            StreamRequestTypeName(requestType),
 
            remoteIp.c_str(),
 
            remotePort,
+
+           m_gb_current_media_port,
 
            gbCode != NULL ? gbCode : "");
 
@@ -7286,12 +7327,12 @@ int ProtocolManager::BuildGbResponseMediaInfo(const char* gbCode,
 
         }
 
-        if ((out.RtpType == kRtpOverTcpActive || out.RtpType == kRtpOverTcp) &&
-
-            m_cfg.gb_register.server_port > 0) {
-
-            resolvedPort = (unsigned int)m_cfg.gb_register.server_port;
-
+        if (out.RtpType == kRtpOverTcpActive || out.RtpType == kRtpOverTcp) {
+            if (m_gb_current_media_port > 0) {
+                resolvedPort = static_cast<unsigned int>(m_gb_current_media_port);
+            } else if (m_cfg.gb_live.local_port > 0) {
+                resolvedPort = static_cast<unsigned int>(m_cfg.gb_live.local_port);
+            }
         }
 
     }

@@ -23,6 +23,7 @@ public:
     int SendAudioFrame(const uint8_t* data, size_t size, uint64_t pts90k);
 
     bool IsOpened() const;
+    int GetLocalPort() const;
 
 private:
     int EnsureLibrariesLoaded();
