@@ -1193,7 +1193,8 @@ int  CSipEventManager::SendResquest( SipMethod method,
               break;
         case kSipMessageMethod :
             {
-                code = eXosip_message_send_request(m_sip_context,pRequest);
+                const int tid = eXosip_message_send_request(m_sip_context,pRequest);
+                code = (tid < 0) ? tid : 0;
             }
                break;
         case kSipNotifyMethod:

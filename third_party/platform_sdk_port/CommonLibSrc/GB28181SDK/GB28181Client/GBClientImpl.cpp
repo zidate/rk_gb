@@ -557,7 +557,7 @@ int CGBClientImpl::SendHeartbeat(  const KeepaliveInfo* list)
 
     TVT_LOG_INFO("gb heartbeat send"
                  << " device=" << m_xml_parser->m_local_code
-                 << " remote_name=" << m_sip_connect_param->sip_code
+                 << " remote_name=" << m_gb_connect->GBCode
                  << " remote=" << m_strIP << ":" << m_sip_connect_param->port
                  << " xml_len=" << (int)content.size()
                  << " timeout=" << timeout);
@@ -572,7 +572,7 @@ int CGBClientImpl::SendHeartbeat(  const KeepaliveInfo* list)
 
          TVT_LOG_ERROR("gb heartbeat sip message failed"
                        << " device=" << m_xml_parser->m_local_code
-                       << " remote_name=" << m_sip_connect_param->sip_code
+                       << " remote_name=" << m_gb_connect->GBCode
                        << " remote=" << m_strIP << ":" << m_sip_connect_param->port
                        << " sip_ret=" << sipRet);
 
@@ -590,7 +590,7 @@ int CGBClientImpl::SendHeartbeat(  const KeepaliveInfo* list)
 
         TVT_LOG_ERROR("gb heartbeat response invalid"
                       << " device=" << m_xml_parser->m_local_code
-                      << " remote_name=" << m_sip_connect_param->sip_code
+                      << " remote_name=" << m_gb_connect->GBCode
                       << " remote=" << m_strIP << ":" << m_sip_connect_param->port
                       << " has_result=" << (result ? 1 : 0)
                       << " sip_code=" << (result ? result->messgae.code : -1));
@@ -602,7 +602,7 @@ int CGBClientImpl::SendHeartbeat(  const KeepaliveInfo* list)
     else {
         TVT_LOG_INFO("gb heartbeat response ok"
                      << " device=" << m_xml_parser->m_local_code
-                     << " remote_name=" << m_sip_connect_param->sip_code
+                     << " remote_name=" << m_gb_connect->GBCode
                      << " remote=" << m_strIP << ":" << m_sip_connect_param->port
                      << " sip_code=" << result->messgae.code);
     }
