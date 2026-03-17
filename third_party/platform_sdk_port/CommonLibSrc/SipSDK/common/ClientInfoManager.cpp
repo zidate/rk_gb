@@ -124,34 +124,59 @@ PeerInfo* CClientInfoManager::GetPeerInfo(osip_message_t *pMsg, bool is_request)
 
 	PeerInfo* peer = new PeerInfo;
     peer->port = 0;
+    std::string name_source = "none";
+    std::string addr_source = "none";
+    struct PeerSourceTracker {
+        static void Apply(PeerInfo* peer,
+                          osip_uri_t* uri,
+                          const char* source,
+                          std::string* name_source,
+                          std::string* addr_source)
+        {
+            if (peer == NULL) {
+                return;
+            }
+            const std::string old_name = peer->name;
+            const std::string old_ip = peer->ip;
+            const int old_port = peer->port;
+            FillPeerFromUri(peer, uri);
+            if (name_source != NULL && old_name.empty() && !peer->name.empty()) {
+                *name_source = source;
+            }
+            if (addr_source != NULL &&
+                ((old_ip.empty() && !peer->ip.empty()) || (old_port <= 0 && peer->port > 0))) {
+                *addr_source = source;
+            }
+        }
+    };
 	osip_contact_t * pContact = NULL;
 	if (OSIP_SUCCESS == osip_message_get_contact(pMsg, 0, &pContact)
 		&& pContact && pContact->url)
 	{
-        FillPeerFromUri(peer, pContact->url);
+        PeerSourceTracker::Apply(peer, pContact->url, "contact", &name_source, &addr_source);
 	}
 
     if (is_request) {
         if (pMsg->from) {
             osip_uri_t * pUri = osip_to_get_url(pMsg->from);
-            FillPeerFromUri(peer, pUri);
+            PeerSourceTracker::Apply(peer, pUri, "from", &name_source, &addr_source);
         }
     }
     else {
         if (pMsg->to) {
             osip_uri_t * pUri = osip_to_get_url(pMsg->to);
-            FillPeerFromUri(peer, pUri);
+            PeerSourceTracker::Apply(peer, pUri, "to", &name_source, &addr_source);
         }
     }
 
     if (peer->name.empty() && pMsg->from) {
         osip_uri_t * pUri = osip_to_get_url(pMsg->from);
-        FillPeerFromUri(peer, pUri);
+        PeerSourceTracker::Apply(peer, pUri, "from_fallback", &name_source, &addr_source);
     }
 
     if ((peer->ip.empty() || peer->port <= 0) && pMsg->to) {
         osip_uri_t * pUri = osip_to_get_url(pMsg->to);
-        FillPeerFromUri(peer, pUri);
+        PeerSourceTracker::Apply(peer, pUri, "to_fallback", &name_source, &addr_source);
     }
 
     if ((peer->name.empty() && peer->ip.empty()) || peer->port < 0) {
@@ -159,5 +184,12 @@ PeerInfo* CClientInfoManager::GetPeerInfo(osip_message_t *pMsg, bool is_request)
         return NULL;
     }
 
-	return peer;
+    TVT_LOG_INFO("sip peer parsed"
+                 << " is_request=" << (is_request ? 1 : 0)
+                 << " peer_name=" << peer->name
+                 << " peer=" << peer->ip << ":" << peer->port
+                 << " name_source=" << name_source
+                 << " addr_source=" << addr_source);
+
+    return peer;
 }

@@ -555,11 +555,26 @@ int CGBClientImpl::SendHeartbeat(  const KeepaliveInfo* list)
 
     SipData* result = NULL;
 
+    TVT_LOG_INFO("gb heartbeat send"
+                 << " device=" << m_strGBCode
+                 << " remote_name=" << m_sip_connect_param->sip_code
+                 << " remote=" << m_strIP << ":" << m_sip_connect_param->port
+                 << " xml_len=" << (int)content.size()
+                 << " timeout=" << timeout);
 
 
 
 
-    if( kSipSuccess != m_sip_client->Message(&message, timeout,  &result)) {
+
+    const int sipRet = m_sip_client->Message(&message, timeout,  &result);
+
+    if( kSipSuccess != sipRet) {
+
+         TVT_LOG_ERROR("gb heartbeat sip message failed"
+                       << " device=" << m_strGBCode
+                       << " remote_name=" << m_sip_connect_param->sip_code
+                       << " remote=" << m_strIP << ":" << m_sip_connect_param->port
+                       << " sip_ret=" << sipRet);
 
 
          return kGbMessageFail;
@@ -573,10 +588,23 @@ int CGBClientImpl::SendHeartbeat(  const KeepaliveInfo* list)
 
     if( !result || result->messgae.code != kSuccessRequest) {
 
+        TVT_LOG_ERROR("gb heartbeat response invalid"
+                      << " device=" << m_strGBCode
+                      << " remote_name=" << m_sip_connect_param->sip_code
+                      << " remote=" << m_strIP << ":" << m_sip_connect_param->port
+                      << " has_result=" << (result ? 1 : 0)
+                      << " sip_code=" << (result ? result->messgae.code : -1));
 
         code = kGbResponseCodeError;
 
 
+    }
+    else {
+        TVT_LOG_INFO("gb heartbeat response ok"
+                     << " device=" << m_strGBCode
+                     << " remote_name=" << m_sip_connect_param->sip_code
+                     << " remote=" << m_strIP << ":" << m_sip_connect_param->port
+                     << " sip_code=" << result->messgae.code);
     }
 
 

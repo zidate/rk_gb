@@ -170,7 +170,17 @@ int   CSipClientImpl::Notify(const  SipDialogKey* key ,const SipMessage* message
 // sip message
 int   CSipClientImpl::Message(const SipMessage* message, int timeout,  SipData** result)
 {
-    return  m_event_manager->SendSipResquest(
+    TVT_LOG_INFO("sip client message request"
+                 << " timeout=" << timeout
+                 << " has_result=" << (result != NULL ? 1 : 0)
+                 << " content_type=" << (message ? (int)message->content_type : -1)
+                 << " body_len=" << ((message && message->content) ? (int)strlen(message->content) : 0)
+                 << " local_name=" << m_client_info->local_name
+                 << " local=" << m_client_info->LocalIp << ":" << m_client_info->LocalPort
+                 << " remote_name=" << m_client_info->RemoteSipSrvName
+                 << " remote=" << m_client_info->RemoteIp << ":" << m_client_info->RemotePort);
+
+    const int ret = m_event_manager->SendSipResquest(
                                                                       kSipMessageMethod,
                                                                       timeout,
                                                                       m_client_info,
@@ -178,6 +188,11 @@ int   CSipClientImpl::Message(const SipMessage* message, int timeout,  SipData**
                                                                       message,
                                                                       result
                                                                     );
+    TVT_LOG_INFO("sip client message result"
+                 << " ret=" << ret
+                 << " remote_name=" << m_client_info->RemoteSipSrvName
+                 << " remote=" << m_client_info->RemoteIp << ":" << m_client_info->RemotePort);
+    return ret;
 }
 
 int CSipClientImpl::MessageToStr(const SipMessage* message, char** buf, size_t* buf_len)

@@ -1117,10 +1117,27 @@ int CSipEventManager::SendSipResquest( SipMethod method,
       }
 
       if(code!= kSipSuccess) {
+             if (method == kSipMessageMethod) {
+                 TVT_LOG_ERROR("sip request build failed"
+                               << " method=" << (int)method
+                               << " code=" << code
+                               << " remote_name=" << client_info->RemoteSipSrvName
+                               << " remote=" << client_info->RemoteIp << ":" << client_info->RemotePort);
+             }
              eXosip_unlock (m_sip_context);
              return code;
       }
-	
+
+      if (method == kSipMessageMethod) {
+          TVT_LOG_INFO("sip request built"
+                       << " method=" << (int)method
+                       << " timeout=" << timeout
+                       << " has_result=" << (result != NULL ? 1 : 0)
+                       << " remote_name=" << client_info->RemoteSipSrvName
+                       << " remote=" << client_info->RemoteIp << ":" << client_info->RemotePort
+                       << " body_len=" << ((message && message->content) ? (int)strlen(message->content) : 0));
+      }
+
 	  return  SendResquest(method, timeout, pRequest, client_info, key, message, result);
 }
 
@@ -1215,10 +1232,26 @@ int  CSipEventManager::SendResquest( SipMethod method,
 
      eXosip_unlock (m_sip_context);
 
+     if (method == kSipMessageMethod) {
+         TVT_LOG_INFO("sip request sent"
+                      << " method=" << (int)method
+                      << " code=" << code
+                      << " remote_name=" << client_info->RemoteSipSrvName
+                      << " remote=" << client_info->RemoteIp << ":" << client_info->RemotePort
+                      << " wait_response=" << (pCond != NULL ? 1 : 0));
+     }
+
 
      if( code != 0 ) {
             if( pCond ) {
                 m_waiter_manager->CancleWaitResponse(pCond);
+            }
+            if (method == kSipMessageMethod) {
+                TVT_LOG_ERROR("sip request send failed"
+                              << " method=" << (int)method
+                              << " code=" << code
+                              << " remote_name=" << client_info->RemoteSipSrvName
+                              << " remote=" << client_info->RemoteIp << ":" << client_info->RemotePort);
             }
             return kSipMessageSendFailed;
      }
@@ -1227,6 +1260,14 @@ int  CSipEventManager::SendResquest( SipMethod method,
     if( pCond ) {
          output = (SipData*)malloc(sizeof(SipData));
          code = m_waiter_manager->WaitResponse(pCond, timeout, output );
+         if (method == kSipMessageMethod) {
+             TVT_LOG_INFO("sip request wait response"
+                          << " method=" << (int)method
+                          << " wait_code=" << code
+                          << " sip_code=" << ((code == kSipSuccess && output) ? output->messgae.code : -1)
+                          << " remote_name=" << client_info->RemoteSipSrvName
+                          << " remote=" << client_info->RemoteIp << ":" << client_info->RemotePort);
+         }
     }
 
      if(result && code == kSipSuccess ) {
