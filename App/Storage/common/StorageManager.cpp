@@ -166,6 +166,46 @@ static int LoadRecordIndexEntries(const char *path,
 	return valid;
 }
 
+static void FormatPlaybackDebugTime(int epochSec,
+						 char *localBuf,
+						 size_t localBufSize,
+						 char *utcBuf,
+						 size_t utcBufSize)
+{
+	if (localBuf && localBufSize > 0)
+		localBuf[0] = '\0';
+	if (utcBuf && utcBufSize > 0)
+		utcBuf[0] = '\0';
+	if (epochSec <= 0)
+		return;
+
+	time_t value = (time_t)epochSec;
+	struct tm tmValue;
+	memset(&tmValue, 0, sizeof(tmValue));
+	if (localBuf && localBufSize > 0 && localtime_r(&value, &tmValue) != NULL)
+		snprintf(localBuf,
+		         localBufSize,
+		         "%04d-%02d-%02d %02d:%02d:%02d",
+		         tmValue.tm_year + 1900,
+		         tmValue.tm_mon + 1,
+		         tmValue.tm_mday,
+		         tmValue.tm_hour,
+		         tmValue.tm_min,
+		         tmValue.tm_sec);
+
+	memset(&tmValue, 0, sizeof(tmValue));
+	if (utcBuf && utcBufSize > 0 && gmtime_r(&value, &tmValue) != NULL)
+		snprintf(utcBuf,
+		         utcBufSize,
+		         "%04d-%02d-%02d %02d:%02d:%02d",
+		         tmValue.tm_year + 1900,
+		         tmValue.tm_mon + 1,
+		         tmValue.tm_mday,
+		         tmValue.tm_hour,
+		         tmValue.tm_min,
+		         tmValue.tm_sec);
+}
+
 
 static void *thread_playback(void *arg)
 {
@@ -3921,8 +3961,45 @@ void CStorageManager::PlaybackProc(int index)
 				{
 					const bool overlap = !(pastPbRcdInfo[i].iEndTime < pPlayManager->iStartTime ||
 					                       pastPbRcdInfo[i].iStartTime > pPlayManager->iEndTime);
+					if (i < 8 || overlap || pastPbRcdInfo[i].iStartTime > pPlayManager->iStartTime || pastPbRcdInfo[i].iStartTime > pPlayManager->iEndTime)
+					{
+						char reqStartLocal[32] = {0};
+						char reqStartUtc[32] = {0};
+						char reqEndLocal[32] = {0};
+						char reqEndUtc[32] = {0};
+						char fileStartLocal[32] = {0};
+						char fileStartUtc[32] = {0};
+						char fileEndLocal[32] = {0};
+						char fileEndUtc[32] = {0};
+						FormatPlaybackDebugTime(pPlayManager->iStartTime, reqStartLocal, sizeof(reqStartLocal), reqStartUtc, sizeof(reqStartUtc));
+						FormatPlaybackDebugTime(pPlayManager->iEndTime, reqEndLocal, sizeof(reqEndLocal), reqEndUtc, sizeof(reqEndUtc));
+						FormatPlaybackDebugTime(pastPbRcdInfo[i].iStartTime, fileStartLocal, sizeof(fileStartLocal), fileStartUtc, sizeof(fileStartUtc));
+						FormatPlaybackDebugTime(pastPbRcdInfo[i].iEndTime, fileEndLocal, sizeof(fileEndLocal), fileEndUtc, sizeof(fileEndUtc));
+						printf("playback scan index=%d/%d overlap=%d req_start=%d local=%s utc=%s req_end=%d local=%s utc=%s file_start=%d local=%s utc=%s file_end=%d local=%s utc=%s\n",
+						       i,
+						       rec_file_num,
+						       overlap ? 1 : 0,
+						       pPlayManager->iStartTime,
+						       reqStartLocal,
+						       reqStartUtc,
+						       pPlayManager->iEndTime,
+						       reqEndLocal,
+						       reqEndUtc,
+						       pastPbRcdInfo[i].iStartTime,
+						       fileStartLocal,
+						       fileStartUtc,
+						       pastPbRcdInfo[i].iEndTime,
+						       fileEndLocal,
+						       fileEndUtc);
+					}
 					if (overlap || pastPbRcdInfo[i].iStartTime > pPlayManager->iStartTime)
+					{
+						printf("playback scan break index=%d/%d reason=%s\n",
+						       i,
+						       rec_file_num,
+						       overlap ? "overlap" : "next_file_after_request_start");
 						break;
+					}
 					i++;
 				}
 				if( i >= rec_file_num )
@@ -3979,11 +4056,31 @@ void CStorageManager::PlaybackProc(int index)
 			//printf("pastPbRcdInfo[%d].iStartTime = %d, pPlayManager->iEndTime = %d\n", i, pastPbRcdInfo[i].iStartTime, pPlayManager->iEndTime);
 			if( pastPbRcdInfo[i].iStartTime > pPlayManager->iEndTime ) 	//超出播放的时间范围
 			{
-				printf("playback candidate window miss start=%d end=%d next_file_start=%d next_file_end=%d index=%d/%d\n",
+				char reqStartLocal[32] = {0};
+				char reqStartUtc[32] = {0};
+				char reqEndLocal[32] = {0};
+				char reqEndUtc[32] = {0};
+				char fileStartLocal[32] = {0};
+				char fileStartUtc[32] = {0};
+				char fileEndLocal[32] = {0};
+				char fileEndUtc[32] = {0};
+				FormatPlaybackDebugTime(pPlayManager->iStartTime, reqStartLocal, sizeof(reqStartLocal), reqStartUtc, sizeof(reqStartUtc));
+				FormatPlaybackDebugTime(pPlayManager->iEndTime, reqEndLocal, sizeof(reqEndLocal), reqEndUtc, sizeof(reqEndUtc));
+				FormatPlaybackDebugTime(pastPbRcdInfo[i].iStartTime, fileStartLocal, sizeof(fileStartLocal), fileStartUtc, sizeof(fileStartUtc));
+				FormatPlaybackDebugTime(pastPbRcdInfo[i].iEndTime, fileEndLocal, sizeof(fileEndLocal), fileEndUtc, sizeof(fileEndUtc));
+				printf("playback candidate window miss start=%d local=%s utc=%s end=%d local=%s utc=%s next_file_start=%d local=%s utc=%s next_file_end=%d local=%s utc=%s index=%d/%d\n",
 				       pPlayManager->iStartTime,
+				       reqStartLocal,
+				       reqStartUtc,
 				       pPlayManager->iEndTime,
+				       reqEndLocal,
+				       reqEndUtc,
 				       pastPbRcdInfo[i].iStartTime,
+				       fileStartLocal,
+				       fileStartUtc,
 				       pastPbRcdInfo[i].iEndTime,
+				       fileEndLocal,
+				       fileEndUtc,
 				       i,
 				       rec_file_num);
 				i = rec_file_num;
@@ -3991,9 +4088,19 @@ void CStorageManager::PlaybackProc(int index)
 			
 			if( i == rec_file_num) 	//自动播放到结尾,不退出循环,再次拖动进度条可以继续播放
 			{
-				printf("playback no candidate file matched start=%d end=%d current_index=%d rec_file_num=%d\n",
+				char reqStartLocal[32] = {0};
+				char reqStartUtc[32] = {0};
+				char reqEndLocal[32] = {0};
+				char reqEndUtc[32] = {0};
+				FormatPlaybackDebugTime(pPlayManager->iStartTime, reqStartLocal, sizeof(reqStartLocal), reqStartUtc, sizeof(reqStartUtc));
+				FormatPlaybackDebugTime(pPlayManager->iEndTime, reqEndLocal, sizeof(reqEndLocal), reqEndUtc, sizeof(reqEndUtc));
+				printf("playback no candidate file matched start=%d local=%s utc=%s end=%d local=%s utc=%s current_index=%d rec_file_num=%d\n",
 				       pPlayManager->iStartTime,
+				       reqStartLocal,
+				       reqStartUtc,
 				       pPlayManager->iEndTime,
+				       reqEndLocal,
+				       reqEndUtc,
 				       i,
 				       rec_file_num);
 				usleep(200000); 		//200ms
