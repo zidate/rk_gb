@@ -15,6 +15,7 @@
 #include <dirent.h>
 #include <unistd.h>
 #include <string.h>
+#include <algorithm>
 
 
 #pragma pack(1)
@@ -3837,19 +3838,32 @@ void CStorageManager::PlaybackProc(int index)
 		}
 		if (index_file_size > 0)
 		{
-			rec_file_num = index_file_size / sizeof(record_file_info_s);
+			const int raw_file_num = index_file_size / (int)sizeof(record_file_info_s);
+			int valid_file_num = 0;
+			for (int file_index = 0; file_index < raw_file_num; ++file_index)
+			{
+				if (s_astPbRcdFileInfo[file_index].iStartTime <= 0 || s_astPbRcdFileInfo[file_index].iEndTime <= 0)
+					continue;
+
+				s_astPbRcdFileInfo[valid_file_num++] = s_astPbRcdFileInfo[file_index];
+			}
+			std::sort(s_astPbRcdFileInfo, s_astPbRcdFileInfo + valid_file_num,
+				[](const record_file_info_s& lhs, const record_file_info_s& rhs) {
+					if (lhs.iStartTime != rhs.iStartTime)
+						return lhs.iStartTime < rhs.iStartTime;
+					if (lhs.iEndTime != rhs.iEndTime)
+						return lhs.iEndTime < rhs.iEndTime;
+					return lhs.iRecType < rhs.iRecType;
+				});
+			rec_file_num = valid_file_num;
 			AppInfo("rec_file_num: %d\n", rec_file_num);
-			int pos = 0;
-			while(0 == s_astPbRcdFileInfo[pos].iStartTime && pos < rec_file_num)
-				pos++;
-			AppInfo("pos: %d\n", pos);
-			if (pos < rec_file_num)
-				pastPbRcdInfo = &s_astPbRcdFileInfo[pos];
-			rec_file_num -= pos;
+			AppInfo("pos: %d\n", 0);
+			if (rec_file_num > 0)
+				pastPbRcdInfo = &s_astPbRcdFileInfo[0];
 			printf("playback index loaded path=%s raw_count=%d first_valid_pos=%d valid_count=%d start=%d end=%d\n",
 			       strPath,
-			       index_file_size / (int)sizeof(record_file_info_s),
-			       pos,
+			       raw_file_num,
+			       0,
 			       rec_file_num,
 			       pPlayManager->iStartTime,
 			       pPlayManager->iEndTime);
@@ -3874,14 +3888,16 @@ void CStorageManager::PlaybackProc(int index)
 			//第一个文件
 			if( true == bPlaybackFirtFile )
 			{
-				//printf("pastPbRcdInfo[%d].iEndTime = %d, pPlayManager->iStartTime = %d\n", i, pastPbRcdInfo[i].iEndTime, pPlayManager->iStartTime);
-				if( pastPbRcdInfo[i].iEndTime <= pPlayManager->iStartTime )
+				while (i < rec_file_num)
 				{
-					i++;
-					if( i >= rec_file_num )
+					const bool overlap = !(pastPbRcdInfo[i].iEndTime < pPlayManager->iStartTime ||
+					                       pastPbRcdInfo[i].iStartTime > pPlayManager->iEndTime);
+					if (overlap || pastPbRcdInfo[i].iStartTime > pPlayManager->iStartTime)
 						break;
-					continue;
+					i++;
 				}
+				if( i >= rec_file_num )
+					break;
 			}
 
 			i64LastFrameTimestamp_ms = 0;

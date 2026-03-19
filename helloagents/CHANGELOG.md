@@ -12,6 +12,7 @@
 - 修复 GB 回放回调缺少 session 身份导致旧存储线程 EOS 可能误清空新回放 session 的竞态，并增加 `stale eos ignored` 诊断日志。
 - 修复 MP4 回放 demux 将“读到 packet 但未产出有效 ES 数据”误判为 EOF 的问题，避免录像回放在首包前直接 `eos video=0 audio=0`。
 - 增加录像回放索引扫描与候选文件选择日志，便于定位“未选中文件”与“选中文件但 open/read 失败”的分界点。
+- 修复 GB 回放从 `index` 选择首个录像文件时的筛选逻辑，改为先排序再按时间重叠/后继文件选取，避免“查询能看到录像、回放却选不到文件”。
 
 ### 新增
 - 增加 issue bot 本机定时巡检脚本、Codex 修复器包装脚本与 cron 安装脚本，默认基于 `silver` 分支在隔离仓库中执行 triage / repair。
