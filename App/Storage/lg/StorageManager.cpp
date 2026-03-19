@@ -3661,17 +3661,18 @@ Int32 CStorageManager::SearchRecord(Int32 iStartTime, Int32 iEndTime, TRecordFil
 					if (0 == listRecordTimeInfo.size())
 					{
 						record_file_time_s stRecordTime;
-						memcpy(&stRecordTime, &s_astSchRcdFileInfo2[i], sizeof(record_file_time_s));
+						memcpy(&stRecordTime, &s_astSchRcdFileInfo2[n], sizeof(record_file_time_s));
 						listRecordTimeInfo.push_back(stRecordTime);
 					}
 					else
 					{
 						TRecordFileTimeList::iterator it = listRecordTimeInfo.end();
 						it--;
-						if (1 == it->iRecType ||  1 == s_astSchRcdFileInfo2[i].iRecType || s_astSchRcdFileInfo2[n].iStartTime > (it->iEndTime+1) )
+						if (1 == it->iRecType || 1 == s_astSchRcdFileInfo2[n].iRecType ||
+							s_astSchRcdFileInfo2[n].iStartTime > (it->iEndTime + 1))
 						{
 							record_file_time_s stRecordTime;
-							memcpy(&stRecordTime, &s_astSchRcdFileInfo2[i], sizeof(record_file_time_s));
+							memcpy(&stRecordTime, &s_astSchRcdFileInfo2[n], sizeof(record_file_time_s));
 							listRecordTimeInfo.push_back(stRecordTime);
 						}
 						else
@@ -4785,4 +4786,3 @@ Int32 CStorageManager::PauseDownload(Int32 iDownloadHandle, bool bPause)
 	
 	return 0;
 }
-

@@ -19,6 +19,7 @@
 #include <netinet/in.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 
@@ -2620,6 +2621,77 @@ static bool ParseGbHttpDate(const std::string& rawDate, time_t* outEpochSec)
     return true;
 }
 
+static bool ParseGbCompactDateTime(const std::string& text, time_t* outEpochSec)
+{
+    if (outEpochSec == NULL || text.size() != 14) {
+        return false;
+    }
+
+    for (size_t i = 0; i < text.size(); ++i) {
+        if (text[i] < '0' || text[i] > '9') {
+            return false;
+        }
+    }
+
+    struct tm tmValue;
+    memset(&tmValue, 0, sizeof(tmValue));
+    tmValue.tm_year = atoi(text.substr(0, 4).c_str()) - 1900;
+    tmValue.tm_mon = atoi(text.substr(4, 2).c_str()) - 1;
+    tmValue.tm_mday = atoi(text.substr(6, 2).c_str());
+    tmValue.tm_hour = atoi(text.substr(8, 2).c_str());
+    tmValue.tm_min = atoi(text.substr(10, 2).c_str());
+    tmValue.tm_sec = atoi(text.substr(12, 2).c_str());
+    tmValue.tm_isdst = -1;
+
+    const time_t epochSec = mktime(&tmValue);
+    if (epochSec == static_cast<time_t>(-1) || epochSec <= 0) {
+        return false;
+    }
+
+    *outEpochSec = epochSec;
+    return true;
+}
+
+static bool ParseGbQueryDateTime(const char* text, time_t* outEpochSec)
+{
+    if (outEpochSec == NULL || text == NULL || text[0] == '\0') {
+        return false;
+    }
+
+    const std::string raw(text);
+    return ParseGbHttpDate(raw, outEpochSec) || ParseGbCompactDateTime(raw, outEpochSec);
+}
+
+static void FormatGbRecordTime(time_t epochSec, char* dst, size_t dstSize)
+{
+    FormatEpochIsoTime(epochSec, false, dst, dstSize);
+}
+
+static int ApplyGbRegisterTimeSyncLocally(time_t epochSec)
+{
+    if (epochSec <= 0) {
+        return -1;
+    }
+
+    struct timeval tv;
+    memset(&tv, 0, sizeof(tv));
+    tv.tv_sec = epochSec;
+    tv.tv_usec = 0;
+
+    if (settimeofday(&tv, NULL) != 0) {
+        return (errno != 0) ? -errno : -2;
+    }
+
+    const int saveRet = Storage_Module_SaveSystemTime(true);
+    if (saveRet != 0) {
+        printf("[ProtocolManager] gb register time sync persist failed ret=%d epoch=%lld\n",
+               saveRet,
+               (long long)epochSec);
+    }
+
+    return 0;
+}
+
 
 
 static const char* GbSubscribeTypeToString(SubscribeType type)
@@ -3660,13 +3732,13 @@ int ProtocolManager::QueryGbRegisterDate(std::string& outDate) const
 int ProtocolManager::PrepareGbRegisterTimeSync(const std::string& rawDate)
 {
     if (rawDate.empty()) {
-        printf("[ProtocolManager] gb register time sync skip reason=empty_date_header dry_run=1\n");
+        printf("[ProtocolManager] gb register time sync skip reason=empty_date_header dry_run=0\n");
         return -1;
     }
 
     time_t epochSec = 0;
     if (!ParseGbHttpDate(rawDate, &epochSec)) {
-        printf("[ProtocolManager] gb register time sync parse failed raw=%s dry_run=1\n",
+        printf("[ProtocolManager] gb register time sync parse failed raw=%s dry_run=0\n",
                rawDate.c_str());
         return -2;
     }
@@ -3681,9 +3753,9 @@ int ProtocolManager::PrepareGbRegisterTimeSync(const std::string& rawDate)
     info.utc_time = utcTime;
     info.local_time = localTime;
     info.epoch_sec = static_cast<int64_t>(epochSec);
-    info.dry_run = true;
+    info.dry_run = false;
 
-    printf("[ProtocolManager] gb register time sync prepared raw=%s utc=%s local=%s epoch=%lld action=settimeofday dry_run=1\n",
+    printf("[ProtocolManager] gb register time sync prepared raw=%s utc=%s local=%s epoch=%lld action=settimeofday dry_run=0\n",
            rawDate.c_str(),
            utcTime,
            localTime,
@@ -3694,11 +3766,14 @@ int ProtocolManager::PrepareGbRegisterTimeSync(const std::string& rawDate)
         printf("[ProtocolManager] gb register time sync hook ret=%d dry_run=%d\n",
                hookRet,
                info.dry_run ? 1 : 0);
+        return hookRet;
     } else {
-        printf("[ProtocolManager] gb register time sync hook not_set dry_run=%d\n",
+        const int applyRet = ApplyGbRegisterTimeSyncLocally(epochSec);
+        printf("[ProtocolManager] gb register time sync local_apply ret=%d dry_run=%d\n",
+               applyRet,
                info.dry_run ? 1 : 0);
+        return applyRet;
     }
-    return 0;
 }
 
 
@@ -6631,6 +6706,8 @@ int ProtocolManager::ResponseGbQueryRecord(ResponseHandle handle, const QueryPar
 
     memset(&recordIndex, 0, sizeof(recordIndex));
 
+    std::vector<RecordParam> records;
+
 
 
     std::string gbCode = SafeStr(param->GBCode, sizeof(param->GBCode));
@@ -6650,10 +6727,71 @@ int ProtocolManager::ResponseGbQueryRecord(ResponseHandle handle, const QueryPar
 
 
     CopyBounded(recordIndex.GBCode, sizeof(recordIndex.GBCode), gbCode);
+    const std::string deviceName = ResolveGbDeviceName(m_cfg, m_gb_device_name);
+    const std::string queryType = ToLowerCopy(
+        SafeStr(param->query_descri.record_index.Type, sizeof(param->query_descri.record_index.Type)));
+    const std::string startText = SafeStr(param->query_descri.record_index.StartTime,
+                                          sizeof(param->query_descri.record_index.StartTime));
+    const std::string endText = SafeStr(param->query_descri.record_index.EndTime,
+                                        sizeof(param->query_descri.record_index.EndTime));
 
-    recordIndex.Num = 0;
+    time_t startEpoch = 0;
+    time_t endEpoch = 0;
+    if (!ParseGbQueryDateTime(param->query_descri.record_index.StartTime, &startEpoch) ||
+        !ParseGbQueryDateTime(param->query_descri.record_index.EndTime, &endEpoch)) {
+        printf("[ProtocolManager] gb record query invalid time gb=%s start=%s end=%s type=%s\n",
+               gbCode.c_str(),
+               startText.c_str(),
+               endText.c_str(),
+               queryType.c_str());
+        return -67;
+    }
 
-    recordIndex.record_list = NULL;
+    if (endEpoch < startEpoch) {
+        printf("[ProtocolManager] gb record query invalid range gb=%s start=%s end=%s\n",
+               gbCode.c_str(),
+               startText.c_str(),
+               endText.c_str());
+        return -68;
+    }
+
+    TRecordFileTimeList recordTimeList;
+    const int searchRet = Storage_Module_SearchRecordOnTime((Int32)startEpoch,
+                                                            (Int32)endEpoch,
+                                                            recordTimeList);
+    records.reserve(recordTimeList.size());
+    for (TRecordFileTimeList::const_iterator it = recordTimeList.begin();
+         it != recordTimeList.end();
+         ++it) {
+        RecordParam item;
+        memset(&item, 0, sizeof(item));
+
+        char startBuf[32] = {0};
+        char endBuf[32] = {0};
+        FormatGbRecordTime((time_t)it->iStartTime, startBuf, sizeof(startBuf));
+        FormatGbRecordTime((time_t)it->iEndTime, endBuf, sizeof(endBuf));
+
+        CopyBounded(item.DeviceID, sizeof(item.DeviceID), gbCode);
+        CopyBounded(item.StartTime, sizeof(item.StartTime), startBuf);
+        CopyBounded(item.EndTime, sizeof(item.EndTime), endBuf);
+        CopyBounded(item.Type,
+                    sizeof(item.Type),
+                    (queryType.empty() || queryType == "all") ? "time" : queryType);
+        CopyBounded(item.Name, sizeof(item.Name), deviceName);
+        item.Secrecy = 0;
+        records.push_back(item);
+    }
+
+    recordIndex.Num = static_cast<unsigned int>(records.size());
+    recordIndex.record_list = records.empty() ? NULL : &records[0];
+
+    printf("[ProtocolManager] gb record query gb=%s start=%s end=%s type=%s search_ret=%d result=%u\n",
+           gbCode.c_str(),
+           startText.c_str(),
+           endText.c_str(),
+           queryType.c_str(),
+           searchRet,
+           recordIndex.Num);
 
 
 
