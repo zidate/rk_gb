@@ -4048,7 +4048,7 @@ void CStorageManager::PlaybackProc(int index)
 				}
 				else
 					{
-						snprintf(strRecordFilePath, sizeof(strRecordFilePath), __STORAGE_SD_MOUNT_PATH__"/DCIM/%04d/%02d/%02d/%04d%02d%02d%02d%02d%02d-%04d%02d%02d%02d%02d%02d_ALARM.mp4", 
+						snprintf(strRecordFilePath, sizeof(strRecordFilePath), __STORAGE_SD_MOUNT_PATH__"/DCIM/%04d/%02d/%02d/%04d%02d%02d%02d%02d%02d-%04d%02d%02d%02d%02d%02d_ALARM.mp4",
 													tmStart.tm_year+1900, tmStart.tm_mon+1, tmStart.tm_mday, 
 													tmStart.tm_year+1900, tmStart.tm_mon+1, tmStart.tm_mday, tmStart.tm_hour, tmStart.tm_min, tmStart.tm_sec, 
 													tmEnd.tm_year+1900, tmEnd.tm_mon+1, tmEnd.tm_mday, tmEnd.tm_hour, tmEnd.tm_min, tmEnd.tm_sec);
