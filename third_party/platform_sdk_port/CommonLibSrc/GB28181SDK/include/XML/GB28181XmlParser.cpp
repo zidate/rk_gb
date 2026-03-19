@@ -1520,10 +1520,16 @@ void CGB28181XmlParser::PackDeviceRecordIndexResponse(int sn ,const RecordIndex*
    int i = 0;
    for(  ;i< (int)index->Num; i++) {
         slothxml::record_list_t  one;
-        one.Address = "null";
         one.DeviceID = index->record_list[i].DeviceID;
         one.EndTime = index->record_list[i].EndTime;
-        one.FilePath = "null";
+        one.FilePath = index->record_list[i].FilePath;
+        if (one.FilePath.empty()) {
+            one.skip_FilePath();
+        }
+        one.Address = index->record_list[i].Address;
+        if (one.Address.empty()) {
+            one.skip_Address();
+        }
         one.Name = index->record_list[i].Name;
         one.Secrecy = index->record_list[i].Secrecy;
         one.StartTime = index->record_list[i].StartTime;

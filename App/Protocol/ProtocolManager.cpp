@@ -8,6 +8,7 @@
 
 #include <string.h>
 
+#include <algorithm>
 #include <chrono>
 
 #include <time.h>
@@ -2665,6 +2666,207 @@ static bool ParseGbQueryDateTime(const char* text, time_t* outEpochSec)
 static void FormatGbRecordTime(time_t epochSec, char* dst, size_t dstSize)
 {
     FormatEpochIsoTime(epochSec, false, dst, dstSize);
+}
+
+static bool IsGbAlarmRecordType(int recType)
+{
+    return recType == 1;
+}
+
+static bool MatchGbRecordQueryType(const std::string& queryType, int recType)
+{
+    if (queryType.empty() || queryType == "all") {
+        return true;
+    }
+
+    if (queryType == "alarm") {
+        return IsGbAlarmRecordType(recType);
+    }
+
+    if (queryType == "time") {
+        return !IsGbAlarmRecordType(recType);
+    }
+
+    return false;
+}
+
+static const char* ResolveGbRecordTypeText(int recType)
+{
+    return IsGbAlarmRecordType(recType) ? "alarm" : "time";
+}
+
+static bool BuildGbRecordFilePath(int startEpochSec,
+                                  int endEpochSec,
+                                  int recType,
+                                  char* buffer,
+                                  size_t bufferSize)
+{
+    if (buffer == NULL || bufferSize == 0 || startEpochSec <= 0 || endEpochSec <= 0) {
+        return false;
+    }
+
+    time_t startTime = static_cast<time_t>(startEpochSec);
+    time_t endTime = static_cast<time_t>(endEpochSec);
+    struct tm startTm;
+    struct tm endTm;
+    memset(&startTm, 0, sizeof(startTm));
+    memset(&endTm, 0, sizeof(endTm));
+    if (localtime_r(&startTime, &startTm) == NULL || localtime_r(&endTime, &endTm) == NULL) {
+        return false;
+    }
+
+    const char* suffix = IsGbAlarmRecordType(recType) ? "_ALARM" : "";
+    const int written = snprintf(buffer,
+                                 bufferSize,
+                                 __STORAGE_SD_MOUNT_PATH__ "/DCIM/%04d/%02d/%02d/"
+                                 "%04d%02d%02d%02d%02d%02d-%04d%02d%02d%02d%02d%02d%s.mp4",
+                                 startTm.tm_year + 1900,
+                                 startTm.tm_mon + 1,
+                                 startTm.tm_mday,
+                                 startTm.tm_year + 1900,
+                                 startTm.tm_mon + 1,
+                                 startTm.tm_mday,
+                                 startTm.tm_hour,
+                                 startTm.tm_min,
+                                 startTm.tm_sec,
+                                 endTm.tm_year + 1900,
+                                 endTm.tm_mon + 1,
+                                 endTm.tm_mday,
+                                 endTm.tm_hour,
+                                 endTm.tm_min,
+                                 endTm.tm_sec,
+                                 suffix);
+    if (written <= 0 || static_cast<size_t>(written) >= bufferSize) {
+        if (bufferSize > 0) {
+            buffer[0] = '\0';
+        }
+        return false;
+    }
+
+    return true;
+}
+
+static std::string GetGbRecordFileName(const std::string& filePath)
+{
+    if (filePath.empty()) {
+        return "";
+    }
+
+    const size_t pos = filePath.find_last_of('/');
+    if (pos == std::string::npos) {
+        return filePath;
+    }
+
+    return filePath.substr(pos + 1);
+}
+
+static void AppendGbRecordEntriesFromIndexFile(const char* indexPath,
+                                               time_t queryStart,
+                                               time_t queryEnd,
+                                               const std::string& queryType,
+                                               std::vector<record_file_info_s>* entries)
+{
+    if (indexPath == NULL || entries == NULL) {
+        return;
+    }
+
+    FILE* fp = fopen(indexPath, "rb");
+    if (fp == NULL) {
+        return;
+    }
+
+    record_file_info_s item;
+    while (fread(&item, sizeof(item), 1, fp) == 1) {
+        if (item.iStartTime <= 0 || item.iEndTime <= 0) {
+            continue;
+        }
+
+        if (!MatchGbRecordQueryType(queryType, item.iRecType)) {
+            continue;
+        }
+
+        if (static_cast<time_t>(item.iEndTime) < queryStart ||
+            static_cast<time_t>(item.iStartTime) > queryEnd) {
+            continue;
+        }
+
+        entries->push_back(item);
+    }
+
+    fclose(fp);
+}
+
+static void CollectGbRecordEntries(time_t queryStart,
+                                   time_t queryEnd,
+                                   const std::string& queryType,
+                                   std::vector<record_file_info_s>* entries)
+{
+    if (entries == NULL || queryStart <= 0 || queryEnd < queryStart) {
+        return;
+    }
+
+    entries->clear();
+
+    struct tm tmCursor;
+    memset(&tmCursor, 0, sizeof(tmCursor));
+    time_t cursor = queryStart;
+    if (localtime_r(&cursor, &tmCursor) == NULL) {
+        return;
+    }
+    tmCursor.tm_hour = 0;
+    tmCursor.tm_min = 0;
+    tmCursor.tm_sec = 0;
+    time_t dayStart = mktime(&tmCursor);
+    if (dayStart == static_cast<time_t>(-1)) {
+        return;
+    }
+
+    while (dayStart <= queryEnd) {
+        if (localtime_r(&dayStart, &tmCursor) == NULL) {
+            break;
+        }
+
+        char indexPath[128] = {0};
+        snprintf(indexPath,
+                 sizeof(indexPath),
+                 __STORAGE_SD_MOUNT_PATH__ "/DCIM/%04d/%02d/%02d/index",
+                 tmCursor.tm_year + 1900,
+                 tmCursor.tm_mon + 1,
+                 tmCursor.tm_mday);
+        AppendGbRecordEntriesFromIndexFile(indexPath, queryStart, queryEnd, queryType, entries);
+
+        if (queryType.empty() || queryType == "all" || queryType == "alarm") {
+            char alarmIndexPath[128] = {0};
+            snprintf(alarmIndexPath,
+                     sizeof(alarmIndexPath),
+                     __STORAGE_SD_MOUNT_PATH__ "/DCIM/%04d/%02d/%02d/alarm_index",
+                     tmCursor.tm_year + 1900,
+                     tmCursor.tm_mon + 1,
+                     tmCursor.tm_mday);
+            AppendGbRecordEntriesFromIndexFile(alarmIndexPath, queryStart, queryEnd, queryType, entries);
+        }
+
+        ++tmCursor.tm_mday;
+        tmCursor.tm_hour = 0;
+        tmCursor.tm_min = 0;
+        tmCursor.tm_sec = 0;
+        dayStart = mktime(&tmCursor);
+        if (dayStart == static_cast<time_t>(-1)) {
+            break;
+        }
+    }
+
+    std::sort(entries->begin(),
+              entries->end(),
+              [](const record_file_info_s& lhs, const record_file_info_s& rhs) {
+                  if (lhs.iStartTime != rhs.iStartTime) {
+                      return lhs.iStartTime < rhs.iStartTime;
+                  }
+                  if (lhs.iEndTime != rhs.iEndTime) {
+                      return lhs.iEndTime < rhs.iEndTime;
+                  }
+                  return lhs.iRecType < rhs.iRecType;
+              });
 }
 
 static int ApplyGbRegisterTimeSyncLocally(time_t epochSec)
@@ -6755,13 +6957,15 @@ int ProtocolManager::ResponseGbQueryRecord(ResponseHandle handle, const QueryPar
         return -68;
     }
 
-    TRecordFileTimeList recordTimeList;
-    const int searchRet = Storage_Module_SearchRecordOnTime((Int32)startEpoch,
-                                                            (Int32)endEpoch,
-                                                            recordTimeList);
-    records.reserve(recordTimeList.size());
-    for (TRecordFileTimeList::const_iterator it = recordTimeList.begin();
-         it != recordTimeList.end();
+    std::string recordAddress;
+    ResolveGbResponseLocalIp(m_cfg.gb_register.server_ip, m_cfg.gb_register.server_port, recordAddress);
+
+    std::vector<record_file_info_s> recordEntries;
+    CollectGbRecordEntries(startEpoch, endEpoch, queryType, &recordEntries);
+
+    records.reserve(recordEntries.size());
+    for (std::vector<record_file_info_s>::const_iterator it = recordEntries.begin();
+         it != recordEntries.end();
          ++it) {
         RecordParam item;
         memset(&item, 0, sizeof(item));
@@ -6771,27 +6975,38 @@ int ProtocolManager::ResponseGbQueryRecord(ResponseHandle handle, const QueryPar
         FormatGbRecordTime((time_t)it->iStartTime, startBuf, sizeof(startBuf));
         FormatGbRecordTime((time_t)it->iEndTime, endBuf, sizeof(endBuf));
 
+        char filePath[ROUTE_LEN] = {0};
+        BuildGbRecordFilePath(it->iStartTime, it->iEndTime, it->iRecType, filePath, sizeof(filePath));
+        const std::string filePathText = filePath;
+        const std::string fileName = GetGbRecordFileName(filePathText);
+
         CopyBounded(item.DeviceID, sizeof(item.DeviceID), gbCode);
         CopyBounded(item.StartTime, sizeof(item.StartTime), startBuf);
         CopyBounded(item.EndTime, sizeof(item.EndTime), endBuf);
-        CopyBounded(item.Type,
-                    sizeof(item.Type),
-                    (queryType.empty() || queryType == "all") ? "time" : queryType);
-        CopyBounded(item.Name, sizeof(item.Name), deviceName);
+        CopyBounded(item.FilePath, sizeof(item.FilePath), filePathText);
+        CopyBounded(item.Address, sizeof(item.Address), recordAddress);
+        CopyBounded(item.Type, sizeof(item.Type), ResolveGbRecordTypeText(it->iRecType));
+        CopyBounded(item.Name, sizeof(item.Name), fileName.empty() ? deviceName : fileName);
         item.Secrecy = 0;
         records.push_back(item);
+
+        printf("[ProtocolManager] gb record query item start=%s end=%s type=%s path=%s\n",
+               startBuf,
+               endBuf,
+               ResolveGbRecordTypeText(it->iRecType),
+               filePathText.c_str());
     }
 
     recordIndex.Num = static_cast<unsigned int>(records.size());
     recordIndex.record_list = records.empty() ? NULL : &records[0];
 
-    printf("[ProtocolManager] gb record query gb=%s start=%s end=%s type=%s search_ret=%d result=%u\n",
+    printf("[ProtocolManager] gb record query gb=%s start=%s end=%s type=%s result=%u addr=%s\n",
            gbCode.c_str(),
            startText.c_str(),
            endText.c_str(),
            queryType.c_str(),
-           searchRet,
-           recordIndex.Num);
+           recordIndex.Num,
+           recordAddress.c_str());
 
 
 
@@ -6810,6 +7025,10 @@ int ProtocolManager::ResponseGbQueryRecord(ResponseHandle handle, const QueryPar
 
 
     const int ret = m_gb_client_sdk->ResponseRecordIndex(handle, &recordIndex, transMode);
+
+    printf("[ProtocolManager] gb record query ResponseRecordIndex raw_ret=%d success=%d\n",
+           ret,
+           IsGbSdkSuccess(ret) ? 1 : 0);
 
     return IsGbSdkSuccess(ret) ? 0 : ret;
 
