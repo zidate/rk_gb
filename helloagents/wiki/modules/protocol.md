@@ -17,3 +17,4 @@
 - SIP `INVITE` 应答不要被同步媒体建链阻塞。
 - GB 回放音频不能按原始 PCM 直接塞给 RTP PS；应与实时流保持一致，按 SDP/`gb.live.audio_codec` 输出 `G711A` 或 `G711U`。
 - GB 回放/下载回调需要带 session 身份；否则旧存储线程收尾时的 EOS 可能误伤新回放 session，表现为 ACK 已到但媒体立即 `eos video=0 audio=0`。
+- GB 回放依赖 MP4 demux 连续读到有效 ES；对“packet 已读到但当前未产出有效音视频载荷”的场景不能直接当 EOF，否则会在首包前提前结束回放。

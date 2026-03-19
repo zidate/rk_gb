@@ -423,12 +423,18 @@ int CMp4Demuxer::Read(unsigned char *pBuffer, int iBufferSize, Mp4DemuxerFrameIn
 		return -1;
 
 	int ret;
-	int iDataLen = 0;
 	unsigned char aac_adts[7] = {0};
 
-	ret = av_read_frame(m_pAVFmtCtx, m_pAVPacket);
-	if( 0 == ret )
+	while (1)
 	{
+		int iDataLen = 0;
+
+		ret = av_read_frame(m_pAVFmtCtx, m_pAVPacket);
+		if( 0 != ret )
+		{
+			break;
+		}
+
 		if(m_pAVPacket->stream_index == m_iAudioindex)
 		{
 //			printf("audio-------pts : %lld,    dts : %lld,	  duration : %lld\n", m_pAVPacket->pts, m_pAVPacket->dts, m_pAVPacket->duration);
@@ -600,7 +606,23 @@ int CMp4Demuxer::Read(unsigned char *pBuffer, int iBufferSize, Mp4DemuxerFrameIn
 */
 			
 		}
-		av_packet_unref(m_pAVPacket);
+
+		{
+			const int packetStreamIndex = m_pAVPacket->stream_index;
+			const long long packetPts = (long long)m_pAVPacket->pts;
+			const int packetSize = m_pAVPacket->size;
+			av_packet_unref(m_pAVPacket);
+
+			if (iDataLen > 0)
+			{
+				return iDataLen;
+			}
+
+			printf("demux skip empty packet stream_index=%d pts=%lld size=%d\n",
+			       packetStreamIndex,
+			       packetPts,
+			       packetSize);
+		}
 	}
 
 	if( ret < 0 )
@@ -610,7 +632,7 @@ int CMp4Demuxer::Read(unsigned char *pBuffer, int iBufferSize, Mp4DemuxerFrameIn
 		printf("demux read end/error ret=%d err=%s\n", ret, errStr);
 	}
 
-	return iDataLen;
+	return -1;
 }
 
 int CMp4Demuxer::Close()
@@ -649,4 +671,3 @@ int CMp4Demuxer::Close()
 	
 	return 0;
 }
-
