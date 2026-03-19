@@ -8649,33 +8649,65 @@ void ProtocolManager::HandleGbReplayStorageFrame(unsigned char* data, int size, 
 
         const std::string audioCodec = NormalizeCodec(m_cfg.gb_live.audio_codec);
 
-        if (audioCodec != "pcm") {
+        const uint8_t* audioData = (const uint8_t*)data;
 
-            bool firstSkipLog = false;
+        size_t audioSize = (size_t)size;
 
-            {
+        std::vector<uint8_t> encodedAudio;
 
-                std::lock_guard<std::mutex> lock(m_gb_replay_mutex);
+        if (audioCodec == "g711a") {
 
-                if (m_gb_replay_session.active) {
+            encodedAudio.resize(audioSize + 16U);
 
-                    firstSkipLog = (m_gb_replay_session.sent_audio_frames == 0);
+            const int outLen = DG_encode_g711a((char*)data, (char*)&encodedAudio[0], size);
 
-                    ++m_gb_replay_session.sent_audio_frames;
+            if (outLen <= 0) {
 
-                }
+                printf("[ProtocolManager] gb replay audio encode failed codec=%s size=%d\n",
+
+                       m_cfg.gb_live.audio_codec.c_str(),
+
+                       size);
+
+                return;
+
+            }
+
+            encodedAudio.resize((size_t)outLen);
+
+            audioData = &encodedAudio[0];
+
+            audioSize = encodedAudio.size();
+
+        } else if (audioCodec == "g711u") {
+
+            encodedAudio.resize(audioSize + 16U);
+
+            const int outLen = DG_encode_g711u((char*)data, (char*)&encodedAudio[0], size);
+
+            if (outLen <= 0) {
+
+                printf("[ProtocolManager] gb replay audio encode failed codec=%s size=%d\n",
+
+                       m_cfg.gb_live.audio_codec.c_str(),
+
+                       size);
+
+                return;
 
             }
 
+            encodedAudio.resize((size_t)outLen);
 
+            audioData = &encodedAudio[0];
 
-            if (firstSkipLog) {
+            audioSize = encodedAudio.size();
 
-                printf("[ProtocolManager] gb replay audio skip, only pcm passthrough supported current=%s\n",
+        } else {
 
-                       m_cfg.gb_live.audio_codec.c_str());
+            printf("[ProtocolManager] gb replay audio unsupported codec=%s, expect g711a/g711u by sdp\n",
 
-            }
+                   m_cfg.gb_live.audio_codec.c_str());
 
             return;
 
@@ -8683,7 +8715,7 @@ void ProtocolManager::HandleGbReplayStorageFrame(unsigned char* data, int size, 
 
 
 
-        ret = m_rtp_ps_sender.SendAudioFrame((const uint8_t*)data, (size_t)size, pts90k);
+        ret = m_rtp_ps_sender.SendAudioFrame(audioData, audioSize, pts90k);
 
         if (ret == 0) {
 

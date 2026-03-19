@@ -15,3 +15,4 @@
 ## 注意事项
 - TCP 实时流要区分 `setup:active` 与 `setup:passive` 方向。
 - SIP `INVITE` 应答不要被同步媒体建链阻塞。
+- GB 回放音频不能按原始 PCM 直接塞给 RTP PS；应与实时流保持一致，按 SDP/`gb.live.audio_codec` 输出 `G711A` 或 `G711U`。

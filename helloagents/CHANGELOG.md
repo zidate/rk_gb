@@ -8,6 +8,7 @@
 - 修正 GB28181 实时流在 TCP 协商场景下的 SIP/媒体建立时序。
 - 修复 GB 注册时间同步仅 dry-run 不落地的问题，并补齐录像文件列表查询响应。
 - 修复 LG 存储分支录像时间搜索误用索引导致的查询结果错乱。
+- 修复 GB 回放音频发送逻辑，改为按 SDP/`gb.live.audio_codec` 将回放 PCM 编码为 G711A/G711U 后再送入 RTP PS。
 
 ### 新增
 - 增加 issue bot 本机定时巡检脚本、Codex 修复器包装脚本与 cron 安装脚本，默认基于 `silver` 分支在隔离仓库中执行 triage / repair。
