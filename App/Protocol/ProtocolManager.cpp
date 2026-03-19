@@ -5058,6 +5058,32 @@ int ProtocolManager::HandleGbPlayControl(StreamHandle handle, const PlayCtrlCmd*
 
                                : Storage_Module_PausePlaybackOnFile(session.storage_handle, false);
 
+        if (ret == 0) {
+
+            std::lock_guard<std::mutex> lock(m_gb_replay_mutex);
+
+            if (m_gb_replay_session.active &&
+
+                m_gb_replay_session.stream_handle != NULL &&
+
+                (handle == NULL || handle == m_gb_replay_session.stream_handle)) {
+
+                m_gb_replay_session.acked = true;
+
+                printf("[ProtocolManager] gb replay play-start acked type=%s gb=%s handle=%p storage=%d\n",
+
+                       m_gb_replay_session.download ? "download" : "playback",
+
+                       m_gb_replay_session.gb_code.c_str(),
+
+                       m_gb_replay_session.stream_handle,
+
+                       m_gb_replay_session.storage_handle);
+
+            }
+
+        }
+
         break;
 
     case kPlayFast:
