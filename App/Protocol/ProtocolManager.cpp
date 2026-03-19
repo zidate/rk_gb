@@ -2665,7 +2665,7 @@ static bool ParseGbQueryDateTime(const char* text, time_t* outEpochSec)
 
 static void FormatGbRecordTime(time_t epochSec, char* dst, size_t dstSize)
 {
-    FormatEpochIsoTime(epochSec, false, dst, dstSize);
+    FormatEpochIsoTime(epochSec, true, dst, dstSize);
 }
 
 static bool IsGbAlarmRecordType(int recType)
