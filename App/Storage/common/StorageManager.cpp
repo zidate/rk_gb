@@ -3846,6 +3846,13 @@ void CStorageManager::PlaybackProc(int index)
 			if (pos < rec_file_num)
 				pastPbRcdInfo = &s_astPbRcdFileInfo[pos];
 			rec_file_num -= pos;
+			printf("playback index loaded path=%s raw_count=%d first_valid_pos=%d valid_count=%d start=%d end=%d\n",
+			       strPath,
+			       index_file_size / (int)sizeof(record_file_info_s),
+			       pos,
+			       rec_file_num,
+			       pPlayManager->iStartTime,
+			       pPlayManager->iEndTime);
 		}
 		else
 		{
@@ -3930,6 +3937,11 @@ void CStorageManager::PlaybackProc(int index)
 			
 			if( i == rec_file_num) 	//自动播放到结尾,不退出循环,再次拖动进度条可以继续播放
 			{
+				printf("playback no candidate file matched start=%d end=%d current_index=%d rec_file_num=%d\n",
+				       pPlayManager->iStartTime,
+				       pPlayManager->iEndTime,
+				       i,
+				       rec_file_num);
 				usleep(200000); 		//200ms
 				continue;
 			}
@@ -3954,14 +3966,21 @@ void CStorageManager::PlaybackProc(int index)
 													tmEnd.tm_year+1900, tmEnd.tm_mon+1, tmEnd.tm_mday, tmEnd.tm_hour, tmEnd.tm_min, tmEnd.tm_sec);
 				}
 				else
-				{
-					snprintf(strRecordFilePath, sizeof(strRecordFilePath), __STORAGE_SD_MOUNT_PATH__"/DCIM/%04d/%02d/%02d/%04d%02d%02d%02d%02d%02d-%04d%02d%02d%02d%02d%02d_ALARM.mp4", 
+					{
+						snprintf(strRecordFilePath, sizeof(strRecordFilePath), __STORAGE_SD_MOUNT_PATH__"/DCIM/%04d/%02d/%02d/%04d%02d%02d%02d%02d%02d-%04d%02d%02d%02d%02d%02d_ALARM.mp4", 
 													tmStart.tm_year+1900, tmStart.tm_mon+1, tmStart.tm_mday, 
 													tmStart.tm_year+1900, tmStart.tm_mon+1, tmStart.tm_mday, tmStart.tm_hour, tmStart.tm_min, tmStart.tm_sec, 
 													tmEnd.tm_year+1900, tmEnd.tm_mon+1, tmEnd.tm_mday, tmEnd.tm_hour, tmEnd.tm_min, tmEnd.tm_sec);
+					}
+					printf("playback candidate file index=%d/%d file_start=%d file_end=%d rec_type=%d path=%s\n",
+					       i,
+					       rec_file_num,
+					       stRecordFileInfo.iStartTime,
+					       stRecordFileInfo.iEndTime,
+					       stRecordFileInfo.iRecType,
+					       strRecordFilePath);
+					AppErr("[record playback] open %s\n", strRecordFilePath);
 				}
-				AppErr("[record playback] open %s\n", strRecordFilePath);
-			}
 
 			{//for debug
 				gettimeofday(&tv, NULL);
