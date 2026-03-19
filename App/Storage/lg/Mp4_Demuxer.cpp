@@ -121,6 +121,11 @@ int CMp4Demuxer::Open(const char *pFile, STORAGE_VIDEO_ENC_TYPE_E eVideoEncType)
 		name = "h264_mp4toannexb";
 	else
 		name = "hevc_mp4toannexb";
+
+	printf("demux open request file=%s video_enc=%d bsf=%s\n",
+	       pFile ? pFile : "(null)",
+	       (int)eVideoEncType,
+	       name ? name : "(null)");
 	
 	ret = avformat_open_input(&m_pAVFmtCtx, pFile, NULL, NULL);
 	if(ret < 0)
@@ -130,6 +135,7 @@ int CMp4Demuxer::Open(const char *pFile, STORAGE_VIDEO_ENC_TYPE_E eVideoEncType)
 		char errStr[128] = "";
 		av_strerror(ret, errStr, 128);
 		printf("err : %s\n", errStr);
+		printf("demux open failed file=%s ret=%d err=%s\n", pFile ? pFile : "(null)", ret, errStr);
 		
 		goto fail;
 	}
@@ -138,6 +144,7 @@ int CMp4Demuxer::Open(const char *pFile, STORAGE_VIDEO_ENC_TYPE_E eVideoEncType)
 	if(ret < 0)
 	{
 		printf("find stream info. ret : %d\n", ret);
+		printf("demux find stream info failed file=%s ret=%d\n", pFile ? pFile : "(null)", ret);
 		goto fail;
 	}
 	
@@ -174,6 +181,7 @@ int CMp4Demuxer::Open(const char *pFile, STORAGE_VIDEO_ENC_TYPE_E eVideoEncType)
 	if( (-1 == m_iAudioindex) && (-1 == m_iVideoindex) )
 	{
 		printf("have not found audio and video stream.\n");
+		printf("demux no valid stream file=%s\n", pFile ? pFile : "(null)");
 		goto fail;
 	}
 
@@ -353,6 +361,13 @@ int CMp4Demuxer::Open(const char *pFile, STORAGE_VIDEO_ENC_TYPE_E eVideoEncType)
 		goto fail;
 	}
 
+	printf("demux open ok file=%s videoindex=%d audioindex=%d duration=%lld start=%lld\n",
+	       pFile ? pFile : "(null)",
+	       m_iVideoindex,
+	       m_iAudioindex,
+	       (long long)m_pAVFmtCtx->duration,
+	       (long long)m_pAVFmtCtx->start_time);
+
 	return 0;
 	
 fail:
@@ -390,8 +405,9 @@ int CMp4Demuxer::Seek(float fPercent)
 	iSeekTime = (iFileDuration * fPercent / 100) + iFileStartTime;
 	
 	printf("iFileStartTime : %lld, iFileDuration : %lld, fPercent : %f, iSeekTime : %lld\n", iFileStartTime, iFileDuration, fPercent, iSeekTime);
-	
-	return av_seek_frame(m_pAVFmtCtx, /*videoindex*/-1, iSeekTime, AVSEEK_FLAG_BACKWARD /*| AVSEEK_FLAG_ANY*/);
+	ret = av_seek_frame(m_pAVFmtCtx, /*videoindex*/-1, iSeekTime, AVSEEK_FLAG_BACKWARD /*| AVSEEK_FLAG_ANY*/);
+	printf("demux seek percent=%.2f target=%lld ret=%d\n", fPercent, iSeekTime, ret);
+	return ret;
 }
 
 /*
@@ -405,8 +421,9 @@ int CMp4Demuxer::Seek(long long llTime)
 	
 	printf("llTime : %lld\n", llTime);
 	printf("iFileStartTime : %lld, iFileDuration : %lld\n", m_pAVFmtCtx->start_time, m_pAVFmtCtx->duration);
-	
-	return av_seek_frame(m_pAVFmtCtx, /*videoindex*/-1, llTime, AVSEEK_FLAG_BACKWARD /*| AVSEEK_FLAG_ANY*/);
+	int ret = av_seek_frame(m_pAVFmtCtx, /*videoindex*/-1, llTime, AVSEEK_FLAG_BACKWARD /*| AVSEEK_FLAG_ANY*/);
+	printf("demux seek time=%lld ret=%d\n", llTime, ret);
+	return ret;
 }
 
 
@@ -629,7 +646,10 @@ int CMp4Demuxer::Read(unsigned char *pBuffer, int iBufferSize, Mp4DemuxerFrameIn
 	{
 		char errStr[128] = "";
 		av_strerror(ret, errStr, sizeof(errStr));
-		printf("demux read end/error ret=%d err=%s\n", ret, errStr);
+		if (AVERROR_EOF == ret)
+			printf("demux read eof ret=%d err=%s\n", ret, errStr);
+		else
+			printf("demux read failed ret=%d err=%s\n", ret, errStr);
 	}
 
 	return -1;

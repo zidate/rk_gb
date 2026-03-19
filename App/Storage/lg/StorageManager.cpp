@@ -3869,8 +3869,12 @@ void CStorageManager::PlaybackProc(int index)
 
 		pPlayManager->bIdel = false;
 
-		printf("playback start time : %d, end time : %d, bSeekFlag[%d], seek time : %d\n", 
-				pPlayManager->iStartTime, pPlayManager->iEndTime, pPlayManager->bSeekFlag, pPlayManager->iSeekTime);
+		printf("playback request enter start=%d end=%d seek_flag=%d seek_time=%d speed=%.2f\n",
+		       pPlayManager->iStartTime,
+		       pPlayManager->iEndTime,
+		       pPlayManager->bSeekFlag ? 1 : 0,
+		       pPlayManager->iSeekTime,
+		       pPlayManager->fSpeed);
 
 		if( pPlayManager->iStartTime > pPlayManager->iEndTime )
 		{
@@ -4097,6 +4101,12 @@ void CStorageManager::PlaybackProc(int index)
 			
 			if( 0 == ret )
 			{
+				printf("playback open ok path=%s index=%d/%d start=%d end=%d\n",
+				       strRecordFilePath,
+				       i,
+				       rec_file_num,
+				       stRecordFileInfo.iStartTime,
+				       stRecordFileInfo.iEndTime);
 				//第一个文件
 				if( true == bPlaybackFirtFile )
 				{
@@ -4108,6 +4118,11 @@ void CStorageManager::PlaybackProc(int index)
 						float fPercent = (pPlayManager->iStartTime - stRecordFileInfo.iStartTime) * 100 / (stRecordFileInfo.iEndTime - stRecordFileInfo.iStartTime);
 						mp4_demuxer.Seek(fPercent);
 						#else
+						printf("playback initial seek path=%s offset_us=%lld start=%d file_start=%d\n",
+						       strRecordFilePath,
+						       (long long)(pPlayManager->iStartTime - stRecordFileInfo.iStartTime) * 1000000LL,
+						       pPlayManager->iStartTime,
+						       stRecordFileInfo.iStartTime);
 						mp4_demuxer.Seek((Int64)((pPlayManager->iStartTime - stRecordFileInfo.iStartTime)*1000000));
 						#endif
 					}
@@ -4119,6 +4134,11 @@ void CStorageManager::PlaybackProc(int index)
 					bSeekToAnotherFile = false;
 					if( pPlayManager->iSeekTime > stRecordFileInfo.iStartTime )
 					{
+						printf("playback cross-file seek path=%s seek_time=%d file_start=%d offset_us=%lld\n",
+						       strRecordFilePath,
+						       pPlayManager->iSeekTime,
+						       stRecordFileInfo.iStartTime,
+						       (long long)(pPlayManager->iSeekTime - stRecordFileInfo.iStartTime) * 1000000LL);
 						mp4_demuxer.Seek((Int64)((pPlayManager->iSeekTime - stRecordFileInfo.iStartTime)*1000000));
 					}
 				}
@@ -4219,6 +4239,13 @@ void CStorageManager::PlaybackProc(int index)
 				printf("playback open failed path=%s ret=%d\n", strRecordFilePath, ret);
 			}
 			mp4_demuxer.Close();
+			printf("playback file done path=%s index=%d/%d enable=%d thread=%d next_index=%d\n",
+			       strRecordFilePath,
+			       i,
+			       rec_file_num,
+			       pPlayManager->bEnablePlay ? 1 : 0,
+			       pPlayManager->bThreadRunningFlag ? 1 : 0,
+			       i + 1);
 			
 			i++;
 		}
@@ -4230,6 +4257,11 @@ void CStorageManager::PlaybackProc(int index)
 			pthread_mutex_unlock(&m_mutexPlaybackManager);
 		
 			pPlayManager->PlaybackProc(NULL, 0, NULL, pPlayManager->pParam);			
+			printf("playback session finished start=%d end=%d seek_flag=%d seek_time=%d\n",
+			       pPlayManager->iStartTime,
+			       pPlayManager->iEndTime,
+			       pPlayManager->bSeekFlag ? 1 : 0,
+			       pPlayManager->iSeekTime);
 		}				
 		
 	}
