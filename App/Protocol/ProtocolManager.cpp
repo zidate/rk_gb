@@ -8448,9 +8448,9 @@ int ProtocolManager::StartGbReplaySession(StreamHandle handle, const char* gbCod
         return ret;
 
     }
-    const int startSec = (int)input->StartTime;
+    const int startSec = (int)input->StartTime + 28800;
 
-    const int endSec = (int)input->EndTime;
+    const int endSec = (int)input->EndTime + 28800;
 
 
 
