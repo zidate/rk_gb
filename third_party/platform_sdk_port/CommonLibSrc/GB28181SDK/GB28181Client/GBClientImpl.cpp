@@ -27,6 +27,8 @@
 
 #include "ShareSDK.h"
 
+#include "gbutil.h"
+
 
 #include <sstream>
 
@@ -4047,6 +4049,20 @@ int CGBClientImpl::StartLiveStreamRequest(const MediaInfo* input,  MediaInfo* re
 
 }
 
+int CGBClientImpl::StartBroadcastStreamRequest(const char* target_id,
+                                               const MediaInfo* input,
+                                               MediaInfo* result,
+                                               StreamHandle* stream_handle)
+{
+    if (!target_id || !input || !result || !stream_handle) {
+        return kGbNullPointer;
+    }
+
+    MediaInfo request = *input;
+    GBUtil::memcpy_safe(request.DeviceID, sizeof(request.DeviceID), target_id);
+    return StreamRequestEx(&request, target_id, target_id, m_xml_parser->m_local_code.c_str(), result, stream_handle);
+}
+
 
 
 
@@ -4161,6 +4177,15 @@ std::string  CGBClientImpl::GenerateSubject( const std::string& devid, int Strea
 
 }
 
+std::string CGBClientImpl::GenerateSubjectPair(const std::string& sender_id,
+                                               int sender_stream_num,
+                                               const std::string& receiver_id)
+{
+    std::ostringstream os;
+    os << sender_id << ":" << sender_stream_num << "," << receiver_id << ":0";
+    return os.str();
+}
+
 
 
 
@@ -4169,6 +4194,25 @@ std::string  CGBClientImpl::GenerateSubject( const std::string& devid, int Strea
 
 
 int   CGBClientImpl::StreamRequest(const MediaInfo* input,  MediaInfo* output, StreamHandle* stream_handle)
+
+
+{
+
+
+    return StreamRequestEx(input, NULL, NULL, NULL, output, stream_handle);
+
+
+}
+
+
+
+
+int   CGBClientImpl::StreamRequestEx(const MediaInfo* input,
+                                     const char* request_id,
+                                     const char* subject_sender_id,
+                                     const char* subject_receiver_id,
+                                     MediaInfo* output,
+                                     StreamHandle* stream_handle)
 
 
 {
@@ -4228,10 +4272,44 @@ int   CGBClientImpl::StreamRequest(const MediaInfo* input,  MediaInfo* output, S
     message.content_type = kSipContentSDP;
 
 
-    std::string subject = GenerateSubject(input->DeviceID, input->StreamNum);
+    std::string subject;
+    if (subject_sender_id && subject_receiver_id) {
+        subject = GenerateSubjectPair(subject_sender_id, input->StreamNum, subject_receiver_id);
+    }
+    else {
+        subject = GenerateSubject(input->DeviceID, input->StreamNum);
+    }
 
 
     message.Subject = (char*)subject.c_str();
+
+
+    std::string from;
+
+
+    std::string to;
+
+
+    if (request_id && request_id[0] != '\0') {
+
+
+        std::ostringstream from_builder;
+        from_builder << "sip:" << m_xml_parser->m_local_code << "@"
+                     << m_xml_parser->m_local_ip << ":" << m_xml_parser->m_port;
+        from = from_builder.str();
+
+
+        std::ostringstream to_builder;
+        to_builder << "sip:" << request_id << "@"
+                   << m_sip_connect_param->ip << ":" << m_sip_connect_param->port;
+        to = to_builder.str();
+
+
+        message.From = (char*)from.c_str();
+        message.To = (char*)to.c_str();
+
+
+    }
 
 
 

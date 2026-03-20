@@ -140,6 +140,7 @@ public:
     // stream media interface
 
     int StartLiveStreamRequest(const MediaInfo* input,  MediaInfo* result, StreamHandle* stream_handle);//?????
+    int StartBroadcastStreamRequest(const char* target_id, const MediaInfo* input, MediaInfo* result, StreamHandle* stream_handle);
 
     int StopStreamRequest(StreamHandle stream_handle);//???????
 
@@ -215,8 +216,15 @@ private:
     void  OnCatalogResponse(const SipData* data);
 
     int   StreamRequest(const MediaInfo* input,  MediaInfo* output, StreamHandle* stream_handle);
+    int   StreamRequestEx(const MediaInfo* input,
+                          const char* request_id,
+                          const char* subject_sender_id,
+                          const char* subject_receiver_id,
+                          MediaInfo* output,
+                          StreamHandle* stream_handle);
 
     std::string  GenerateSubject( const std::string& devid, int StreamNum );
+    std::string  GenerateSubjectPair(const std::string& sender_id, int sender_stream_num, const std::string& receiver_id);
 
 private:
 

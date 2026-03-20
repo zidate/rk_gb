@@ -4796,12 +4796,15 @@ int ProtocolManager::HandleGbBroadcastNotifyResponse(const char* gbCode, const B
     memset(&requestMap, 0, sizeof(requestMap));
     memset(&request, 0, sizeof(request));
 
-    int ret = BuildGbBroadcastMediaInfo(localIp, resolvedGbCode, request, requestMap);
+    const std::string inviteTargetId = sourceId.empty() ? resolvedGbCode : sourceId;
+
+    int ret = BuildGbBroadcastMediaInfo(localIp, inviteTargetId, request, requestMap);
     if (ret != 0) {
 
-        printf("[ProtocolManager] gb broadcast active invite build request failed ret=%d gb=%s\n",
+        printf("[ProtocolManager] gb broadcast active invite build request failed ret=%d gb=%s invite_target=%s\n",
                ret,
-               resolvedGbCode.c_str());
+               resolvedGbCode.c_str(),
+               inviteTargetId.c_str());
 
         return -73;
 
@@ -4814,24 +4817,26 @@ int ProtocolManager::HandleGbBroadcastNotifyResponse(const char* gbCode, const B
     memset(&answer, 0, sizeof(answer));
 
     StreamHandle handle = NULL;
-    printf("[ProtocolManager] gb broadcast active invite start gb=%s source=%s target=%s transport=%s local=%s:%u codec=%s pt=%u\n",
+    printf("[ProtocolManager] gb broadcast active invite start gb=%s source=%s target=%s invite_target=%s transport=%s local=%s:%u codec=%s pt=%u\n",
            resolvedGbCode.c_str(),
            sourceId.c_str(),
            targetId.c_str(),
+           inviteTargetId.c_str(),
            GbNetTransportName(request.RtpType),
            request.IP,
            request.Port,
            requestMap.MimeType,
            requestMap.MediaFormat);
 
-    ret = sdk->StartLiveStreamRequest(&request, &answer, &handle);
+    ret = sdk->StartBroadcastStreamRequest(inviteTargetId.c_str(), &request, &answer, &handle);
     if (!IsGbSdkSuccess(ret) || handle == NULL) {
 
-        printf("[ProtocolManager] gb broadcast active invite failed ret=%d gb=%s source=%s target=%s\n",
+        printf("[ProtocolManager] gb broadcast active invite failed ret=%d gb=%s source=%s target=%s invite_target=%s\n",
                ret,
                resolvedGbCode.c_str(),
                sourceId.c_str(),
-               targetId.c_str());
+               targetId.c_str(),
+               inviteTargetId.c_str());
 
         return -74;
 

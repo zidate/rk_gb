@@ -50,6 +50,7 @@ public:
 
 	// stream media interface
 	int StartLiveStreamRequest(const MediaInfo* input, MediaInfo* result, StreamHandle* stream_handle);
+	int StartBroadcastStreamRequest(const char* target_id, const MediaInfo* input, MediaInfo* result, StreamHandle* stream_handle);
 	int StopStreamRequest(StreamHandle stream_handle);
 	int DeviceKeyFrameControl(const char* deviceID);
 

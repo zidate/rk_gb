@@ -191,6 +191,17 @@ int GB28181ClientSDK::StartLiveStreamRequest(const MediaInfo* input,  MediaInfo*
    return m_client_Impl->StartLiveStreamRequest(input,  result, stream_handle);
 }
 
+int GB28181ClientSDK::StartBroadcastStreamRequest(const char* target_id,
+                                                  const MediaInfo* input,
+                                                  MediaInfo* result,
+                                                  StreamHandle* stream_handle)
+{
+    if( !target_id || !input || !result || !stream_handle ){
+        return kGbNullPointer;
+    }
+    return m_client_Impl->StartBroadcastStreamRequest(target_id, input, result, stream_handle);
+}
+
 int GB28181ClientSDK::StopStreamRequest(StreamHandle stream_handle)
 {
      return m_client_Impl->StopStreamRequest(stream_handle);
