@@ -875,47 +875,21 @@ static bool TouchFileMarker(const char* path)
     return true;
 }
 
-static bool ExtractAudioTransportHint(const MediaInfo* input,
+static bool ResolveAudioCodecFromPayload(const RtpMap& map,
 
-                                      std::string& remoteIp,
+                                         int& payloadType,
 
-                                      int& remotePort,
+                                         std::string& codec,
 
-                                      int& payloadType,
-
-                                      std::string& codec)
+                                         unsigned int& sampleRate)
 
 {
 
-    if (input == NULL) {
+    payloadType = (int)map.MediaFormat;
 
-        return false;
+    codec = NormalizeCodec(SafeStr(map.MimeType, sizeof(map.MimeType)));
 
-    }
-
-
-
-    remoteIp = SafeStr(input->IP, sizeof(input->IP));
-
-    remotePort = (int)input->Port;
-
-
-
-    payloadType = -1;
-
-    codec.clear();
-
-
-
-    if (input->RtpDescri.DescriNum > 0 && input->RtpDescri.mapDescri != NULL) {
-
-        const RtpMap& map = input->RtpDescri.mapDescri[0];
-
-        payloadType = (int)map.MediaFormat;
-
-        codec = NormalizeCodec(SafeStr(map.MimeType, sizeof(map.MimeType)));
-
-    }
+    sampleRate = map.SampleRate;
 
 
 
@@ -935,6 +909,119 @@ static bool ExtractAudioTransportHint(const MediaInfo* input,
 
 
 
+    if (payloadType < 0 || payloadType > 127 || codec.empty()) {
+
+        return false;
+
+    }
+
+
+
+    if (sampleRate == 0) {
+
+        sampleRate = 8000;
+
+    }
+
+
+
+    return true;
+
+}
+
+
+
+static bool ExtractAudioTransportHintWithPreference(const MediaInfo* input,
+
+                                                    const std::string& preferredCodec,
+
+                                                    std::string& remoteIp,
+
+                                                    int& remotePort,
+
+                                                    int& payloadType,
+
+                                                    std::string& codec,
+
+                                                    unsigned int& sampleRate)
+
+{
+
+    if (input == NULL) {
+
+        return false;
+
+    }
+
+
+
+    remoteIp = SafeStr(input->IP, sizeof(input->IP));
+
+    remotePort = (int)input->Port;
+
+    payloadType = -1;
+
+    codec.clear();
+
+    sampleRate = 0;
+
+
+
+    const std::string normalizedPreferred = NormalizeCodec(preferredCodec);
+
+
+
+    if (input->RtpDescri.DescriNum > 0 && input->RtpDescri.mapDescri != NULL) {
+
+        for (unsigned int i = 0; i < input->RtpDescri.DescriNum; ++i) {
+
+            int candidatePayloadType = -1;
+
+            std::string candidateCodec;
+
+            unsigned int candidateSampleRate = 0;
+
+            if (!ResolveAudioCodecFromPayload(input->RtpDescri.mapDescri[i],
+                                              candidatePayloadType,
+                                              candidateCodec,
+                                              candidateSampleRate)) {
+
+                continue;
+
+            }
+
+
+
+            if (payloadType < 0) {
+
+                payloadType = candidatePayloadType;
+
+                codec = candidateCodec;
+
+                sampleRate = candidateSampleRate;
+
+            }
+
+
+
+            if (!normalizedPreferred.empty() && candidateCodec == normalizedPreferred) {
+
+                payloadType = candidatePayloadType;
+
+                codec = candidateCodec;
+
+                sampleRate = candidateSampleRate;
+
+                break;
+
+            }
+
+        }
+
+    }
+
+
+
     if (remotePort <= 0 || payloadType < 0 || payloadType > 127 || codec.empty()) {
 
         return false;
@@ -943,7 +1030,41 @@ static bool ExtractAudioTransportHint(const MediaInfo* input,
 
 
 
+    if (sampleRate == 0) {
+
+        sampleRate = 8000;
+
+    }
+
+
+
     return true;
+
+}
+
+
+
+static bool ExtractAudioTransportHint(const MediaInfo* input,
+
+                                      std::string& remoteIp,
+
+                                      int& remotePort,
+
+                                      int& payloadType,
+
+                                      std::string& codec)
+
+{
+
+    unsigned int sampleRate = 0;
+
+    return ExtractAudioTransportHintWithPreference(input,
+                                                   "",
+                                                   remoteIp,
+                                                   remotePort,
+                                                   payloadType,
+                                                   codec,
+                                                   sampleRate);
 
 }
 
@@ -1135,6 +1256,26 @@ static NetTransType ResolveGbAnswerTransportType(NetTransType requestType,
 
     return (ToLowerCopy(defaultTransport) == "tcp") ? kRtpOverTcpActive : kRtpOverUdp;
 
+}
+
+static bool IsGbTalkListenSupportedTransport(NetTransType transportType)
+{
+    return transportType == kRtpOverUdp ||
+           transportType == kRtpOverTcp ||
+           transportType == kRtpOverTcpActive;
+}
+
+static protocol::GbBroadcastParam BuildGbTalkBridgeParam(const protocol::ProtocolExternalConfig& cfg)
+{
+    protocol::GbBroadcastParam param;
+    param.input_mode = "stream";
+    param.codec = NormalizeCodec(cfg.gb_talk.codec);
+    if (param.codec.empty()) {
+        param.codec = "g711a";
+    }
+    param.recv_port = cfg.gb_talk.recv_port;
+    param.file_cache_dir = cfg.gb_broadcast.file_cache_dir.empty() ? "/tmp" : cfg.gb_broadcast.file_cache_dir;
+    return param;
 }
 
 static uint64_t TimestampMsToPts90k(uint64_t timestampMs)
@@ -2360,6 +2501,14 @@ static std::string BuildConfigDiffSummary(const protocol::ProtocolExternalConfig
 
     AppendConfigDiff(diff, "gb.live.clock_rate", before.gb_live.clock_rate, after.gb_live.clock_rate);
 
+    AppendConfigDiff(diff, "gb.talk.codec", before.gb_talk.codec, after.gb_talk.codec);
+
+    AppendConfigDiff(diff, "gb.talk.recv_port", before.gb_talk.recv_port, after.gb_talk.recv_port);
+
+    AppendConfigDiff(diff, "gb.talk.sample_rate", before.gb_talk.sample_rate, after.gb_talk.sample_rate);
+
+    AppendConfigDiff(diff, "gb.talk.jitter_buffer_ms", before.gb_talk.jitter_buffer_ms, after.gb_talk.jitter_buffer_ms);
+
     AppendConfigDiff(diff, "gb.video.main_codec", before.gb_video.main_codec, after.gb_video.main_codec);
 
     AppendConfigDiff(diff, "gb.video.main_resolution", before.gb_video.main_resolution, after.gb_video.main_resolution);
@@ -2441,6 +2590,8 @@ static std::string BuildConfigDiffSummary(const protocol::ProtocolExternalConfig
     AppendConfigDiff(diff, "gb.listen.codec", before.gb_listen.codec, after.gb_listen.codec);
 
     AppendConfigDiff(diff, "gb.listen.packet_ms", before.gb_listen.packet_ms, after.gb_listen.packet_ms);
+
+    AppendConfigDiff(diff, "gb.listen.sample_rate", before.gb_listen.sample_rate, after.gb_listen.sample_rate);
 
     return diff;
 
@@ -3132,6 +3283,20 @@ int ProtocolManager::Start()
 
     }
 
+    ret = m_talk_broadcast.StartSession(BuildGbTalkBridgeParam(m_cfg));
+
+    if (ret != 0) {
+
+        printf("[ProtocolManager] start talk session failed: %d\n", ret);
+
+        m_broadcast.StopSession();
+
+        m_rtp_ps_sender.CloseSession();
+
+        return ret;
+
+    }
+
 
 
     if (ShouldAutoStartGbListen(m_cfg.gb_listen)) {
@@ -3140,6 +3305,8 @@ int ProtocolManager::Start()
         if (ret != 0) {
 
             printf("[ProtocolManager] start listen session failed: %d\n", ret);
+
+            m_talk_broadcast.StopSession();
 
             m_broadcast.StopSession();
 
@@ -3166,6 +3333,8 @@ int ProtocolManager::Start()
 
             m_listen.StopSession();
 
+            m_talk_broadcast.StopSession();
+
             m_broadcast.StopSession();
 
             m_rtp_ps_sender.CloseSession();
@@ -3182,6 +3351,7 @@ int ProtocolManager::Start()
         if (ret != 0) {
             printf("[ProtocolManager] start gat1400 client failed: %d\n", ret);
             StopGbClientLifecycle();
+            m_talk_broadcast.StopSession();
             m_listen.StopSession();
             m_broadcast.StopSession();
             m_rtp_ps_sender.CloseSession();
@@ -3225,6 +3395,8 @@ void ProtocolManager::Stop()
 
 
     StopGbLiveCapture();
+
+    m_talk_broadcast.StopSession();
 
     m_listen.StopSession();
 
@@ -3304,6 +3476,14 @@ int ProtocolManager::ReloadExternalConfig()
 
                                   (m_cfg.gb_broadcast.file_cache_dir != latest.gb_broadcast.file_cache_dir);
 
+    const bool restartTalk = (m_cfg.gb_talk.codec != latest.gb_talk.codec) ||
+
+                             (m_cfg.gb_talk.recv_port != latest.gb_talk.recv_port) ||
+
+                             (m_cfg.gb_talk.sample_rate != latest.gb_talk.sample_rate) ||
+
+                             (m_cfg.gb_talk.jitter_buffer_ms != latest.gb_talk.jitter_buffer_ms);
+
     const bool restartListen = (m_cfg.gb_listen.transport != latest.gb_listen.transport) ||
 
                                (m_cfg.gb_listen.target_ip != latest.gb_listen.target_ip) ||
@@ -3312,7 +3492,9 @@ int ProtocolManager::ReloadExternalConfig()
 
                                (m_cfg.gb_listen.codec != latest.gb_listen.codec) ||
 
-                               (m_cfg.gb_listen.packet_ms != latest.gb_listen.packet_ms);
+                               (m_cfg.gb_listen.packet_ms != latest.gb_listen.packet_ms) ||
+
+                               (m_cfg.gb_listen.sample_rate != latest.gb_listen.sample_rate);
 
     const bool reloadGbLifecycle = (m_cfg.gb_register.enabled != latest.gb_register.enabled) ||
 
@@ -3455,6 +3637,28 @@ int ProtocolManager::ReloadExternalConfig()
 
 
             printf("[ProtocolManager] module=config event=config_apply_success trace=manager error=0 stage=gb_broadcast_restart version=%s\n",
+
+                   m_cfg.version.c_str());
+
+        }
+
+        if (restartTalk) {
+
+            const int talkRet = RestartGbTalkBridge("config_reload");
+
+            if (talkRet != 0) {
+
+                printf("[ProtocolManager] module=config event=config_apply_fail trace=manager error=%d stage=gb_talk_restart version=%s\n",
+
+                       talkRet,
+
+                       m_cfg.version.c_str());
+
+                return talkRet;
+
+            }
+
+            printf("[ProtocolManager] module=config event=config_apply_success trace=manager error=0 stage=gb_talk_restart version=%s\n",
 
                    m_cfg.version.c_str());
 
@@ -4724,6 +4928,115 @@ int ProtocolManager::HandleGbBroadcastNotify(const char* gbCode, const Broadcast
 
 }
 
+int ProtocolManager::BuildGbTalkMediaInfo(const char* gbCode,
+
+                                         const MediaInfo* input,
+
+                                         const std::string& localIp,
+
+                                         MediaInfo& out,
+
+                                         RtpMap& outMap) const
+
+{
+
+    memset(&out, 0, sizeof(out));
+
+    memset(&outMap, 0, sizeof(outMap));
+
+
+
+    const std::string preferredCodec = NormalizeCodec(m_cfg.gb_talk.codec);
+
+    std::string remoteIp;
+
+    int remotePort = 0;
+
+    int payloadType = -1;
+
+    std::string codec;
+
+    unsigned int sampleRate = 0;
+
+    if (!ExtractAudioTransportHintWithPreference(input,
+                                                 preferredCodec,
+                                                 remoteIp,
+                                                 remotePort,
+                                                 payloadType,
+                                                 codec,
+                                                 sampleRate)) {
+
+        codec = preferredCodec.empty() ? "g711a" : preferredCodec;
+
+        payloadType = ResolvePayloadTypeByCodec(codec);
+
+        sampleRate = (m_cfg.gb_talk.sample_rate > 0) ? (unsigned int)m_cfg.gb_talk.sample_rate : 8000U;
+
+    }
+
+
+
+    if (sampleRate == 0) {
+
+        sampleRate = (m_cfg.gb_talk.sample_rate > 0) ? (unsigned int)m_cfg.gb_talk.sample_rate : 8000U;
+
+    }
+
+
+
+    const NetTransType answerTransport = (input != NULL)
+                                             ? ResolveGbAnswerTransportType(input->RtpType, "udp")
+                                             : kRtpOverUdp;
+    const std::string ip = localIp.empty() ? "0.0.0.0" : localIp;
+    const std::string deviceId = (gbCode != NULL && gbCode[0] != '\0') ? gbCode : m_cfg.gb_register.device_id;
+    const int localRecvPort = (m_cfg.gb_talk.recv_port > 0) ? m_cfg.gb_talk.recv_port : 0;
+
+    if (localRecvPort <= 0) {
+
+        return -1;
+
+    }
+
+
+
+    out.RtpType = answerTransport;
+
+    out.RequestType = kAudioStream;
+
+    out.Port = static_cast<unsigned int>(localRecvPort);
+
+    CopyBounded(out.DeviceID, sizeof(out.DeviceID), deviceId);
+
+    CopyBounded(out.IP, sizeof(out.IP), ip);
+
+
+
+    const unsigned int ssrcValue = (m_cfg.gb_live.ssrc > 0) ? static_cast<unsigned int>(m_cfg.gb_live.ssrc) : 1u;
+
+    snprintf(out.Ssrc, sizeof(out.Ssrc), "%010u", ssrcValue);
+
+
+
+    out.RtpDescri.type = kGBAudio;
+
+    out.RtpDescri.DescriNum = 1;
+
+    out.RtpDescri.mapDescri = &outMap;
+
+
+
+    outMap.MediaFormat = static_cast<unsigned int>(payloadType);
+
+    outMap.SampleRate = sampleRate;
+
+    CopyBounded(outMap.MimeType, sizeof(outMap.MimeType), ResolveMimeByCodec(codec));
+
+
+
+    return 0;
+
+}
+
 int ProtocolManager::HandleGbBroadcastNotifyResponse(const char* gbCode, const BroadcastInfo* info, bool ok)
 
 {
@@ -4967,21 +5280,27 @@ int ProtocolManager::HandleGbAudioStreamRequest(StreamHandle handle, const char*
 
     std::string codec;
 
-    GbBroadcastSession previousSession;
+    unsigned int sampleRate = 0;
+
+    GbTalkSession previousSession;
 
     bool needResetPrevious = false;
 
-    int negotiatedPayloadType = payloadType;
+    const std::string preferredCodec = NormalizeCodec(m_cfg.gb_talk.codec);
 
-    std::string negotiatedCodec = codec;
+    const int localRecvPort = (m_cfg.gb_talk.recv_port > 0) ? m_cfg.gb_talk.recv_port : 0;
 
-    int negotiatedLocalPort = m_cfg.gb_broadcast.recv_port;
+    const NetTransType answerTransport = ResolveGbAnswerTransportType(input->RtpType, "udp");
 
-    int negotiatedTransportType = (int)input->RtpType;
+    if (!ExtractAudioTransportHintWithPreference(input,
+                                                 preferredCodec,
+                                                 remoteIp,
+                                                 remotePort,
+                                                 payloadType,
+                                                 codec,
+                                                 sampleRate)) {
 
-    if (!ExtractAudioTransportHint(input, remoteIp, remotePort, payloadType, codec)) {
-
-        printf("[ProtocolManager] gb audio stream request parse failed gb=%s\n", gbCode != NULL ? gbCode : "");
+        printf("[ProtocolManager] gb talk invite parse failed gb=%s\n", gbCode != NULL ? gbCode : "");
 
         return -11;
 
@@ -4991,15 +5310,15 @@ int ProtocolManager::HandleGbAudioStreamRequest(StreamHandle handle, const char*
 
     {
 
-        std::lock_guard<std::mutex> lock(m_gb_broadcast_mutex);
+        std::lock_guard<std::mutex> lock(m_gb_talk_mutex);
 
-        if (m_gb_broadcast_session.active &&
-            m_gb_broadcast_session.stream_handle != NULL &&
-            m_gb_broadcast_session.stream_handle != handle) {
+        if (m_gb_talk_session.active &&
+            m_gb_talk_session.stream_handle != NULL &&
+            m_gb_talk_session.stream_handle != handle) {
 
-            previousSession = m_gb_broadcast_session;
+            previousSession = m_gb_talk_session;
 
-            m_gb_broadcast_session = GbBroadcastSession();
+            m_gb_talk_session = GbTalkSession();
 
             needResetPrevious = true;
 
@@ -5009,29 +5328,17 @@ int ProtocolManager::HandleGbAudioStreamRequest(StreamHandle handle, const char*
 
     if (needResetPrevious) {
 
-        printf("[ProtocolManager] gb broadcast session replaced old_handle=%p old_remote=%s:%d new_handle=%p gb=%s\n",
+        printf("[ProtocolManager] gb talk session replaced old_handle=%p old_remote=%s:%d new_handle=%p gb=%s\n",
                previousSession.stream_handle,
                previousSession.remote_ip.c_str(),
                previousSession.remote_port,
                handle,
                gbCode != NULL ? gbCode : "");
 
-        const int resetRet = RestartGbBroadcastBridge("replace_audio_stream");
+        const int resetRet = RestartGbTalkBridge("replace_audio_stream");
         if (resetRet != 0) {
             return resetRet;
         }
-
-    }
-
-
-
-    int ret = ApplyGbBroadcastTransportHint(remoteIp, remotePort, payloadType, codec, input->RtpType);
-
-    if (ret != 0) {
-
-        printf("[ProtocolManager] gb audio stream apply transport failed=%d gb=%s\n", ret, gbCode != NULL ? gbCode : "");
-
-        return -12;
 
     }
 
@@ -5041,36 +5348,16 @@ int ProtocolManager::HandleGbAudioStreamRequest(StreamHandle handle, const char*
 
     if (!ResolveGbResponseLocalIp(remoteIp, remotePort, localIp)) {
 
-        printf("[ProtocolManager] gb audio stream local ip unresolved remote=%s:%d gb=%s\n",
+        printf("[ProtocolManager] gb talk invite local ip unresolved remote=%s:%d gb=%s\n",
                remoteIp.c_str(),
                remotePort,
                gbCode != NULL ? gbCode : "");
 
     }
 
-    {
-        std::string actualRemoteIp;
-        int actualRemotePort = 0;
-        int actualPayloadType = -1;
-        std::string actualCodec;
-        int actualLocalPort = 0;
-        int actualTransportType = kRtpOverUdp;
-        if (m_broadcast.GetNegotiatedTransport(actualRemoteIp,
-                                               actualRemotePort,
-                                               actualPayloadType,
-                                               actualCodec,
-                                               actualLocalPort,
-                                               actualTransportType) == 0) {
-            negotiatedPayloadType = actualPayloadType;
-            negotiatedCodec = actualCodec;
-            negotiatedLocalPort = actualLocalPort;
-            negotiatedTransportType = actualTransportType;
-        }
-    }
 
 
-
-    ret = RespondGbMediaPlayInfo(handle, gbCode, kAudioStream, input);
+    int ret = RespondGbMediaPlayInfo(handle, gbCode, kAudioStream, input);
 
     if (ret != 0) {
 
@@ -5082,49 +5369,41 @@ int ProtocolManager::HandleGbAudioStreamRequest(StreamHandle handle, const char*
 
     {
 
-        std::lock_guard<std::mutex> lock(m_gb_broadcast_mutex);
+        std::lock_guard<std::mutex> lock(m_gb_talk_mutex);
 
-        const std::string keepSourceId = m_gb_broadcast_session.source_id;
+        m_gb_talk_session = GbTalkSession();
 
-        const std::string keepTargetId = m_gb_broadcast_session.target_id;
+        m_gb_talk_session.active = true;
 
-        const uint64_t keepNotifyTsMs = m_gb_broadcast_session.notify_ts_ms;
+        m_gb_talk_session.stream_handle = handle;
 
-        m_gb_broadcast_session = GbBroadcastSession();
+        m_gb_talk_session.gb_code = (gbCode != NULL) ? gbCode : "";
 
-        m_gb_broadcast_session.active = true;
+        m_gb_talk_session.invite_ts_ms = GetNowMs();
 
-        m_gb_broadcast_session.stream_handle = handle;
+        m_gb_talk_session.remote_ip = remoteIp;
 
-        m_gb_broadcast_session.gb_code = (gbCode != NULL) ? gbCode : "";
+        m_gb_talk_session.remote_port = remotePort;
 
-        m_gb_broadcast_session.source_id = keepSourceId;
+        m_gb_talk_session.local_ip = localIp;
 
-        m_gb_broadcast_session.target_id = keepTargetId;
+        m_gb_talk_session.local_port = localRecvPort;
 
-        m_gb_broadcast_session.notify_ts_ms = keepNotifyTsMs;
+        m_gb_talk_session.payload_type = payloadType;
 
-        m_gb_broadcast_session.invite_ts_ms = GetNowMs();
+        m_gb_talk_session.request_transport_type = (int)input->RtpType;
 
-        m_gb_broadcast_session.remote_ip = remoteIp;
+        m_gb_talk_session.answer_transport_type = (int)answerTransport;
 
-        m_gb_broadcast_session.remote_port = remotePort;
+        m_gb_talk_session.codec = codec;
 
-        m_gb_broadcast_session.local_ip = localIp;
-
-        m_gb_broadcast_session.local_port = negotiatedLocalPort;
-
-        m_gb_broadcast_session.payload_type = negotiatedPayloadType;
-
-        m_gb_broadcast_session.transport_type = negotiatedTransportType;
-
-        m_gb_broadcast_session.codec = negotiatedCodec.empty() ? codec : negotiatedCodec;
+        m_gb_talk_session.sample_rate = (sampleRate > 0) ? (int)sampleRate : m_cfg.gb_talk.sample_rate;
 
     }
 
 
 
-    printf("[ProtocolManager] gb audio stream accepted gb=%s codec=%s pt=%d transport=%d remote=%s:%d\n",
+    printf("[ProtocolManager] gb talk invite accepted gb=%s codec=%s pt=%d req_transport=%d answer_transport=%d remote=%s:%d local=%s:%d sample_rate=%u ack_wait=1\n",
 
            gbCode != NULL ? gbCode : "",
 
@@ -5134,9 +5413,17 @@ int ProtocolManager::HandleGbAudioStreamRequest(StreamHandle handle, const char*
 
            (int)input->RtpType,
 
+           (int)answerTransport,
+
            remoteIp.c_str(),
 
-           remotePort);
+           remotePort,
+
+           localIp.c_str(),
+
+           localRecvPort,
+
+           sampleRate);
 
     return 0;
 
@@ -5458,6 +5745,87 @@ int ProtocolManager::HandleGbStreamAck(StreamHandle handle)
                audioEnabled ? 1 : 0,
                forceIdrChannel,
                forceRet);
+        return 0;
+    }
+
+    GbTalkSession talkSession;
+    bool hasTalkSession = false;
+
+    {
+        std::lock_guard<std::mutex> lock(m_gb_talk_mutex);
+        if (m_gb_talk_session.active &&
+            m_gb_talk_session.stream_handle != NULL &&
+            handle == m_gb_talk_session.stream_handle) {
+            m_gb_talk_session.acked = true;
+            m_gb_talk_session.ack_ts_ms = GetNowMs();
+            talkSession = m_gb_talk_session;
+            hasTalkSession = true;
+        }
+    }
+
+    if (hasTalkSession) {
+        const int applyRet = m_talk_broadcast.ApplyTransportHint(talkSession.remote_ip,
+                                                                 talkSession.remote_port,
+                                                                 talkSession.payload_type,
+                                                                 talkSession.codec,
+                                                                 talkSession.answer_transport_type);
+        if (applyRet != 0) {
+            printf("[ProtocolManager] gb talk ack apply transport failed ret=%d gb=%s handle=%p remote=%s:%d local=%s:%d codec=%s pt=%d transport=%d\n",
+                   applyRet,
+                   talkSession.gb_code.c_str(),
+                   handle,
+                   talkSession.remote_ip.c_str(),
+                   talkSession.remote_port,
+                   talkSession.local_ip.c_str(),
+                   talkSession.local_port,
+                   talkSession.codec.c_str(),
+                   talkSession.payload_type,
+                   talkSession.answer_transport_type);
+            HandleGbStopStreamRequest(handle, talkSession.gb_code.c_str());
+            return applyRet;
+        }
+
+        int uplinkRet = 0;
+        bool uplinkStarted = false;
+        if (IsGbTalkListenSupportedTransport((NetTransType)talkSession.answer_transport_type)) {
+            GbListenParam listenParam = m_cfg.gb_listen;
+            listenParam.transport = ((NetTransType)talkSession.answer_transport_type == kRtpOverUdp) ? "udp" : "tcp";
+            listenParam.target_ip = talkSession.remote_ip;
+            listenParam.target_port = talkSession.remote_port;
+            listenParam.codec = talkSession.codec;
+            listenParam.sample_rate = (talkSession.sample_rate > 0) ? talkSession.sample_rate : m_cfg.gb_talk.sample_rate;
+            m_listen.StopSession();
+            uplinkRet = m_listen.StartSession(listenParam);
+            uplinkStarted = (uplinkRet == 0);
+        } else {
+            uplinkRet = -1;
+            printf("[ProtocolManager] gb talk uplink skipped unsupported transport gb=%s handle=%p transport=%d\n",
+                   talkSession.gb_code.c_str(),
+                   handle,
+                   talkSession.answer_transport_type);
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(m_gb_talk_mutex);
+            if (m_gb_talk_session.active &&
+                m_gb_talk_session.stream_handle == handle) {
+                m_gb_talk_session.uplink_started = uplinkStarted;
+            }
+        }
+
+        printf("[ProtocolManager] gb talk acked gb=%s handle=%p remote=%s:%d local=%s:%d codec=%s pt=%d transport=%d sample_rate=%d uplink_started=%d uplink_ret=%d\n",
+               talkSession.gb_code.c_str(),
+               handle,
+               talkSession.remote_ip.c_str(),
+               talkSession.remote_port,
+               talkSession.local_ip.c_str(),
+               talkSession.local_port,
+               talkSession.codec.c_str(),
+               talkSession.payload_type,
+               talkSession.answer_transport_type,
+               talkSession.sample_rate,
+               uplinkStarted ? 1 : 0,
+               uplinkRet);
         return 0;
     }
 
@@ -7963,6 +8331,10 @@ void ProtocolManager::HandleGbStopStreamRequest(StreamHandle handle, const char*
 
     bool needStopBroadcast = false;
 
+    GbTalkSession talkSession;
+
+    bool needStopTalk = false;
+
 
 
     {
@@ -8006,6 +8378,30 @@ void ProtocolManager::HandleGbStopStreamRequest(StreamHandle handle, const char*
             m_gb_live_session = GbLiveSession();
 
             needStopLive = true;
+
+        }
+
+    }
+
+
+
+    {
+
+        std::lock_guard<std::mutex> lock(m_gb_talk_mutex);
+
+        if (m_gb_talk_session.active &&
+
+            (handle == NULL ||
+
+             m_gb_talk_session.stream_handle == NULL ||
+
+             handle == m_gb_talk_session.stream_handle)) {
+
+            talkSession = m_gb_talk_session;
+
+            m_gb_talk_session = GbTalkSession();
+
+            needStopTalk = true;
 
         }
 
@@ -8140,6 +8536,54 @@ void ProtocolManager::HandleGbStopStreamRequest(StreamHandle handle, const char*
             if (restartRet != 0) {
 
                 printf("[ProtocolManager] gb broadcast bridge restart failed ret=%d reason=stop_stream\n", restartRet);
+
+            }
+
+        }
+
+    }
+
+    if (needStopTalk) {
+
+        m_listen.StopSession();
+
+        m_talk_broadcast.StopSession();
+
+        printf("[ProtocolManager] gb talk session stopped gb=%s handle=%p remote=%s:%d local=%s:%d codec=%s pt=%d req_transport=%d answer_transport=%d acked=%d uplink_started=%d\n",
+
+               talkSession.gb_code.c_str(),
+
+               talkSession.stream_handle,
+
+               talkSession.remote_ip.c_str(),
+
+               talkSession.remote_port,
+
+               talkSession.local_ip.c_str(),
+
+               talkSession.local_port,
+
+               talkSession.codec.c_str(),
+
+               talkSession.payload_type,
+
+               talkSession.request_transport_type,
+
+               talkSession.answer_transport_type,
+
+               talkSession.acked ? 1 : 0,
+
+               talkSession.uplink_started ? 1 : 0);
+
+
+
+        if (m_started && handle != NULL) {
+
+            const int restartRet = RestartGbTalkBridge("stop_stream");
+
+            if (restartRet != 0) {
+
+                printf("[ProtocolManager] gb talk bridge restart failed ret=%d reason=stop_stream\n", restartRet);
 
             }
 
@@ -8390,7 +8834,7 @@ int ProtocolManager::BuildGbResponseMediaInfo(const char* gbCode,
         if (input != NULL) {
             const std::string requestIp = SafeStr(input->IP, sizeof(input->IP));
             if (!ResolveGbResponseLocalIp(requestIp, (int)input->Port, localIp)) {
-                printf("[ProtocolManager] gb broadcast resolve local ip failed remote=%s:%u gb=%s\n",
+                printf("[ProtocolManager] gb talk resolve local ip failed remote=%s:%u gb=%s\n",
                        requestIp.c_str(),
                        input->Port,
                        gbCode != NULL ? gbCode : "");
@@ -8398,11 +8842,11 @@ int ProtocolManager::BuildGbResponseMediaInfo(const char* gbCode,
         }
 
         if (localIp.empty()) {
-            std::lock_guard<std::mutex> lock(m_gb_broadcast_mutex);
-            localIp = m_gb_broadcast_session.local_ip;
+            std::lock_guard<std::mutex> lock(m_gb_talk_mutex);
+            localIp = m_gb_talk_session.local_ip;
         }
 
-        return BuildGbBroadcastMediaInfo(localIp, gbCode != NULL ? gbCode : "", out, outMap);
+        return BuildGbTalkMediaInfo(gbCode, input, localIp, out, outMap);
 
     }
 
@@ -9841,6 +10285,16 @@ void ProtocolManager::ClearGbBroadcastSessionState()
 
 }
 
+void ProtocolManager::ClearGbTalkSessionState()
+
+{
+
+    std::lock_guard<std::mutex> lock(m_gb_talk_mutex);
+
+    m_gb_talk_session = GbTalkSession();
+
+}
+
 
 
 int ProtocolManager::RestartGbBroadcastBridge(const char* reason)
@@ -9860,6 +10314,43 @@ int ProtocolManager::RestartGbBroadcastBridge(const char* reason)
            m_cfg.gb_broadcast.input_mode.c_str(),
            m_cfg.gb_broadcast.codec.c_str(),
            m_cfg.gb_broadcast.recv_port);
+    return ret;
+
+}
+
+int ProtocolManager::RestartGbTalkBridge(const char* reason)
+
+{
+
+    m_listen.StopSession();
+
+    m_talk_broadcast.StopSession();
+
+    ClearGbTalkSessionState();
+
+    if (!m_started) {
+        return 0;
+    }
+
+    const GbBroadcastParam talkParam = BuildGbTalkBridgeParam(m_cfg);
+    const int ret = m_talk_broadcast.StartSession(talkParam);
+    printf("[ProtocolManager] gb talk bridge restart reason=%s ret=%d codec=%s recv_port=%d sample_rate=%d jitter_buffer_ms=%d\n",
+           reason != NULL ? reason : "",
+           ret,
+           m_cfg.gb_talk.codec.c_str(),
+           m_cfg.gb_talk.recv_port,
+           m_cfg.gb_talk.sample_rate,
+           m_cfg.gb_talk.jitter_buffer_ms);
+
+    if (m_started && ShouldAutoStartGbListen(m_cfg.gb_listen)) {
+        const int listenRet = m_listen.StartSession(m_cfg.gb_listen);
+        printf("[ProtocolManager] gb talk bridge restore listen reason=%s ret=%d target=%s:%d transport=%s\n",
+               reason != NULL ? reason : "",
+               listenRet,
+               m_cfg.gb_listen.target_ip.c_str(),
+               m_cfg.gb_listen.target_port,
+               m_cfg.gb_listen.transport.c_str());
+    }
     return ret;
 
 }

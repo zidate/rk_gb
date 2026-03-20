@@ -192,6 +192,11 @@ int GB28181ListenBridge::StartSession(const GbListenParam& param)
         return -4;
     }
 
+    if (param.sample_rate <= 0) {
+        printf("[GB28181][Listen] invalid sample_rate=%d\n", param.sample_rate);
+        return -5;
+    }
+
     StopSession();
 
     m_param = param;
@@ -223,12 +228,13 @@ int GB28181ListenBridge::StartSession(const GbListenParam& param)
         return ret;
     }
 
-    printf("[GB28181][Listen] start session target=%s:%d codec=%s transport=%s packet_ms=%d\n",
+    printf("[GB28181][Listen] start session target=%s:%d codec=%s transport=%s packet_ms=%d sample_rate=%d\n",
            m_param.target_ip.c_str(),
            m_param.target_port,
            m_param.codec.c_str(),
            m_param.transport.c_str(),
-           m_param.packet_ms);
+           m_param.packet_ms,
+           m_param.sample_rate);
 
     return 0;
 }
@@ -304,7 +310,7 @@ int GB28181ListenBridge::InitAudioInput()
     AUDIOIN_FORMAT format;
     memset(&format, 0, sizeof(format));
     format.BitRate = 64;
-    format.SampleRate = 8000;
+    format.SampleRate = m_param.sample_rate;
     format.SampleBit = 16;
     format.EncodeType = ResolveAudioEncodeType(m_param.codec);
 

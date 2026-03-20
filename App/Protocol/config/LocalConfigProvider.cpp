@@ -37,7 +37,7 @@ std::string BuildConfigLogSummary(const protocol::ProtocolExternalConfig& cfg)
     char buffer[512] = {0};
     snprintf(buffer,
              sizeof(buffer),
-             "version=%s gb_enable=%d gb=%s:%d live=%s/%s:%d flip=%s gat=%s:%d/%d broadcast=%s/%d listen=%s/%s:%d",
+             "version=%s gb_enable=%d gb=%s:%d live=%s/%s:%d flip=%s gat=%s:%d/%d talk=%s/%d/%d broadcast=%s/%d listen=%s/%s:%d",
              cfg.version.c_str(),
              cfg.gb_register.enabled,
              cfg.gb_register.server_ip.c_str(),
@@ -49,6 +49,9 @@ std::string BuildConfigLogSummary(const protocol::ProtocolExternalConfig& cfg)
              cfg.gat_register.server_ip.c_str(),
              cfg.gat_register.server_port,
              cfg.gat_register.listen_port,
+             cfg.gb_talk.codec.c_str(),
+             cfg.gb_talk.recv_port,
+             cfg.gb_talk.sample_rate,
              cfg.gb_broadcast.codec.c_str(),
              cfg.gb_broadcast.recv_port,
              cfg.gb_listen.transport.c_str(),
@@ -145,6 +148,26 @@ bool LoadLocalConfigFile(protocol::ProtocolExternalConfig& cfg)
         cfg.gb_image.flip_mode = value;
     }
 
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "talk_codec", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gb_talk.codec = value;
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "talk_recv_port", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gb_talk.recv_port = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "talk_sample_rate", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gb_talk.sample_rate = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "talk_jitter_buffer_ms", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gb_talk.jitter_buffer_ms = atoi(value);
+    }
+
     return true;
 }
 
@@ -167,6 +190,10 @@ int SaveLocalConfigFile(const protocol::ProtocolExternalConfig& cfg)
     fprintf(fp, "device_id=%s\n", cfg.gb_register.device_id.c_str());
     fprintf(fp, "password=%s\n", cfg.gb_register.password.c_str());
     fprintf(fp, "image_flip_mode=%s\n", cfg.gb_image.flip_mode.c_str());
+    fprintf(fp, "talk_codec=%s\n", cfg.gb_talk.codec.c_str());
+    fprintf(fp, "talk_recv_port=%d\n", cfg.gb_talk.recv_port);
+    fprintf(fp, "talk_sample_rate=%d\n", cfg.gb_talk.sample_rate);
+    fprintf(fp, "talk_jitter_buffer_ms=%d\n", cfg.gb_talk.jitter_buffer_ms);
 
     const int flushRet = fflush(fp);
     const int closeRet = fclose(fp);
@@ -249,6 +276,11 @@ void LocalConfigProvider::InitDefaultConfig()
     m_cached_cfg.gat_register.keepalive_interval_sec = 60;
     m_cached_cfg.gat_register.max_retry = 3;
 
+    m_cached_cfg.gb_talk.codec = "g711a";
+    m_cached_cfg.gb_talk.recv_port = 30003;
+    m_cached_cfg.gb_talk.sample_rate = 8000;
+    m_cached_cfg.gb_talk.jitter_buffer_ms = 80;
+
     m_cached_cfg.gb_broadcast.input_mode = "stream";
     m_cached_cfg.gb_broadcast.codec = "g711a";
     m_cached_cfg.gb_broadcast.recv_port = 30001;
@@ -258,6 +290,7 @@ void LocalConfigProvider::InitDefaultConfig()
     m_cached_cfg.gb_listen.target_ip = "127.0.0.1";
     m_cached_cfg.gb_listen.target_port = 30002;
     m_cached_cfg.gb_listen.codec = "g711a";
+    m_cached_cfg.gb_listen.sample_rate = 8000;
 }
 
 int LocalConfigProvider::PullLatest(ProtocolExternalConfig& out)
@@ -343,6 +376,11 @@ int LocalConfigProvider::Validate(const ProtocolExternalConfig& cfg)
             return -6;
         }
 
+        if (cfg.gb_talk.codec.empty() || cfg.gb_talk.recv_port <= 0 || cfg.gb_talk.sample_rate <= 0) {
+            LogConfigValidateFail(cfg, -7, "gb_talk_params");
+            return -7;
+        }
+
         if (cfg.gb_video.main_codec.empty() || cfg.gb_video.sub_codec.empty()) {
             LogConfigValidateFail(cfg, -16, "gb_video_codec");
             return -16;
@@ -412,6 +450,11 @@ int LocalConfigProvider::Validate(const ProtocolExternalConfig& cfg)
     if (cfg.gb_listen.packet_ms <= 0) {
         LogConfigValidateFail(cfg, -20, "gb_listen_packet_ms");
         return -20;
+    }
+
+    if (cfg.gb_listen.sample_rate <= 0) {
+        LogConfigValidateFail(cfg, -21, "gb_listen_sample_rate");
+        return -21;
     }
 
     return 0;

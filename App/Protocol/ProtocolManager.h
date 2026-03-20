@@ -399,6 +399,74 @@ private:
 
     };
 
+    struct GbTalkSession
+
+    {
+
+        bool active;
+
+        bool acked;
+
+        bool uplink_started;
+
+        StreamHandle stream_handle;
+
+        std::string gb_code;
+
+        std::string remote_ip;
+
+        std::string local_ip;
+
+        int remote_port;
+
+        int local_port;
+
+        int payload_type;
+
+        int request_transport_type;
+
+        int answer_transport_type;
+
+        int sample_rate;
+
+        std::string codec;
+
+        uint64_t invite_ts_ms;
+
+        uint64_t ack_ts_ms;
+
+        GbTalkSession()
+
+            : active(false),
+
+              acked(false),
+
+              uplink_started(false),
+
+              stream_handle(NULL),
+
+              remote_port(0),
+
+              local_port(0),
+
+              payload_type(-1),
+
+              request_transport_type(kRtpOverUdp),
+
+              answer_transport_type(kRtpOverUdp),
+
+              sample_rate(8000),
+
+              invite_ts_ms(0),
+
+              ack_ts_ms(0)
+
+        {
+
+        }
+
+    };
+
 
 
     static int OnGbMediaPlayInfoRespond(StreamHandle handle, const MediaInfo* info, void* userData);
@@ -436,6 +504,16 @@ private:
                                  MediaInfo& out,
 
                                  RtpMap& outMap) const;
+
+    int BuildGbTalkMediaInfo(const char* gbCode,
+
+                            const MediaInfo* input,
+
+                            const std::string& localIp,
+
+                            MediaInfo& out,
+
+                            RtpMap& outMap) const;
 
     int StartGbClientLifecycle();
 
@@ -520,7 +598,11 @@ private:
 
     void ClearGbBroadcastSessionState();
 
+    void ClearGbTalkSessionState();
+
     int RestartGbBroadcastBridge(const char* reason);
+
+    int RestartGbTalkBridge(const char* reason);
 
     int NotifyGbMediaStatus(StreamHandle handle, const std::string& gbCode, int notifyType, const char* reason);
 
@@ -538,6 +620,8 @@ private:
     bool m_gb_osd_alert_enabled;
 
     GB28181BroadcastBridge m_broadcast;
+
+    GB28181BroadcastBridge m_talk_broadcast;
 
     GB28181ListenBridge m_listen;
 
@@ -595,6 +679,10 @@ private:
     mutable std::mutex m_gb_broadcast_mutex;
 
     GbBroadcastSession m_gb_broadcast_session;
+
+    mutable std::mutex m_gb_talk_mutex;
+
+    GbTalkSession m_gb_talk_session;
 
     uint32_t m_gb_current_media_ssrc;
     int m_gb_current_media_port;

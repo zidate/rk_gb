@@ -3599,12 +3599,25 @@ void  CGBClientImpl::OnInvite(const SipData* data)
 		subject = data->messgae.Subject;
 
 
-		if (subject.size() > 20) {
+		size_t end = subject.find_first_of(":,");
+		if (end == std::string::npos) {
+			end = subject.size();
+		}
 
+		std::string subject_device = subject.substr(0, end);
+		while (!subject_device.empty() &&
+		       (subject_device[subject_device.size() - 1] == ' ' ||
+		        subject_device[subject_device.size() - 1] == '\t')) {
+			subject_device.erase(subject_device.size() - 1);
+		}
 
-			memcpy(media_info.DeviceID, subject.substr(0, 20).c_str(), GB_ID_LEN);
-
-
+		if (!subject_device.empty()) {
+			memset(media_info.DeviceID, 0, sizeof(media_info.DeviceID));
+			memcpy(media_info.DeviceID,
+			       subject_device.c_str(),
+			       (subject_device.size() < (sizeof(media_info.DeviceID) - 1))
+			           ? subject_device.size()
+			           : (sizeof(media_info.DeviceID) - 1));
 		}
 
 

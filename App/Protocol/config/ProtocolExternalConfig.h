@@ -70,10 +70,11 @@ struct GbPlaybackParam
 struct GbTalkParam
 {
     std::string codec;
+    int recv_port;
     int sample_rate;
     int jitter_buffer_ms;
 
-    GbTalkParam() : codec("g711a"), sample_rate(8000), jitter_buffer_ms(80) {}
+    GbTalkParam() : codec("g711a"), recv_port(30003), sample_rate(8000), jitter_buffer_ms(80) {}
 };
 
 struct GbPtzParam
@@ -182,8 +183,9 @@ struct GbListenParam
     int target_port;
     std::string codec;
     int packet_ms;
+    int sample_rate;
 
-    GbListenParam() : transport("udp"), target_port(0), codec("g711a"), packet_ms(20) {}
+    GbListenParam() : transport("udp"), target_port(0), codec("g711a"), packet_ms(20), sample_rate(8000) {}
 };
 
 struct GatRegisterParam

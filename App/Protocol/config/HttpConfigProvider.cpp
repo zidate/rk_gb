@@ -365,7 +365,7 @@ std::string BuildConfigLogSummary(const protocol::ProtocolExternalConfig& cfg)
     char buffer[512] = {0};
     snprintf(buffer,
              sizeof(buffer),
-             "version=%s gb=%s:%d live=%s/%s:%d gat=%s:%d/%d broadcast=%s/%d listen=%s/%s:%d",
+             "version=%s gb=%s:%d live=%s/%s:%d gat=%s:%d/%d talk=%s/%d/%d broadcast=%s/%d listen=%s/%s:%d",
              cfg.version.c_str(),
              cfg.gb_register.server_ip.c_str(),
              cfg.gb_register.server_port,
@@ -375,6 +375,9 @@ std::string BuildConfigLogSummary(const protocol::ProtocolExternalConfig& cfg)
              cfg.gat_register.server_ip.c_str(),
              cfg.gat_register.server_port,
              cfg.gat_register.listen_port,
+             cfg.gb_talk.codec.c_str(),
+             cfg.gb_talk.recv_port,
+             cfg.gb_talk.sample_rate,
              cfg.gb_broadcast.codec.c_str(),
              cfg.gb_broadcast.recv_port,
              cfg.gb_listen.transport.c_str(),
@@ -451,6 +454,11 @@ void HttpConfigProvider::InitDefaultConfig()
     m_cached_cfg.gat_register.keepalive_interval_sec = 60;
     m_cached_cfg.gat_register.max_retry = 3;
 
+    m_cached_cfg.gb_talk.codec = "g711a";
+    m_cached_cfg.gb_talk.recv_port = 30003;
+    m_cached_cfg.gb_talk.sample_rate = 8000;
+    m_cached_cfg.gb_talk.jitter_buffer_ms = 80;
+
     m_cached_cfg.gb_broadcast.input_mode = "stream";
     m_cached_cfg.gb_broadcast.codec = "g711a";
     m_cached_cfg.gb_broadcast.recv_port = 30001;
@@ -460,6 +468,7 @@ void HttpConfigProvider::InitDefaultConfig()
     m_cached_cfg.gb_listen.target_ip = "127.0.0.1";
     m_cached_cfg.gb_listen.target_port = 30002;
     m_cached_cfg.gb_listen.codec = "g711a";
+    m_cached_cfg.gb_listen.sample_rate = 8000;
 }
 std::string HttpConfigProvider::BuildUrl(const std::string& suffix) const
 {
@@ -518,6 +527,13 @@ std::string HttpConfigProvider::ToMinimalJson(const ProtocolExternalConfig& cfg)
     json += "\"gb_live_audio_codec\":\"" + cfg.gb_live.audio_codec + "\",";
     snprintf(tmp, sizeof(tmp), "%d", cfg.gb_live.mtu);
     json += "\"gb_live_mtu\":" + std::string(tmp) + ",";
+    json += "\"gb_talk_codec\":\"" + cfg.gb_talk.codec + "\",";
+    snprintf(tmp, sizeof(tmp), "%d", cfg.gb_talk.recv_port);
+    json += "\"gb_talk_recv_port\":" + std::string(tmp) + ",";
+    snprintf(tmp, sizeof(tmp), "%d", cfg.gb_talk.sample_rate);
+    json += "\"gb_talk_sample_rate\":" + std::string(tmp) + ",";
+    snprintf(tmp, sizeof(tmp), "%d", cfg.gb_talk.jitter_buffer_ms);
+    json += "\"gb_talk_jitter_buffer_ms\":" + std::string(tmp) + ",";
     snprintf(tmp, sizeof(tmp), "%d", cfg.gb_live.payload_type);
     json += "\"gb_live_payload_type\":" + std::string(tmp) + ",";
     snprintf(tmp, sizeof(tmp), "%d", cfg.gb_live.ssrc);
@@ -594,7 +610,9 @@ std::string HttpConfigProvider::ToMinimalJson(const ProtocolExternalConfig& cfg)
     json += "\"gb_listen_target_port\":" + std::string(tmp) + ",";
     json += "\"gb_listen_codec\":\"" + cfg.gb_listen.codec + "\",";
     snprintf(tmp, sizeof(tmp), "%d", cfg.gb_listen.packet_ms);
-    json += "\"gb_listen_packet_ms\":" + std::string(tmp);
+    json += "\"gb_listen_packet_ms\":" + std::string(tmp) + ",";
+    snprintf(tmp, sizeof(tmp), "%d", cfg.gb_listen.sample_rate);
+    json += "\"gb_listen_sample_rate\":" + std::string(tmp);
 
     json += "}";
     return json;
@@ -669,6 +687,18 @@ int HttpConfigProvider::PullLatest(ProtocolExternalConfig& out)
     }
     if (FindIntField(body, "gb_live_mtu", ivalue)) {
         next.gb_live.mtu = ivalue;
+    }
+    if (FindStringField(body, "gb_talk_codec", value)) {
+        next.gb_talk.codec = value;
+    }
+    if (FindIntField(body, "gb_talk_recv_port", ivalue)) {
+        next.gb_talk.recv_port = ivalue;
+    }
+    if (FindIntField(body, "gb_talk_sample_rate", ivalue)) {
+        next.gb_talk.sample_rate = ivalue;
+    }
+    if (FindIntField(body, "gb_talk_jitter_buffer_ms", ivalue)) {
+        next.gb_talk.jitter_buffer_ms = ivalue;
     }
     if (FindIntField(body, "gb_live_payload_type", ivalue)) {
         next.gb_live.payload_type = ivalue;
@@ -818,6 +848,9 @@ int HttpConfigProvider::PullLatest(ProtocolExternalConfig& out)
     if (FindIntField(body, "gb_listen_packet_ms", ivalue)) {
         next.gb_listen.packet_ms = ivalue;
     }
+    if (FindIntField(body, "gb_listen_sample_rate", ivalue)) {
+        next.gb_listen.sample_rate = ivalue;
+    }
 
     out = next;
     m_cached_cfg = next;
@@ -943,6 +976,11 @@ int HttpConfigProvider::Validate(const ProtocolExternalConfig& cfg)
         return -8;
     }
 
+    if (cfg.gb_talk.codec.empty() || cfg.gb_talk.recv_port <= 0 || cfg.gb_talk.sample_rate <= 0) {
+        LogConfigValidateFail(cfg, -7, "gb_talk_params");
+        return -7;
+    }
+
     if (cfg.gb_broadcast.codec.empty() || cfg.gb_broadcast.recv_port <= 0) {
         LogConfigValidateFail(cfg, -9, "gb_broadcast_params");
         return -9;
@@ -961,6 +999,11 @@ int HttpConfigProvider::Validate(const ProtocolExternalConfig& cfg)
     if (cfg.gb_listen.packet_ms <= 0) {
         LogConfigValidateFail(cfg, -20, "gb_listen_packet_ms");
         return -20;
+    }
+
+    if (cfg.gb_listen.sample_rate <= 0) {
+        LogConfigValidateFail(cfg, -21, "gb_listen_sample_rate");
+        return -21;
     }
 
     std::string resp;
