@@ -2268,12 +2268,6 @@ void  CGBClientImpl::OnNotify(ProtocolType  type, const SipData* data)
 {
 
 
-	SendSipMessageWithOk(data);
-
-
-
-
-
 	SipMessage message;
 
 
@@ -2283,13 +2277,16 @@ void  CGBClientImpl::OnNotify(ProtocolType  type, const SipData* data)
 	message.code = kSuccessRequest;
 
 
+	message.Method = kSipMessageMethod;
 
+
+	message.content_type = kSipContentMANSCDP_XML;
 
 
 	bool result = true;
 
 
-	int sn;
+	int sn = 0;
 
 
 	NotifyInfo info;
@@ -2304,22 +2301,21 @@ void  CGBClientImpl::OnNotify(ProtocolType  type, const SipData* data)
 	std::string content;
 
 
-	
-
-
 	if (!m_xml_parser->UnPackNotifyInfo(data->messgae.content, sn, info)) {
 
 
 		message.code = kBadRequest;
 
 
+		TVT_LOG_ERROR("gb notify unpack failed"
+		              << " notify_type=" << (int)info.type
+		              << " xml_len=" << (data->messgae.content ? (int)strlen(data->messgae.content) : 0));
+
+
 		goto finally;
 
 
 	}
-
-
-
 
 
 	if (m_gb_receiver && !m_gb_receiver->OnNotify(info.type, info.GBCode, &info)) {
@@ -2329,12 +2325,6 @@ void  CGBClientImpl::OnNotify(ProtocolType  type, const SipData* data)
 
 
 	}
-
-
-	    message.code = kSuccessRequest;
-
-
-
 
 
 finally:
@@ -2349,19 +2339,32 @@ finally:
 	}
 
 
-
-
-
 	m_xml_parser->PackResponse("Broadcast", sn, result, info.GBCode, content);
-
-
-	message.Method = kSipMessageMethod;
 
 
 	message.content = (char*)content.c_str();
 
 
-	m_sip_client->Response(&(data->Dialog), &message);
+	TVT_LOG_INFO("gb notify response"
+	             << " notify_type=" << (int)info.type
+	             << " sn=" << sn
+	             << " gb_code=" << info.GBCode
+	             << " sip_code=" << message.code
+	             << " result=" << (result ? 1 : 0)
+	             << " xml_len=" << (int)content.size());
+
+
+	if (kSipSuccess != m_sip_client->Response(&(data->Dialog), &message)) {
+
+
+		TVT_LOG_ERROR("gb notify response send failed"
+		              << " notify_type=" << (int)info.type
+		              << " sn=" << sn
+		              << " gb_code=" << info.GBCode
+		              << " sip_code=" << message.code);
+
+
+	}
 
 
 }

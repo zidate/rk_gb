@@ -5,6 +5,7 @@
 ## [Unreleased]
 
 ### 修复
+- 修复 GB28181 广播通知 `MESSAGE` 在 `OnNotify()` 中被重复应答的问题，改为单次返回携带 XML 的最终响应，并保留 `400/403` 失败语义与诊断日志。
 - 修复 GB28181 配置仅停留在代码默认值的问题，新增 `/userdata/conf/Config/gb28181.ini` 本地配置落盘、缺省自动生成和开关控制能力。
 - 修复 GB 画面翻转配置未接入设备主配置链路的问题，改为复用 `CFG_CAMERA_PARAM.rotateAttr` 并将 `image_flip_mode` 持久化到 `gb28181.ini`。
 - 修复 GB 远程重启控制缺少冷却保护的问题，新增基于 `gb_reboot.cooldown_sec` 的防抖限制。
