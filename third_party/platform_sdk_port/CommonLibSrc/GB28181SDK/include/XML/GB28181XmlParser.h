@@ -196,6 +196,12 @@ public:
     bool UnPackDevicePresetResponse(const std::string &xml_str, int& sn,  PresetInfo* info);
 
     void PackDeviceRecordIndexResponse(int sn ,const RecordIndex* index, std::string &result);
+    void PackDeviceRecordIndexResponseEx(int sn,
+                                         const char* device_id,
+                                         unsigned int total_num,
+                                         const RecordParam* record_list,
+                                         unsigned int record_num,
+                                         std::string &result);
     bool UnPackDeviceRecordIndexResponse(const std::string &xml_str,  int& sn, int& sum,   RecordIndex* index);
 
 

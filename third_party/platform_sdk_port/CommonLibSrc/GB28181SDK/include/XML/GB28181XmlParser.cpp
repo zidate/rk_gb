@@ -1510,40 +1510,60 @@ bool CGB28181XmlParser::UnPackDevicePresetResponse(const std::string &xml_str, i
    return true;
 }
 
-void CGB28181XmlParser::PackDeviceRecordIndexResponse(int sn ,const RecordIndex* index, std::string &result)
+void CGB28181XmlParser::PackDeviceRecordIndexResponseEx(int sn,
+                                                        const char* device_id,
+                                                        unsigned int total_num,
+                                                        const RecordParam* record_list,
+                                                        unsigned int record_num,
+                                                        std::string &result)
 {
     slothxml::record_index_response_t record;
-    record.DeviceID = index->GBCode;
+    record.DeviceID = device_id ? device_id : "";
     record.CmdType="RecordInfo";
     record.SN = sn;
-    record.SumNum = index->Num;
-   int i = 0;
-   for(  ;i< (int)index->Num; i++) {
+    record.SumNum = total_num;
+   unsigned int i = 0;
+   for(  ;i < record_num; ++i) {
         slothxml::record_list_t  one;
-        one.DeviceID = index->record_list[i].DeviceID;
-        one.EndTime = index->record_list[i].EndTime;
-        one.FilePath = index->record_list[i].FilePath;
+        one.DeviceID = record_list[i].DeviceID;
+        one.EndTime = record_list[i].EndTime;
+        one.FilePath = record_list[i].FilePath;
         if (one.FilePath.empty()) {
             one.skip_FilePath();
         }
-        one.Address = index->record_list[i].Address;
+        one.Address = record_list[i].Address;
         if (one.Address.empty()) {
             one.skip_Address();
         }
-        one.Name = index->record_list[i].Name;
-        one.Secrecy = index->record_list[i].Secrecy;
-        one.StartTime = index->record_list[i].StartTime;
-        one.Type = index->record_list[i].Type;
+        one.Name = record_list[i].Name;
+        one.Secrecy = record_list[i].Secrecy;
+        one.StartTime = record_list[i].StartTime;
+        one.Type = record_list[i].Type;
         record.RecordList.push_back(one);
    }
 
-   if (index->Num == 0) {
+   if (record_num == 0) {
 	   record.skip_RecordList();
    }
 
     if (!slothxml::encode(record,   RESPONSE, result)) {
             result = "";
     }
+}
+
+void CGB28181XmlParser::PackDeviceRecordIndexResponse(int sn ,const RecordIndex* index, std::string &result)
+{
+    if (index == NULL) {
+        result = "";
+        return;
+    }
+
+    PackDeviceRecordIndexResponseEx(sn,
+                                    index->GBCode,
+                                    index->Num,
+                                    index->record_list,
+                                    index->Num,
+                                    result);
 }
 
 bool CGB28181XmlParser::UnPackDeviceRecordIndexResponse(const std::string &xml_str, int& sn, int& sum,   RecordIndex* index)

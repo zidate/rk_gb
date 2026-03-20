@@ -1183,6 +1183,18 @@ int CGBClientImpl::ResponseRecordIndex(ResponseHandle handle, const RecordIndex*
 
 
 
+    if (index == NULL) {
+
+
+        return kGbNullPointer;
+
+
+    }
+
+
+
+
+
     SipMessage message;
 
 
@@ -1192,34 +1204,16 @@ int CGBClientImpl::ResponseRecordIndex(ResponseHandle handle, const RecordIndex*
     message.content_type = kSipContentMANSCDP_XML;
 
 
-
-
-
-    std::string content;
-
-
     int sn = (int)handle;
 
 
+    const size_t kMaxRecordInfoBodyLen = 24000;
 
 
-
-    m_xml_parser->PackDeviceRecordIndexResponse(sn, index, content );
-
-
-    if(content.empty()) {
+	long hNetCommunication = 0;
 
 
-        return kGbXmlEncodeFail;
-
-
-    }
-
-
-
-
-
-	long hNetCommunication;
+    bool tcp_connected = false;
 
 
 	if (trans_mode == 1)
@@ -1228,82 +1222,290 @@ int CGBClientImpl::ResponseRecordIndex(ResponseHandle handle, const RecordIndex*
 	{
 
 
-		StartConnect(hNetCommunication,(char*)m_strIP.c_str(),m_sip_connect_param->port);
+		tcp_connected = StartConnect(hNetCommunication,(char*)m_strIP.c_str(),m_sip_connect_param->port);
+
+
+        if (!tcp_connected) {
+
+
+            return kGbFail;
+
+
+        }
 
 
 	}
 
 
-	if (trans_mode == 0)
+    else if (trans_mode != 0)
 
 
-	{
+    {
+
+
+        return kGbFail;
+
+
+    }
+
+
+    int result = kGb28181Success;
+
+
+    unsigned int total_num = index->Num;
+
+
+    unsigned int start = 0;
+
+
+    unsigned int chunk_index = 0;
+
+
+    do {
+
+
+        std::string content;
+
+
+        unsigned int send_count = 0;
+
+
+        if (total_num == 0) {
+
+
+            m_xml_parser->PackDeviceRecordIndexResponseEx(sn,
+                                                          index->GBCode,
+                                                          0,
+                                                          NULL,
+                                                          0,
+                                                          content);
+
+
+        } else {
+
+
+            std::string best_content;
+
+
+            unsigned int best_count = 0;
+
+
+            unsigned int remain = total_num - start;
+
+
+            for (unsigned int count = 1; count <= remain; ++count) {
+
+
+                std::string candidate_content;
+
+
+                m_xml_parser->PackDeviceRecordIndexResponseEx(sn,
+                                                              index->GBCode,
+                                                              total_num,
+                                                              index->record_list + start,
+                                                              count,
+                                                              candidate_content);
+
+
+                if (candidate_content.empty()) {
+
+
+                    result = kGbXmlEncodeFail;
+
+
+                    break;
+
+
+                }
+
+
+                best_content.swap(candidate_content);
+
+
+                best_count = count;
+
+
+                if (best_content.size() > kMaxRecordInfoBodyLen) {
+
+
+                    if (best_count > 1) {
+
+
+                        best_count -= 1;
+
+
+                        m_xml_parser->PackDeviceRecordIndexResponseEx(sn,
+                                                                      index->GBCode,
+                                                                      total_num,
+                                                                      index->record_list + start,
+                                                                      best_count,
+                                                                      best_content);
+
+
+                    }
+
+
+                    break;
+
+
+                }
+
+
+            }
+
+
+            if (result != kGb28181Success) {
+
+
+                break;
+
+
+            }
+
+
+            content.swap(best_content);
+
+
+            send_count = best_count;
+
+
+        }
+
+
+        if(content.empty()) {
+
+
+            result = kGbXmlEncodeFail;
+
+
+            break;
+
+
+        }
+
+
+        ++chunk_index;
+
+
+        TVT_LOG_INFO("gb recordinfo response chunk"
+                     << " sn=" << sn
+                     << " chunk=" << chunk_index
+                     << " start=" << start
+                     << " count=" << send_count
+                     << " total=" << total_num
+                     << " body_len=" << content.size()
+                     << " trans_mode=" << trans_mode);
 
 
 		message.content = (char*)content.c_str();
 
 
-		int code =  m_sip_client->Message(&message,0,NULL);
-
-
-		if( code != kSipSuccess) {
-
-
-			return kGbFail;
-
-
-		}
-
-
-	}
-
-
-	else if (trans_mode == 1)
-
-
-	{
-
-
-		char* pBuf = NULL;
-
-
-        size_t len = 0;
-
-
-		message.content = (char*)content.c_str();
-
-
-		m_sip_client->MessageToStr(&message, &pBuf, &len);
-
-
-		tint32 nSendLen = Send(hNetCommunication,pBuf,len);
-
-
-        if (nSendLen == (tint32)len)
+		if (trans_mode == 0)
 
 
 		{
 
 
-			m_sip_client->FreeSipBuffer(&pBuf);
+			int code =  m_sip_client->Message(&message,0,NULL);
 
 
-			NET_SOCKET_Stop(hNetCommunication);
+			if( code != kSipSuccess) {
 
 
-			NET_SOCKET_UnRegisterNode(hNetCommunication);
+                result = kGbFail;
 
 
-			NET_SOCKET_DestroyHNetCommunication(hNetCommunication);
+                break;
+
+
+			}
 
 
 		}
 
 
-	}
+		else if (trans_mode == 1)
 
 
-	return kGb28181Success;
+		{
+
+
+			char* pBuf = NULL;
+
+
+            size_t len = 0;
+
+
+			m_sip_client->MessageToStr(&message, &pBuf, &len);
+
+
+			tint32 nSendLen = Send(hNetCommunication,pBuf,len);
+
+
+            m_sip_client->FreeSipBuffer(&pBuf);
+
+
+            if (nSendLen != (tint32)len)
+
+
+			{
+
+
+                result = kGbFail;
+
+
+                break;
+
+
+			}
+
+
+		}
+
+
+        if (total_num == 0) {
+
+
+            break;
+
+
+        }
+
+
+        if (send_count == 0) {
+
+
+            result = kGbFail;
+
+
+            break;
+
+
+        }
+
+
+        start += send_count;
+
+
+    } while (start < total_num);
+
+
+    if (tcp_connected) {
+
+
+        NET_SOCKET_Stop(hNetCommunication);
+
+
+        NET_SOCKET_UnRegisterNode(hNetCommunication);
+
+
+        NET_SOCKET_DestroyHNetCommunication(hNetCommunication);
+
+
+    }
+
+
+	return result;
 
 
 }
