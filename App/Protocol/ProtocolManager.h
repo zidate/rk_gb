@@ -126,6 +126,8 @@ public:
 
                                   RtpMap& outMap) const;
 
+    int HandleGbBroadcastNotify(const char* gbCode, const BroadcastInfo* info);
+
 
 
     int HandleGbAudioStreamRequest(StreamHandle handle, const char* gbCode, const MediaInfo* input);
@@ -336,6 +338,66 @@ private:
 
     };
 
+    struct GbBroadcastSession
+
+    {
+
+        bool active;
+
+        bool acked;
+
+        StreamHandle stream_handle;
+
+        std::string gb_code;
+
+        std::string source_id;
+
+        std::string target_id;
+
+        std::string remote_ip;
+
+        std::string local_ip;
+
+        int remote_port;
+
+        int local_port;
+
+        int payload_type;
+
+        int transport_type;
+
+        std::string codec;
+
+        uint64_t notify_ts_ms;
+
+        uint64_t invite_ts_ms;
+
+        GbBroadcastSession()
+
+            : active(false),
+
+              acked(false),
+
+              stream_handle(NULL),
+
+              remote_port(0),
+
+              local_port(0),
+
+              payload_type(-1),
+
+              transport_type(kRtpOverUdp),
+
+              notify_ts_ms(0),
+
+              invite_ts_ms(0)
+
+        {
+
+        }
+
+    };
+
 
 
     static int OnGbMediaPlayInfoRespond(StreamHandle handle, const MediaInfo* info, void* userData);
@@ -455,6 +517,10 @@ private:
 
     void ClearGbReplaySessionState();
 
+    void ClearGbBroadcastSessionState();
+
+    int RestartGbBroadcastBridge(const char* reason);
+
     int NotifyGbMediaStatus(StreamHandle handle, const std::string& gbCode, int notifyType, const char* reason);
 
 
@@ -524,6 +590,10 @@ private:
     std::mutex m_gb_live_mutex;
 
     GbLiveSession m_gb_live_session;
+
+    mutable std::mutex m_gb_broadcast_mutex;
+
+    GbBroadcastSession m_gb_broadcast_session;
 
     uint32_t m_gb_current_media_ssrc;
     int m_gb_current_media_port;

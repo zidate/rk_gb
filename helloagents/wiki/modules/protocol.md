@@ -19,6 +19,7 @@
 - `gb_register.enabled` 为 `0` 时，`ProtocolManager` 会跳过 GB client 生命周期启动与重注册，但 GAT1400 相关配置校验和生命周期不受影响。
 - GB `TeleBoot` 远程重启已接入冷却保护；短时间内重复命令会被拒绝并打印 `gb teleboot rejected` 日志。
 - GB 广播通知 `MESSAGE` 只能对同一事务返回一次最终 SIP 响应；不要先发空 `200 OK` 再补带 XML 的 `Response`，否则平台只会收到前一个无业务体的应答。
+- GB 广播 `notify -> invite -> ack/bye` 现在有独立会话状态；`notify` 会校验 `TargetID` 是否匹配本机，`INVITE` 的音频 `200 OK` 会优先返回设备侧可达 IP，`BYE` 后会清理播音状态并把广播桥恢复到待机接收态。
 - TCP 实时流要区分 `setup:active` 与 `setup:passive` 方向。
 - SIP `INVITE` 应答不要被同步媒体建链阻塞。
 - GB 回放音频不能按原始 PCM 直接塞给 RTP PS；应与实时流保持一致，按 SDP/`gb.live.audio_codec` 输出 `G711A` 或 `G711U`。

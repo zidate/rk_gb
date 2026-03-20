@@ -64,7 +64,11 @@ bool GB28181ClientReceiverAdapter::OnNotify(NotifyType type, const char* gb_code
            sourceId.c_str(),
            targetId.c_str());
 
-    return true;
+    if (m_manager == NULL) {
+        return false;
+    }
+
+    return (m_manager->HandleGbBroadcastNotify(gb_code, broadcastInfo) == 0);
 }
 
 
