@@ -563,6 +563,10 @@ std::string HttpConfigProvider::ToMinimalJson(const ProtocolExternalConfig& cfg)
     json += "\"gb_osd_event_enabled\":" + std::string(tmp) + ",";
     snprintf(tmp, sizeof(tmp), "%d", cfg.gb_osd.alert_enabled);
     json += "\"gb_osd_alert_enabled\":" + std::string(tmp) + ",";
+    snprintf(tmp, sizeof(tmp), "%d", cfg.gb_reboot.cooldown_sec);
+    json += "\"gb_reboot_cooldown_sec\":" + std::string(tmp) + ",";
+    snprintf(tmp, sizeof(tmp), "%d", cfg.gb_reboot.require_auth_level);
+    json += "\"gb_reboot_require_auth_level\":" + std::string(tmp) + ",";
 
     json += "\"gat_register_server_ip\":\"" + cfg.gat_register.server_ip + "\",";
     snprintf(tmp, sizeof(tmp), "%d", cfg.gat_register.server_port);
@@ -754,6 +758,12 @@ int HttpConfigProvider::PullLatest(ProtocolExternalConfig& out)
     }
     if (FindIntField(body, "gb_osd_alert_enabled", ivalue)) {
         next.gb_osd.alert_enabled = ivalue;
+    }
+    if (FindIntField(body, "gb_reboot_cooldown_sec", ivalue)) {
+        next.gb_reboot.cooldown_sec = ivalue;
+    }
+    if (FindIntField(body, "gb_reboot_require_auth_level", ivalue)) {
+        next.gb_reboot.require_auth_level = ivalue;
     }
 
     if (FindStringField(body, "gat_register_server_ip", value)) {
@@ -1027,7 +1037,7 @@ int HttpConfigProvider::QueryCapabilities(std::string& outJson)
         return 0;
     }
 
-    outJson = "{\"mandatory\":[\"gb.register\",\"gb.live\",\"gb.playback\",\"gb.talk\",\"gb.ptz\",\"gb.video\",\"gb.reboot\",\"gb.image\",\"gb.osd\",\"gb.alarm\",\"gb.multistream\",\"gb.broadcast\",\"gb.listen\",\"gat.register\",\"gat.upload\",\"gat.capture\",\"cloud.fast_access\"]}";
+    outJson = "{\"mandatory\":[\"gb.register\",\"gb.live\",\"gb.playback\",\"gb.talk\",\"gb.ptz\",\"gb.video\",\"gb.reboot\",\"gb.upgrade\",\"gb.image\",\"gb.osd\",\"gb.alarm\",\"gb.multistream\",\"gb.broadcast\",\"gb.listen\",\"gat.register\",\"gat.upload\",\"gat.capture\",\"cloud.fast_access\"]}";
     return 0;
 }
 

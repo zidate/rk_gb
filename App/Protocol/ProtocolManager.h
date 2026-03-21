@@ -542,6 +542,7 @@ private:
     int HandleGbTeleBootControl(const DevControlCmd* cmd);
 
     int HandleGbDeviceUpgradeControl(const DevControlCmd* cmd);
+    static void* GbUpgradeApplyThread(void* arg);
 
     int NotifyGbUpgradeResult(const char* gbCode,
                               const char* sessionId,
@@ -648,6 +649,7 @@ private:
     std::thread m_gb_heartbeat_thread;
 
     std::atomic<bool> m_gb_heartbeat_running;
+    std::atomic<bool> m_gb_upgrade_running;
 
     bool m_gb_client_started;
 

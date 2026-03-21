@@ -43,8 +43,10 @@
 
 #include "Storage_api.h"
 #include "Manager/ConfigManager.h"
+#include "Manager/EventManager.h"
 #include "ExchangeAL/CameraExchange.h"
 #include "ExchangeAL/ExchangeKind.h"
+#include "Update/update.h"
 
 #include "Ptz/Ptz.h"
 
@@ -109,12 +111,19 @@ static const int kRkOsdDateTimeId = 1;
 static const int kRkOsdCustomTextId = 2;
 static const char* kGbUpgradePackagePath = "/tmp/upgrade.bin";
 static const char* kGbUpgradePackageTempPath = "/tmp/upgrade.bin.download";
-static const char* kGbUpgradeTriggerFlag = "/tmp/ota_upgrade_flag";
 static const char* kGbUpgradeConfigPendingKey = "GbPending";
 static const char* kGbUpgradeConfigSessionKey = "GbSessionID";
 static const char* kGbUpgradeConfigFirmwareKey = "GbFirmware";
 static const char* kGbUpgradeConfigDeviceKey = "GbDeviceID";
 static const char* kGbUpgradeConfigDescriptionKey = "GbDescription";
+static const char* kGbUpgradeReleaseEvent = "UpgradeReleaseResource";
+
+struct GbUpgradeThreadContext
+{
+    protocol::ProtocolManager* manager;
+
+    GbUpgradeThreadContext() : manager(NULL) {}
+};
 
 
 
@@ -2336,6 +2345,42 @@ static void* GbRemoteRestartThread(void* arg)
 
 }
 
+static void LoadGbUpgradePendingIdentity(std::string& gbCode,
+                                         std::string& sessionId,
+                                         std::string& firmware)
+{
+    gbCode.clear();
+    sessionId.clear();
+    firmware.clear();
+
+    CConfigTable table;
+    if (!g_configManager.getConfig(getConfigName(CFG_UPDATE), table)) {
+        return;
+    }
+
+    gbCode = TrimWhitespaceCopy(table.get(kGbUpgradeConfigDeviceKey, "").asString());
+    sessionId = TrimWhitespaceCopy(table.get(kGbUpgradeConfigSessionKey, "").asString());
+    firmware = TrimWhitespaceCopy(table.get(kGbUpgradeConfigFirmwareKey, "").asString());
+}
+
+static void ClearGbUpgradePendingState(protocol::ProtocolManager* manager, const char* description)
+{
+    std::string gbCode;
+    std::string sessionId;
+    std::string firmware;
+    LoadGbUpgradePendingIdentity(gbCode, sessionId, firmware);
+
+    CConfigTable table;
+    g_configManager.getConfig(getConfigName(CFG_UPDATE), table);
+    table["Status"] = table.get("Status", 0).asInt();
+    table[kGbUpgradeConfigPendingKey] = 0;
+    table[kGbUpgradeConfigDeviceKey] = gbCode;
+    table[kGbUpgradeConfigSessionKey] = sessionId;
+    table[kGbUpgradeConfigFirmwareKey] = firmware;
+    table[kGbUpgradeConfigDescriptionKey] = (description != NULL) ? description : "";
+    g_configManager.setConfig(getConfigName(CFG_UPDATE), table, 0, IConfigManager::applyOK);
+}
+
 
 
 static bool IsGbSdkSuccess(int ret)
@@ -3129,6 +3174,41 @@ namespace protocol
 
 
 
+void* ProtocolManager::GbUpgradeApplyThread(void* arg)
+{
+    std::unique_ptr<GbUpgradeThreadContext> ctx(static_cast<GbUpgradeThreadContext*>(arg));
+    ProtocolManager* manager = (ctx.get() != NULL) ? ctx->manager : NULL;
+    if (manager == NULL) {
+        return NULL;
+    }
+
+    usleep(500 * 1000);
+
+    printf("[ProtocolManager] gb upgrade apply start package=%s\n",
+           kGbUpgradePackagePath);
+
+    IEventManager::instance()->notify(kGbUpgradeReleaseEvent, 0, appEventPulse, NULL, NULL, NULL);
+    usleep(500 * 1000);
+
+    const int updateRet = DG_update((char*)kGbUpgradePackagePath);
+    printf("[ProtocolManager] gb upgrade apply finish package=%s ret=%d\n",
+           kGbUpgradePackagePath,
+           updateRet);
+    sync();
+
+    if (RunShellCommand("reboot -f") != 0) {
+        printf("[ProtocolManager] gb upgrade reboot command failed package=%s\n",
+               kGbUpgradePackagePath);
+        ClearGbUpgradePendingState(manager, "reboot_command_failed");
+        manager->m_gb_upgrade_running.store(false);
+        return NULL;
+    }
+
+    manager->m_gb_upgrade_running.store(false);
+    return NULL;
+}
+
+
 ProtocolManager::ProtocolManager()
 
     : m_gb_receiver(this),
@@ -3146,6 +3226,7 @@ ProtocolManager::ProtocolManager()
       m_gb_time_sync_user(NULL),
 
       m_gb_heartbeat_running(false),
+      m_gb_upgrade_running(false),
 
       m_gb_client_started(false),
 
@@ -6856,6 +6937,19 @@ int ProtocolManager::HandleGbDeviceUpgradeControl(const DevControlCmd* cmd)
     const bool forceUpgrade = (upgrade.ForceUpgrade != 0);
     bool packageInstalled = false;
 
+    if (m_gb_upgrade_running.load()) {
+        printf("[ProtocolManager] gb upgrade rejected ret=%d reason=%s firmware=%s manufacturer=%s session=%s force=%d url=%s gb=%s\n",
+               -115,
+               "upgrade_busy",
+               firmware.c_str(),
+               manufacturer.c_str(),
+               sessionId.c_str(),
+               forceUpgrade ? 1 : 0,
+               fileUrl.c_str(),
+               cmd->GBCode);
+        return -115;
+    }
+
     const auto fail = [&](int code, const char* reason) -> int {
 
         PersistGbUpgradePendingState(cmd->GBCode,
@@ -6864,14 +6958,7 @@ int ProtocolManager::HandleGbDeviceUpgradeControl(const DevControlCmd* cmd)
                                      reason,
                                      false);
 
-        NotifyGbUpgradeResult(cmd->GBCode,
-                              sessionId.c_str(),
-                              firmware.c_str(),
-                              false,
-                              reason);
-
         RemoveFileQuietly(kGbUpgradePackageTempPath);
-        RemoveFileQuietly(kGbUpgradeTriggerFlag);
         if (packageInstalled) {
 
             RemoveFileQuietly(kGbUpgradePackagePath);
@@ -6935,7 +7022,6 @@ int ProtocolManager::HandleGbDeviceUpgradeControl(const DevControlCmd* cmd)
 
 
     RemoveFileQuietly(kGbUpgradePackageTempPath);
-    RemoveFileQuietly(kGbUpgradeTriggerFlag);
 
     const int downloadTimeout = (m_cfg.gb_upgrade.timeout_sec > 0) ? m_cfg.gb_upgrade.timeout_sec : 120;
     const int downloadRet = DownloadFileByCurl(fileUrl, kGbUpgradePackageTempPath, downloadTimeout);
@@ -7023,35 +7109,22 @@ int ProtocolManager::HandleGbDeviceUpgradeControl(const DevControlCmd* cmd)
     packageInstalled = true;
     sync();
 
-    if (!TouchFileMarker(kGbUpgradeTriggerFlag)) {
-
-        printf("[ProtocolManager] gb upgrade trigger create failed errno=%d flag=%s gb=%s\n",
-
-               errno,
-
-               kGbUpgradeTriggerFlag,
-
-               cmd->GBCode);
-
-        return fail(-114, "trigger_failed");
-
-    }
-
-    sync();
-
     PersistGbUpgradePendingState(cmd->GBCode,
                                  sessionId.c_str(),
                                  firmware.c_str(),
-                                 "accepted_for_upgrade",
+                                 "",
                                  true);
 
-    NotifyGbUpgradeResult(cmd->GBCode,
-                          sessionId.c_str(),
-                          firmware.c_str(),
-                          true,
-                          "accepted_for_upgrade");
+    std::unique_ptr<GbUpgradeThreadContext> threadCtx(new GbUpgradeThreadContext());
+    threadCtx->manager = this;
+    m_gb_upgrade_running.store(true);
+    if (!CreateDetachedThread((char*)"gb_upgrade_apply", ProtocolManager::GbUpgradeApplyThread, threadCtx.get(), true)) {
+        m_gb_upgrade_running.store(false);
+        return fail(-114, "apply_thread_failed");
+    }
+    threadCtx.release();
 
-    printf("[ProtocolManager] gb upgrade staged firmware=%s manufacturer=%s session=%s force=%d expected_size=%llu actual_size=%llu checksum=%s package=%s flag=%s gb=%s\n",
+    printf("[ProtocolManager] gb upgrade staged firmware=%s manufacturer=%s session=%s force=%d expected_size=%llu actual_size=%llu checksum=%s package=%s gb=%s\n",
 
            firmware.c_str(),
 
@@ -7068,8 +7141,6 @@ int ProtocolManager::HandleGbDeviceUpgradeControl(const DevControlCmd* cmd)
            expectedChecksum.empty() ? "none" : expectedChecksum.c_str(),
 
            kGbUpgradePackagePath,
-
-           kGbUpgradeTriggerFlag,
 
            cmd->GBCode);
 

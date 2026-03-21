@@ -32,6 +32,45 @@ std::string JoinConfigList(const std::vector<std::string>& values)
     return out;
 }
 
+std::string TrimCopy(const std::string& input)
+{
+    size_t begin = 0;
+    while (begin < input.size() && (input[begin] == ' ' || input[begin] == '\t' || input[begin] == '\r' || input[begin] == '\n')) {
+        ++begin;
+    }
+
+    size_t end = input.size();
+    while (end > begin && (input[end - 1] == ' ' || input[end - 1] == '\t' || input[end - 1] == '\r' || input[end - 1] == '\n')) {
+        --end;
+    }
+
+    return input.substr(begin, end - begin);
+}
+
+std::vector<std::string> SplitConfigList(const std::string& input)
+{
+    std::vector<std::string> out;
+    std::string current;
+    for (size_t i = 0; i < input.size(); ++i) {
+        const char ch = input[i];
+        if (ch == ',' || ch == ';' || ch == '\n' || ch == '\r') {
+            const std::string item = TrimCopy(current);
+            if (!item.empty()) {
+                out.push_back(item);
+            }
+            current.clear();
+            continue;
+        }
+        current.push_back(ch);
+    }
+
+    const std::string tail = TrimCopy(current);
+    if (!tail.empty()) {
+        out.push_back(tail);
+    }
+    return out;
+}
+
 std::string BuildConfigLogSummary(const protocol::ProtocolExternalConfig& cfg)
 {
     char buffer[512] = {0};
@@ -168,6 +207,36 @@ bool LoadLocalConfigFile(protocol::ProtocolExternalConfig& cfg)
         cfg.gb_talk.jitter_buffer_ms = atoi(value);
     }
 
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "reboot_cooldown_sec", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gb_reboot.cooldown_sec = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "reboot_require_auth_level", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gb_reboot.require_auth_level = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "upgrade_url_whitelist", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gb_upgrade.url_whitelist = SplitConfigList(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "upgrade_max_package_mb", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gb_upgrade.max_package_mb = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "upgrade_verify_mode", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gb_upgrade.verify_mode = value;
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "upgrade_timeout_sec", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gb_upgrade.timeout_sec = atoi(value);
+    }
+
     return true;
 }
 
@@ -194,6 +263,12 @@ int SaveLocalConfigFile(const protocol::ProtocolExternalConfig& cfg)
     fprintf(fp, "talk_recv_port=%d\n", cfg.gb_talk.recv_port);
     fprintf(fp, "talk_sample_rate=%d\n", cfg.gb_talk.sample_rate);
     fprintf(fp, "talk_jitter_buffer_ms=%d\n", cfg.gb_talk.jitter_buffer_ms);
+    fprintf(fp, "reboot_cooldown_sec=%d\n", cfg.gb_reboot.cooldown_sec);
+    fprintf(fp, "reboot_require_auth_level=%d\n", cfg.gb_reboot.require_auth_level);
+    fprintf(fp, "upgrade_url_whitelist=%s\n", JoinConfigList(cfg.gb_upgrade.url_whitelist).c_str());
+    fprintf(fp, "upgrade_max_package_mb=%d\n", cfg.gb_upgrade.max_package_mb);
+    fprintf(fp, "upgrade_verify_mode=%s\n", cfg.gb_upgrade.verify_mode.c_str());
+    fprintf(fp, "upgrade_timeout_sec=%d\n", cfg.gb_upgrade.timeout_sec);
 
     const int flushRet = fflush(fp);
     const int closeRet = fclose(fp);
@@ -280,6 +355,12 @@ void LocalConfigProvider::InitDefaultConfig()
     m_cached_cfg.gb_talk.recv_port = 30003;
     m_cached_cfg.gb_talk.sample_rate = 8000;
     m_cached_cfg.gb_talk.jitter_buffer_ms = 80;
+    m_cached_cfg.gb_reboot.cooldown_sec = 60;
+    m_cached_cfg.gb_reboot.require_auth_level = 1;
+    m_cached_cfg.gb_upgrade.url_whitelist.clear();
+    m_cached_cfg.gb_upgrade.max_package_mb = 128;
+    m_cached_cfg.gb_upgrade.verify_mode = "md5";
+    m_cached_cfg.gb_upgrade.timeout_sec = 120;
 
     m_cached_cfg.gb_broadcast.input_mode = "stream";
     m_cached_cfg.gb_broadcast.codec = "g711a";
@@ -457,6 +538,18 @@ int LocalConfigProvider::Validate(const ProtocolExternalConfig& cfg)
         return -21;
     }
 
+    if (cfg.gb_reboot.cooldown_sec < 0 || cfg.gb_reboot.require_auth_level < 0) {
+        LogConfigValidateFail(cfg, -22, "gb_reboot");
+        return -22;
+    }
+
+    const std::string verifyMode = TrimCopy(cfg.gb_upgrade.verify_mode);
+    if (cfg.gb_upgrade.max_package_mb <= 0 || cfg.gb_upgrade.timeout_sec <= 0 ||
+        (verifyMode != "md5" && verifyMode != "sha256")) {
+        LogConfigValidateFail(cfg, -23, "gb_upgrade");
+        return -23;
+    }
+
     return 0;
 }
 
@@ -464,7 +557,7 @@ int LocalConfigProvider::QueryCapabilities(std::string& outJson)
 {
     outJson =
         "{\"mandatory\":[\"gb.register\",\"gb.live\",\"gb.playback\",\"gb.talk\",\"gb.ptz\",\"gb.video\","
-        "\"gb.reboot\",\"gb.image\",\"gb.osd\",\"gb.alarm\",\"gb.multistream\",\"gb.broadcast\",\"gb.listen\","
+        "\"gb.reboot\",\"gb.upgrade\",\"gb.image\",\"gb.osd\",\"gb.alarm\",\"gb.multistream\",\"gb.broadcast\",\"gb.listen\","
         "\"gat.register\",\"gat.upload\",\"gat.capture\",\"cloud.fast_access\"],"
         "\"storage\":\"local\",\"upgrade_verify_modes\":\"" + m_cached_cfg.gb_upgrade.verify_mode + "\","
         "\"gb_upgrade_url_whitelist\":\"" + JoinConfigList(m_cached_cfg.gb_upgrade.url_whitelist) + "\"}";
