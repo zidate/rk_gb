@@ -333,13 +333,14 @@ int CGBClientImpl::Register(const GBRegistParam* gb_param, const ConnectParam* g
     m_sip_regist_param->new_reg = true;
 
 
-    m_sip_regist_param->user_name = (char*)gb_param->username;
+    // Keep all long-lived SIP parameter pointers backed by the SDK-owned copies.
+    m_sip_regist_param->user_name = m_gb_regist_param->username;
 
 
-    m_sip_regist_param->password = (char*)gb_param->password;
+    m_sip_regist_param->password = m_gb_regist_param->password;
 
 
-    m_sip_regist_param->expires = gb_param->expires;
+    m_sip_regist_param->expires = m_gb_regist_param->expires;
 
 
     m_sip_regist_param->auth_flag = false;
@@ -351,16 +352,16 @@ int CGBClientImpl::Register(const GBRegistParam* gb_param, const ConnectParam* g
 
 
 
-    m_sip_connect_param->ip = (char*)gb_connect->ip;
+    m_sip_connect_param->ip = m_gb_connect->ip;
 
 
-    m_sip_connect_param->port = gb_connect->port;
+    m_sip_connect_param->port = m_gb_connect->port;
 
 
-    m_sip_connect_param->sip_code = (char*)gb_connect->GBCode;
+    m_sip_connect_param->sip_code = m_gb_connect->GBCode;
 
 
-	m_strIP = (char*)gb_connect->ip;
+	m_strIP = m_gb_connect->ip;
 
 
 
@@ -4072,8 +4073,8 @@ int CGBClientImpl::StartBroadcastStreamRequest(const char* target_id,
     }
 
     MediaInfo request = *input;
-    GBUtil::memcpy_safe(request.DeviceID, sizeof(request.DeviceID), target_id);
-    return StreamRequestEx(&request, target_id, target_id, m_xml_parser->m_local_code.c_str(), result, stream_handle);
+    const char* subject_sender_id = request.DeviceID[0] != '\0' ? request.DeviceID : target_id;
+    return StreamRequestEx(&request, target_id, subject_sender_id, m_xml_parser->m_local_code.c_str(), result, stream_handle);
 }
 
 

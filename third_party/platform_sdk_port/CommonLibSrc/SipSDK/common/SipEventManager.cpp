@@ -1333,12 +1333,16 @@ int CSipEventManager::BuildInvite(ClientInfo *client,const  SipMessage* sendData
        osip_message_t *invite= NULL;
 
        if( sendData->To && sendData->From  ){
+           const char* route = NULL;
+           if (client != NULL && !client->route.empty()) {
+               route = client->route.c_str();
+           }
 
            res = eXosip_call_build_initial_invite(   m_sip_context ,
                                                                     &invite,
                                                                     sendData->To,
                                                                     sendData->From,
-                                                                    sendData->To,
+                                                                    route,
                                                                     NULL
                                                                      );
        }else{
