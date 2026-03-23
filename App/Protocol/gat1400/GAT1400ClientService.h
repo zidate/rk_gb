@@ -2,6 +2,7 @@
 #define __GAT1400_CLIENT_SERVICE_H__
 
 #include <atomic>
+#include <ctime>
 #include <list>
 #include <map>
 #include <mutex>
@@ -30,6 +31,24 @@ public:
         HttpResponse() : status_code(0) {}
     };
 
+    struct PendingUploadItem
+    {
+        std::string id;
+        std::string method;
+        std::string path;
+        std::string content_type;
+        std::string response_kind;
+        std::string body;
+        std::string category;
+        std::string object_id;
+        std::string last_error;
+        std::string persist_path;
+        int attempt_count;
+        time_t enqueue_time;
+
+        PendingUploadItem() : attempt_count(0), enqueue_time(0) {}
+    };
+
     GAT1400ClientService();
     ~GAT1400ClientService();
 
@@ -45,6 +64,10 @@ public:
     void RemoveRegistStatusObserver(CLower1400RegistStatusObserver* observer);
 
     int GetTime(std::string& outTime);
+    int Register();
+    int Unregister();
+    int Keepalive();
+    int SendHttpCommand(const std::string& url, unsigned int method, unsigned int format, const std::string& content);
     int PostFaces(const std::list<GAT_1400_Face>& faceList);
     int PostPersons(const std::list<GAT_1400_Person>& personList);
     int PostMotorVehicles(const std::list<GAT_1400_Motor>& motorList);
@@ -64,7 +87,10 @@ public:
     int PostApes(const std::list<GAT_1400_Ape>& apeList);
 
     std::list<GAT_1400_Subscribe> GetSubscriptions() const;
-    int PostJsonWithResponseList(const char* action, const char* path, const std::string& body);
+    int PostJsonWithResponseList(const char* action,
+                                 const char* path,
+                                 const std::string& body,
+                                 const std::string* overrideUrl = NULL);
 
 private:
     int StartServerLocked();
@@ -87,6 +113,7 @@ private:
                        const std::string& deviceId,
                        const std::string& method,
                        const std::string& path,
+                       const std::string& contentType,
                        const std::string& body,
                        HttpResponse& response,
                        const std::string* overrideUrl = NULL) const;
@@ -95,7 +122,22 @@ private:
                                    const char* path,
                                    const std::string& body,
                                    const std::string* overrideUrl = NULL);
-    int PostBinaryData(const char* action, const std::string& path, const std::string& data);
+    int PostBinaryData(const char* action,
+                       const std::string& path,
+                       const std::string& data,
+                       const std::string* overrideUrl = NULL);
+    int EnqueuePendingUpload(const char* action,
+                             const std::string& method,
+                             const std::string& path,
+                             const std::string& contentType,
+                             const std::string& responseKind,
+                             const std::string& body,
+                             const std::string& objectId,
+                             const std::string& lastError);
+    void LoadPendingUploadsLocked(const ProtocolExternalConfig& cfg);
+    void ClearPendingUploadsLocked();
+    int ReplayPendingUploads();
+    int ReplayPendingUploadsIfDue();
 
     int SnapshotConfig(ProtocolExternalConfig& cfg, GbRegisterParam& gbRegister, std::string& deviceId) const;
     void UpdateRegistState(regist_state state);
@@ -120,6 +162,10 @@ private:
 
     mutable std::mutex m_subscribe_mutex;
     std::map<std::string, GAT_1400_Subscribe> m_subscriptions;
+    mutable std::mutex m_pending_mutex;
+    std::list<PendingUploadItem> m_pending_uploads;
+    unsigned long long m_pending_seq;
+    time_t m_last_replay_time;
 
     mutable std::mutex m_observer_mutex;
     std::vector<CLower1400SubscribeObserver*> m_subscribe_observers;

@@ -9,11 +9,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <dirent.h>
 #include <functional>
 #include <iterator>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sstream>
+#include <sys/stat.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/time.h>
@@ -32,6 +34,22 @@ namespace
 static const int kHttpTimeoutMs = 5000;
 static const int kAcceptWaitMs = 500;
 static const char* kJsonContentType = "application/VIID+json;charset=UTF-8";
+static const char* kPendingUploadFileSuffix = ".req";
+static const char* kResponseKindList = "list";
+static const char* kResponseKindStatus = "status";
+static const int kClientErrorUnsupportedUri = -6;
+static const int kClientErrorApePostCompatDisabled = -7;
+
+struct RequestTarget
+{
+    std::string scheme;
+    std::string host;
+    int port;
+    std::string request_path;
+    int timeout_ms;
+
+    RequestTarget() : scheme("http"), port(80), request_path("/"), timeout_ms(kHttpTimeoutMs) {}
+};
 
 std::string ToLowerCopy(const std::string& input)
 {
@@ -223,27 +241,464 @@ std::vector<int> ParseRetryPolicy(const std::string& policy)
     return delays;
 }
 
-bool ParseHttpUrl(const std::string& url, std::string& host, int& port, std::string& path)
+std::string NormalizeBasePath(const std::string& input)
 {
-    const std::string prefix("http://");
-    if (url.compare(0, prefix.size(), prefix) != 0) {
+    std::string path = TrimCopy(input);
+    if (path.empty() || path == "/") {
+        return "";
+    }
+
+    if (path[0] != '/') {
+        path.insert(path.begin(), '/');
+    }
+    while (path.size() > 1 && path[path.size() - 1] == '/') {
+        path.erase(path.size() - 1);
+    }
+    return path;
+}
+
+std::string BuildRequestPath(const std::string& basePath, const std::string& path)
+{
+    const std::string normalizedBase = NormalizeBasePath(basePath);
+    std::string normalizedPath = TrimCopy(path);
+    if (normalizedPath.empty()) {
+        normalizedPath = "/";
+    }
+    if (normalizedPath[0] != '/') {
+        normalizedPath.insert(normalizedPath.begin(), '/');
+    }
+    if (normalizedBase.empty()) {
+        return normalizedPath;
+    }
+    return (normalizedPath == "/") ? normalizedBase : (normalizedBase + normalizedPath);
+}
+
+bool ParseRequestUrl(const std::string& url, RequestTarget& out)
+{
+    const std::string::size_type schemeEnd = url.find("://");
+    if (schemeEnd == std::string::npos || schemeEnd == 0) {
         return false;
     }
 
-    std::string remain = url.substr(prefix.size());
+    out.scheme = ToLowerCopy(url.substr(0, schemeEnd));
+    std::string remain = url.substr(schemeEnd + 3);
     std::string::size_type slash = remain.find('/');
     std::string hostPort = remain.substr(0, slash);
-    path = (slash == std::string::npos) ? "/" : remain.substr(slash);
-
-    std::string::size_type colon = hostPort.find(':');
-    if (colon == std::string::npos) {
-        host = hostPort;
-        port = 80;
-    } else {
-        host = hostPort.substr(0, colon);
-        port = atoi(hostPort.substr(colon + 1).c_str());
+    out.request_path = (slash == std::string::npos) ? "/" : remain.substr(slash);
+    if (hostPort.empty()) {
+        return false;
     }
-    return !host.empty() && port > 0;
+
+    out.port = (out.scheme == "https") ? 443 : 80;
+    std::string::size_type colon = hostPort.rfind(':');
+    if (colon != std::string::npos) {
+        out.host = hostPort.substr(0, colon);
+        const std::string portText = hostPort.substr(colon + 1);
+        if (out.host.empty() || portText.empty()) {
+            return false;
+        }
+        out.port = atoi(portText.c_str());
+    } else {
+        out.host = hostPort;
+    }
+    return !out.host.empty() && out.port > 0;
+}
+
+std::string BuildRequestUrl(const RequestTarget& target)
+{
+    std::ostringstream oss;
+    oss << target.scheme << "://" << target.host << ":" << target.port << target.request_path;
+    return oss.str();
+}
+
+bool BuildRequestTarget(const ProtocolExternalConfig& cfg,
+                        const std::string& path,
+                        const std::string* overrideUrl,
+                        RequestTarget& out)
+{
+    out.scheme = ToLowerCopy(cfg.gat_register.scheme.empty() ? "http" : cfg.gat_register.scheme);
+    out.host = cfg.gat_register.server_ip;
+    out.port = cfg.gat_register.server_port;
+    out.timeout_ms = cfg.gat_register.request_timeout_ms > 0 ? cfg.gat_register.request_timeout_ms : kHttpTimeoutMs;
+    out.request_path = BuildRequestPath(cfg.gat_register.base_path, path);
+
+    if (overrideUrl == NULL || overrideUrl->empty()) {
+        return !out.host.empty() && out.port > 0;
+    }
+
+    const std::string trimmed = TrimCopy(*overrideUrl);
+    if (trimmed.empty()) {
+        return !out.host.empty() && out.port > 0;
+    }
+    if (trimmed.find("://") != std::string::npos) {
+        if (!ParseRequestUrl(trimmed, out)) {
+            return false;
+        }
+        out.timeout_ms = cfg.gat_register.request_timeout_ms > 0 ? cfg.gat_register.request_timeout_ms : kHttpTimeoutMs;
+        return true;
+    }
+
+    out.request_path = BuildRequestPath(cfg.gat_register.base_path, trimmed);
+    return !out.host.empty() && out.port > 0;
+}
+
+std::string JoinFilePath(const std::string& dir, const std::string& fileName)
+{
+    if (dir.empty()) {
+        return fileName;
+    }
+    if (dir[dir.size() - 1] == '/') {
+        return dir + fileName;
+    }
+    return dir + "/" + fileName;
+}
+
+bool EnsureDirectoryExists(const std::string& dir)
+{
+    if (dir.empty()) {
+        return false;
+    }
+
+    std::string normalized = dir;
+    if (normalized[normalized.size() - 1] != '/') {
+        normalized += "/";
+    }
+
+    std::string current;
+    for (size_t i = 0; i < normalized.size(); ++i) {
+        current.push_back(normalized[i]);
+        if (normalized[i] != '/') {
+            continue;
+        }
+        if (current.empty() || access(current.c_str(), F_OK) == 0) {
+            continue;
+        }
+        if (mkdir(current.c_str(), 0777) != 0 && errno != EEXIST) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ReadFileText(const std::string& path, std::string& out)
+{
+    out.clear();
+    FILE* fp = fopen(path.c_str(), "rb");
+    if (fp == NULL) {
+        return false;
+    }
+
+    char buffer[4096];
+    size_t bytes = 0;
+    while ((bytes = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
+        out.append(buffer, bytes);
+    }
+    const bool ok = (ferror(fp) == 0);
+    fclose(fp);
+    return ok;
+}
+
+bool WriteFileText(const std::string& path, const std::string& data)
+{
+    FILE* fp = fopen(path.c_str(), "wb");
+    if (fp == NULL) {
+        return false;
+    }
+    bool ok = fwrite(data.data(), 1, data.size(), fp) == data.size();
+    if (ok) {
+        ok = fflush(fp) == 0;
+    }
+    const int closeRet = fclose(fp);
+    return ok && closeRet == 0;
+}
+
+bool RemoveFileIfExists(const std::string& path)
+{
+    return path.empty() || unlink(path.c_str()) == 0 || errno == ENOENT;
+}
+
+std::string BuildPendingFileName(unsigned long long seq)
+{
+    char buffer[96] = {0};
+    snprintf(buffer, sizeof(buffer), "pending_%lld_%llu%s",
+             static_cast<long long>(time(NULL)),
+             seq,
+             kPendingUploadFileSuffix);
+    return std::string(buffer);
+}
+
+std::string SerializePendingUpload(const GAT1400ClientService::PendingUploadItem& item)
+{
+    std::ostringstream oss;
+    oss << "id=" << item.id << "\n";
+    oss << "method=" << item.method << "\n";
+    oss << "path=" << item.path << "\n";
+    oss << "content_type=" << item.content_type << "\n";
+    oss << "response_kind=" << item.response_kind << "\n";
+    oss << "category=" << item.category << "\n";
+    oss << "object_id=" << item.object_id << "\n";
+    oss << "attempt_count=" << item.attempt_count << "\n";
+    oss << "enqueue_time=" << static_cast<long long>(item.enqueue_time) << "\n";
+    oss << "last_error=" << item.last_error << "\n\n";
+    std::string text = oss.str();
+    text.append(item.body);
+    return text;
+}
+
+bool ParsePendingUploadText(const std::string& raw, GAT1400ClientService::PendingUploadItem& item)
+{
+    const std::string::size_type headerEnd = raw.find("\n\n");
+    if (headerEnd == std::string::npos) {
+        return false;
+    }
+
+    std::stringstream ss(raw.substr(0, headerEnd));
+    std::string line;
+    while (std::getline(ss, line)) {
+        if (!line.empty() && line[line.size() - 1] == '\r') {
+            line.erase(line.size() - 1);
+        }
+        const std::string::size_type pos = line.find('=');
+        if (pos == std::string::npos) {
+            continue;
+        }
+        const std::string key = line.substr(0, pos);
+        const std::string value = line.substr(pos + 1);
+        if (key == "id") {
+            item.id = value;
+        } else if (key == "method") {
+            item.method = value;
+        } else if (key == "path") {
+            item.path = value;
+        } else if (key == "content_type") {
+            item.content_type = value;
+        } else if (key == "response_kind") {
+            item.response_kind = value;
+        } else if (key == "category") {
+            item.category = value;
+        } else if (key == "object_id") {
+            item.object_id = value;
+        } else if (key == "attempt_count") {
+            item.attempt_count = atoi(value.c_str());
+        } else if (key == "enqueue_time") {
+            item.enqueue_time = static_cast<time_t>(atoll(value.c_str()));
+        } else if (key == "last_error") {
+            item.last_error = value;
+        }
+    }
+
+    item.body = raw.substr(headerEnd + 2);
+    if (item.id.empty() || item.method.empty() || item.path.empty() || item.response_kind.empty()) {
+        return false;
+    }
+    if (item.content_type.empty()) {
+        item.content_type = kJsonContentType;
+    }
+    if (item.enqueue_time == 0) {
+        item.enqueue_time = time(NULL);
+    }
+    return true;
+}
+
+bool ReadPendingUploadFile(const std::string& path, GAT1400ClientService::PendingUploadItem& item)
+{
+    std::string raw;
+    if (!ReadFileText(path, raw) || !ParsePendingUploadText(raw, item)) {
+        return false;
+    }
+    item.persist_path = path;
+    return true;
+}
+
+int ParseResponseStatusListBody(const std::string& body, int& outError)
+{
+    outError = 0;
+    std::list<GAT1400_RESPONSESTATUS_ST> responseList;
+    if (GAT1400Json::UnPackResponseStatusList(body, responseList) != 0) {
+        return -1;
+    }
+
+    for (std::list<GAT1400_RESPONSESTATUS_ST>::const_iterator it = responseList.begin(); it != responseList.end(); ++it) {
+        if (it->StatusCode != OK) {
+            outError = it->StatusCode;
+            return -2;
+        }
+    }
+    return 0;
+}
+
+int ParseResponseStatusBody(const std::string& body, int& outError)
+{
+    outError = 0;
+    GAT1400_RESPONSESTATUS_ST responseStatus;
+    if (GAT1400Json::UnPackResponseStatus(body, responseStatus) != 0) {
+        return -1;
+    }
+    if (responseStatus.StatusCode != OK) {
+        outError = responseStatus.StatusCode;
+        return -2;
+    }
+    return 0;
+}
+
+const char* HttpMethodToString(unsigned int method)
+{
+    switch (method) {
+        case HTTP_REQUEST_POST:
+            return "POST";
+        case HTTP_REQUEST_PUT:
+            return "PUT";
+        case HTTP_REQUEST_GET:
+            return "GET";
+        case HTTP_REQUEST_DELETE:
+            return "DELETE";
+        default:
+            return NULL;
+    }
+}
+
+bool IsAbsoluteRequestTarget(const std::string& url)
+{
+    return url.find("://") != std::string::npos;
+}
+
+bool IsListResponseUriType(unsigned int format)
+{
+    switch (format) {
+        case POST_DISPOSITION_LIST:
+        case POST_VIDEOSLICES:
+        case POST_IMAGES:
+        case POST_FILES:
+        case POST_PERSONS:
+        case POST_FACES:
+        case POST_MOTORVEHICLE:
+        case POST_NUNMOTORVEHICLE:
+        case POST_VIDEOLABELS:
+        case POST_SUBSCRIBE_LIST:
+            return true;
+        default:
+            return false;
+    }
+}
+
+bool IsBinaryUploadUriType(unsigned int format)
+{
+    return format == POST_VIDEOSLICESDATA || format == POST_IMAGESDATA || format == POST_FILESDATA;
+}
+
+std::string DefaultPathForUriType(unsigned int format)
+{
+    switch (format) {
+        case POST_REGISTER:
+            return "/VIID/System/Register";
+        case POST_UNREGISTER:
+            return "/VIID/System/UnRegister";
+        case POST_KEEPALIVE:
+            return "/VIID/System/Keepalive";
+        case POST_DISPOSITION_LIST:
+            return "/VIID/Dispositions";
+        case POST_VIDEOSLICES:
+            return "/VIID/VideoSlices";
+        case POST_IMAGES:
+            return "/VIID/Images";
+        case POST_FILES:
+            return "/VIID/Files";
+        case POST_PERSONS:
+            return "/VIID/Persons";
+        case POST_FACES:
+            return "/VIID/Faces";
+        case POST_MOTORVEHICLE:
+            return "/VIID/MotorVehicles";
+        case POST_NUNMOTORVEHICLE:
+            return "/VIID/NonMotorVehicles";
+        case POST_VIDEOLABELS:
+            return "/VIID/VideoLabels";
+        case POST_SUBSCRIBE_NOTIFICATION_LIST:
+            return "/VIID/SubscribeNotifications";
+        case POST_SUBSCRIBE_LIST:
+            return "/VIID/Subscribes";
+        case GET_SYNCTIME:
+            return "/VIID/System/Time";
+        case GET_APES:
+        case PUT_APES:
+            return "/VIID/APEs";
+        case GET_TOLLGATES:
+            return "/VIID/Tollgates";
+        case GET_LANES:
+            return "/VIID/Lanes";
+        case GET_MOTORVEHICLE_LIST:
+            return "/VIID/MotorVehicles";
+        case GET_NONMOTORVEHICLE_LIST:
+            return "/VIID/NonMotorVehicles";
+        case GET_THING_LIST:
+            return "/VIID/Things";
+        case GET_SCENE_LIST:
+            return "/VIID/Scenes";
+        case GET_VIDEO_SLICE_LIST:
+            return "/VIID/VideoSlices";
+        case GET_IMAGE_LIST:
+            return "/VIID/Images";
+        case GET_FILE_LIST:
+            return "/VIID/Files";
+        case GET_PERSON_LIST:
+            return "/VIID/Persons";
+        case GET_FACE_LIST:
+            return "/VIID/Faces";
+        case GET_CASE_LIST:
+            return "/VIID/Cases";
+        case GET_DISPOSITION_LIST:
+        case PUT_DISPOSITION_LIST:
+        case DELETE_DISPOSITION_LIST:
+            return "/VIID/Dispositions";
+        case GET_DISPOSITION_NOTIFICATION_LIST:
+        case DELETE_DISPOSITION_NOTIFICATION_LIST:
+            return "/VIID/DispositionNotifications";
+        case GET_SUBSCRIBE_LIST:
+        case PUT_SUBSCRIBE_LIST:
+        case DELETE_SUBSCRIBE_LIST:
+            return "/VIID/Subscribes";
+        case GET_SUBSCRIBE_NOTIFICATION_LIST:
+        case DELETE_SUBSCRIBE_NOTIFICATION_LIST:
+            return "/VIID/SubscribeNotifications";
+        case GET_ANALYSIS_RULE_LIST:
+            return "/VIID/AnalysisRules";
+        case GET_VIDEO_LABEL_LIST:
+            return "/VIID/VideoLabels";
+        default:
+            return "";
+    }
+}
+
+bool PathContainsResource(const std::string& requestPath, const char* resource)
+{
+    if (resource == NULL || resource[0] == '\0') {
+        return false;
+    }
+
+    const std::string::size_type queryPos = requestPath.find('?');
+    const std::string normalized = (queryPos == std::string::npos) ? requestPath : requestPath.substr(0, queryPos);
+    const std::string::size_type pos = normalized.find(resource);
+    if (pos == std::string::npos) {
+        return false;
+    }
+
+    const std::string::size_type tail = pos + strlen(resource);
+    return tail == normalized.size() || normalized[tail] == '/';
+}
+
+bool IsViasRequestPath(const std::string& requestPath)
+{
+    return requestPath.find("/VIAS/") != std::string::npos;
+}
+
+bool IsApeCompatPostPath(const std::string& requestPath)
+{
+    return PathContainsResource(requestPath, "/VIID/APEs");
+}
+
+bool ShouldPersistFailedUpload(int errorCode)
+{
+    return errorCode != kClientErrorUnsupportedUri && errorCode != kClientErrorApePostCompatDisabled;
 }
 
 int ConnectTcp(const std::string& host, int port, int timeoutMs)
@@ -455,7 +910,9 @@ GAT1400ClientService::GAT1400ClientService()
       m_regist_state(EM_REGIST_OFF),
       m_listen_fd(-1),
       m_server_running(false),
-      m_heartbeat_running(false)
+      m_heartbeat_running(false),
+      m_pending_seq(0),
+      m_last_replay_time(0)
 {
 }
 
@@ -956,30 +1413,50 @@ int GAT1400ClientService::ExecuteRequest(const ProtocolExternalConfig& cfg,
                                          const std::string& deviceId,
                                          const std::string& method,
                                          const std::string& path,
+                                         const std::string& contentType,
                                          const std::string& body,
                                          HttpResponse& response,
                                          const std::string* overrideUrl) const
 {
-    std::string host = cfg.gat_register.server_ip;
-    int port = cfg.gat_register.server_port;
-    std::string requestPath = path;
-    if (overrideUrl != NULL && !overrideUrl->empty()) {
-        if (!ParseHttpUrl(*overrideUrl, host, port, requestPath)) {
-            return -1;
-        }
+    RequestTarget target;
+    if (!BuildRequestTarget(cfg, path, overrideUrl, target)) {
+        return -1;
+    }
+
+    if (IsViasRequestPath(target.request_path)) {
+        printf("[GAT1400] module=gat1400 event=request trace=client error=%d method=%s path=%s note=vias_not_supported\n",
+               kClientErrorUnsupportedUri,
+               method.c_str(),
+               target.request_path.c_str());
+        return kClientErrorUnsupportedUri;
+    }
+
+    if (method == "POST" && IsApeCompatPostPath(target.request_path) && cfg.gat_upload.enable_apes_post_compat == 0) {
+        printf("[GAT1400] module=gat1400 event=request trace=client error=%d method=%s path=%s note=post_apes_compat_disabled\n",
+               kClientErrorApePostCompatDisabled,
+               method.c_str(),
+               target.request_path.c_str());
+        return kClientErrorApePostCompatDisabled;
+    }
+
+    if (target.scheme != "http") {
+        printf("[GAT1400] module=gat1400 event=request trace=client error=-5 scheme=%s path=%s note=scheme_not_supported\n",
+               target.scheme.c_str(),
+               target.request_path.c_str());
+        return -5;
     }
 
     const auto doRequest = [&](const std::string* authHeader) -> int {
-        const int fd = ConnectTcp(host, port, kHttpTimeoutMs);
+        const int fd = ConnectTcp(target.host, target.port, target.timeout_ms);
         if (fd < 0) {
             return -2;
         }
 
         std::ostringstream request;
-        request << method << ' ' << requestPath << " HTTP/1.1\r\n";
-        request << "Host: " << host << ':' << port << "\r\n";
-        request << "User-Identify:" << deviceId << "\r\n";
-        request << "Content-Type: " << kJsonContentType << "\r\n";
+        request << method << ' ' << target.request_path << " HTTP/1.1\r\n";
+        request << "Host: " << target.host << ':' << target.port << "\r\n";
+        request << "User-Identify: " << deviceId << "\r\n";
+        request << "Content-Type: " << (contentType.empty() ? kJsonContentType : contentType) << "\r\n";
         request << "Connection: close\r\n";
         if (authHeader != NULL && !authHeader->empty()) {
             request << *authHeader << "\r\n";
@@ -1010,9 +1487,7 @@ int GAT1400ClientService::ExecuteRequest(const ProtocolExternalConfig& cfg,
     if (response.status_code == 401 && !cfg.gat_register.username.empty()) {
         std::map<std::string, std::string>::const_iterator authIt = response.headers.find("www-authenticate");
         if (authIt != response.headers.end()) {
-            std::ostringstream url;
-            url << "http://" << host << ':' << port << requestPath;
-            CHttpAuth auth(url.str(), method, cfg.gat_register.username, cfg.gat_register.password);
+            CHttpAuth auth(BuildRequestUrl(target), method, cfg.gat_register.username, cfg.gat_register.password);
             std::string authHeader;
             auth.HttpAuthParse(authIt->second, authHeader);
             response = HttpResponse();
@@ -1026,7 +1501,277 @@ int GAT1400ClientService::ExecuteRequest(const ProtocolExternalConfig& cfg,
     return 0;
 }
 
-int GAT1400ClientService::PostJsonWithResponseList(const char* action, const char* path, const std::string& body)
+int GAT1400ClientService::EnqueuePendingUpload(const char* action,
+                                               const std::string& method,
+                                               const std::string& path,
+                                               const std::string& contentType,
+                                               const std::string& responseKind,
+                                               const std::string& body,
+                                               const std::string& objectId,
+                                               const std::string& lastError)
+{
+    ProtocolExternalConfig cfg;
+    GbRegisterParam gbRegister;
+    std::string deviceId;
+    if (SnapshotConfig(cfg, gbRegister, deviceId) != 0) {
+        return -1;
+    }
+    if (!EnsureDirectoryExists(cfg.gat_upload.queue_dir)) {
+        return -2;
+    }
+
+    PendingUploadItem item;
+    {
+        std::lock_guard<std::mutex> lock(m_pending_mutex);
+        if (m_pending_uploads.empty()) {
+            LoadPendingUploadsLocked(cfg);
+        }
+
+        item.id = BuildPendingFileName(++m_pending_seq);
+        item.method = method;
+        item.path = path;
+        item.content_type = contentType.empty() ? kJsonContentType : contentType;
+        item.response_kind = responseKind.empty() ? kResponseKindStatus : responseKind;
+        item.body = body;
+        item.category = action != NULL ? action : "post";
+        item.object_id = objectId;
+        item.last_error = lastError;
+        item.enqueue_time = time(NULL);
+        item.persist_path = JoinFilePath(cfg.gat_upload.queue_dir, item.id);
+
+        if (!WriteFileText(item.persist_path, SerializePendingUpload(item))) {
+            return -3;
+        }
+
+        m_pending_uploads.push_back(item);
+        while (static_cast<int>(m_pending_uploads.size()) > std::max(1, cfg.gat_upload.max_pending_count)) {
+            const PendingUploadItem oldest = m_pending_uploads.front();
+            RemoveFileIfExists(oldest.persist_path);
+            m_pending_uploads.pop_front();
+        }
+        m_last_replay_time = 0;
+    }
+
+    printf("[GAT1400] module=gat1400 event=%s trace=queue error=0 path=%s reason=%s\n",
+           action != NULL ? action : "post",
+           path.c_str(),
+           lastError.c_str());
+    return 0;
+}
+
+void GAT1400ClientService::LoadPendingUploadsLocked(const ProtocolExternalConfig& cfg)
+{
+    ClearPendingUploadsLocked();
+    if (!EnsureDirectoryExists(cfg.gat_upload.queue_dir)) {
+        return;
+    }
+
+    DIR* dir = opendir(cfg.gat_upload.queue_dir.c_str());
+    if (dir == NULL) {
+        return;
+    }
+
+    struct dirent* entry = NULL;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name == NULL) {
+            continue;
+        }
+        const std::string fileName(entry->d_name);
+        if (fileName == "." || fileName == "..") {
+            continue;
+        }
+        if (fileName.size() <= strlen(kPendingUploadFileSuffix) ||
+            fileName.substr(fileName.size() - strlen(kPendingUploadFileSuffix)) != kPendingUploadFileSuffix) {
+            continue;
+        }
+
+        PendingUploadItem item;
+        const std::string filePath = JoinFilePath(cfg.gat_upload.queue_dir, fileName);
+        if (!ReadPendingUploadFile(filePath, item)) {
+            RemoveFileIfExists(filePath);
+            continue;
+        }
+        m_pending_uploads.push_back(item);
+        if (m_pending_seq < static_cast<unsigned long long>(m_pending_uploads.size())) {
+            m_pending_seq = static_cast<unsigned long long>(m_pending_uploads.size());
+        }
+    }
+    closedir(dir);
+
+    m_pending_uploads.sort([](const PendingUploadItem& lhs, const PendingUploadItem& rhs) {
+        if (lhs.enqueue_time != rhs.enqueue_time) {
+            return lhs.enqueue_time < rhs.enqueue_time;
+        }
+        return lhs.id < rhs.id;
+    });
+
+    while (static_cast<int>(m_pending_uploads.size()) > std::max(1, cfg.gat_upload.max_pending_count)) {
+        const PendingUploadItem oldest = m_pending_uploads.front();
+        RemoveFileIfExists(oldest.persist_path);
+        m_pending_uploads.pop_front();
+    }
+}
+
+void GAT1400ClientService::ClearPendingUploadsLocked()
+{
+    m_pending_uploads.clear();
+}
+
+int GAT1400ClientService::ReplayPendingUploads()
+{
+    ProtocolExternalConfig cfg;
+    GbRegisterParam gbRegister;
+    std::string deviceId;
+    if (SnapshotConfig(cfg, gbRegister, deviceId) != 0) {
+        return -1;
+    }
+
+    bool registered = false;
+    {
+        std::lock_guard<std::mutex> lock(m_state_mutex);
+        registered = m_registered;
+    }
+    if (!registered) {
+        return -2;
+    }
+
+    std::list<PendingUploadItem> replayItems;
+    {
+        std::lock_guard<std::mutex> lock(m_pending_mutex);
+        if (m_pending_uploads.empty()) {
+            LoadPendingUploadsLocked(cfg);
+        }
+        replayItems = m_pending_uploads;
+    }
+    if (replayItems.empty()) {
+        return 0;
+    }
+
+    const std::vector<int> retryPolicy = ParseRetryPolicy(cfg.gat_upload.retry_policy);
+    int replayedCount = 0;
+    int failedCount = 0;
+    int droppedCount = 0;
+    for (std::list<PendingUploadItem>::const_iterator itemIt = replayItems.begin(); itemIt != replayItems.end(); ++itemIt) {
+        const PendingUploadItem& pending = *itemIt;
+        bool success = false;
+        int finalRet = 0;
+        int attemptsUsed = 0;
+        std::string lastError;
+
+        for (size_t attempt = 0;; ++attempt) {
+            ++attemptsUsed;
+            HttpResponse response;
+            const std::string* overrideUrl = pending.path.find("://") != std::string::npos ? &pending.path : NULL;
+            const std::string requestPath = overrideUrl != NULL ? "" : pending.path;
+            const int reqRet = ExecuteRequest(cfg,
+                                              deviceId,
+                                              pending.method,
+                                              requestPath,
+                                              pending.content_type,
+                                              pending.body,
+                                              response,
+                                              overrideUrl);
+            if (reqRet == 0) {
+                int statusCode = 0;
+                const int parseRet = (pending.response_kind == kResponseKindList)
+                                         ? ParseResponseStatusListBody(response.body, statusCode)
+                                         : ParseResponseStatusBody(response.body, statusCode);
+                if (parseRet == 0) {
+                    success = true;
+                    break;
+                }
+                finalRet = (statusCode != 0) ? statusCode : parseRet;
+            } else {
+                finalRet = reqRet;
+            }
+
+            char errorText[64] = {0};
+            snprintf(errorText, sizeof(errorText), "ret=%d", finalRet);
+            lastError = errorText;
+
+            if (attempt >= retryPolicy.size()) {
+                break;
+            }
+            sleep(static_cast<unsigned int>(retryPolicy[attempt]));
+        }
+
+        std::lock_guard<std::mutex> lock(m_pending_mutex);
+        std::list<PendingUploadItem>::iterator current = std::find_if(
+            m_pending_uploads.begin(),
+            m_pending_uploads.end(),
+            [&](const PendingUploadItem& item) { return item.id == pending.id; });
+        if (current == m_pending_uploads.end()) {
+            continue;
+        }
+
+        if (success) {
+            RemoveFileIfExists(current->persist_path);
+            m_pending_uploads.erase(current);
+            ++replayedCount;
+            continue;
+        }
+
+        if (!ShouldPersistFailedUpload(finalRet)) {
+            RemoveFileIfExists(current->persist_path);
+            m_pending_uploads.erase(current);
+            ++droppedCount;
+            continue;
+        }
+
+        current->attempt_count += attemptsUsed;
+        current->last_error = lastError;
+        WriteFileText(current->persist_path, SerializePendingUpload(*current));
+        ++failedCount;
+    }
+
+    printf("[GAT1400] module=gat1400 event=replay trace=queue error=%d replayed=%d dropped=%d failed=%d\n",
+           failedCount == 0 ? 0 : -1,
+           replayedCount,
+           droppedCount,
+           failedCount);
+    return failedCount == 0 ? 0 : -1;
+}
+
+int GAT1400ClientService::ReplayPendingUploadsIfDue()
+{
+    ProtocolExternalConfig cfg;
+    GbRegisterParam gbRegister;
+    std::string deviceId;
+    if (SnapshotConfig(cfg, gbRegister, deviceId) != 0) {
+        return -1;
+    }
+
+    bool registered = false;
+    {
+        std::lock_guard<std::mutex> lock(m_state_mutex);
+        registered = m_registered;
+    }
+    if (!registered) {
+        return -2;
+    }
+
+    const time_t now = time(NULL);
+    {
+        std::lock_guard<std::mutex> lock(m_pending_mutex);
+        if (m_pending_uploads.empty()) {
+            LoadPendingUploadsLocked(cfg);
+        }
+        if (m_pending_uploads.empty()) {
+            return 0;
+        }
+        if (m_last_replay_time != 0 && (now - m_last_replay_time) < cfg.gat_upload.replay_interval_sec) {
+            return 0;
+        }
+        m_last_replay_time = now;
+    }
+
+    return ReplayPendingUploads();
+}
+
+int GAT1400ClientService::PostJsonWithResponseList(const char* action,
+                                                   const char* path,
+                                                   const std::string& body,
+                                                   const std::string* overrideUrl)
 {
     ProtocolExternalConfig cfg;
     GbRegisterParam gbRegister;
@@ -1036,9 +1781,19 @@ int GAT1400ClientService::PostJsonWithResponseList(const char* action, const cha
     }
 
     const std::vector<int> retryPolicy = ParseRetryPolicy(cfg.gat_upload.retry_policy);
+    int finalRet = -1;
+    const std::string requestTarget = (overrideUrl != NULL && !overrideUrl->empty()) ? *overrideUrl : (path != NULL ? path : "");
+    std::string lastError("ret=-1");
     for (size_t attempt = 0;; ++attempt) {
         HttpResponse response;
-        const int reqRet = ExecuteRequest(cfg, deviceId, "POST", path, body, response, NULL);
+        const int reqRet = ExecuteRequest(cfg,
+                                          deviceId,
+                                          "POST",
+                                          path != NULL ? path : "",
+                                          kJsonContentType,
+                                          body,
+                                          response,
+                                          overrideUrl);
         if (reqRet == 0) {
             std::list<GAT1400_RESPONSESTATUS_ST> responseList;
             if (GAT1400Json::UnPackResponseStatusList(response.body, responseList) == 0) {
@@ -1058,18 +1813,35 @@ int GAT1400ClientService::PostJsonWithResponseList(const char* action, const cha
                            responseList.size());
                     return 0;
                 }
-                if (attempt >= retryPolicy.size()) {
-                    return firstError == 0 ? -2 : firstError;
-                }
-            } else if (attempt >= retryPolicy.size()) {
-                return -3;
+                finalRet = firstError == 0 ? -2 : firstError;
+            } else {
+                finalRet = -3;
             }
-        } else if (attempt >= retryPolicy.size()) {
-            return reqRet;
+        } else {
+            finalRet = reqRet;
         }
 
+        char errorText[64] = {0};
+        snprintf(errorText, sizeof(errorText), "ret=%d", finalRet);
+        lastError = errorText;
+
+        if (attempt >= retryPolicy.size()) {
+            break;
+        }
         sleep(static_cast<unsigned int>(retryPolicy[attempt]));
     }
+
+    if (ShouldPersistFailedUpload(finalRet)) {
+        EnqueuePendingUpload(action,
+                             "POST",
+                             requestTarget,
+                             kJsonContentType,
+                             kResponseKindList,
+                             body,
+                             "",
+                             lastError);
+    }
+    return finalRet;
 }
 
 int GAT1400ClientService::PostJsonWithResponseStatus(const char* action,
@@ -1085,9 +1857,12 @@ int GAT1400ClientService::PostJsonWithResponseStatus(const char* action,
     }
 
     const std::vector<int> retryPolicy = ParseRetryPolicy(cfg.gat_upload.retry_policy);
+    int finalRet = -1;
+    const std::string requestTarget = (overrideUrl != NULL && !overrideUrl->empty()) ? *overrideUrl : (path != NULL ? path : "");
+    std::string lastError("ret=-1");
     for (size_t attempt = 0;; ++attempt) {
         HttpResponse response;
-        const int reqRet = ExecuteRequest(cfg, deviceId, "POST", path, body, response, overrideUrl);
+        const int reqRet = ExecuteRequest(cfg, deviceId, "POST", path != NULL ? path : "", kJsonContentType, body, response, overrideUrl);
         if (reqRet == 0) {
             GAT1400_RESPONSESTATUS_ST responseStatus;
             if (GAT1400Json::UnPackResponseStatus(response.body, responseStatus) == 0 && responseStatus.StatusCode == OK) {
@@ -1096,20 +1871,95 @@ int GAT1400ClientService::PostJsonWithResponseStatus(const char* action,
                        path != NULL ? path : "");
                 return 0;
             }
-            if (attempt >= retryPolicy.size()) {
-                return -2;
-            }
-        } else if (attempt >= retryPolicy.size()) {
-            return reqRet;
+            finalRet = -2;
+        } else {
+            finalRet = reqRet;
         }
 
+        char errorText[64] = {0};
+        snprintf(errorText, sizeof(errorText), "ret=%d", finalRet);
+        lastError = errorText;
+
+        if (attempt >= retryPolicy.size()) {
+            break;
+        }
         sleep(static_cast<unsigned int>(retryPolicy[attempt]));
     }
+
+    if (ShouldPersistFailedUpload(finalRet)) {
+        EnqueuePendingUpload(action,
+                             "POST",
+                             requestTarget,
+                             kJsonContentType,
+                             kResponseKindStatus,
+                             body,
+                             "",
+                             lastError);
+    }
+    return finalRet;
 }
 
-int GAT1400ClientService::PostBinaryData(const char* action, const std::string& path, const std::string& data)
+int GAT1400ClientService::PostBinaryData(const char* action,
+                                         const std::string& path,
+                                         const std::string& data,
+                                         const std::string* overrideUrl)
 {
-    return PostJsonWithResponseStatus(action, path.c_str(), data, NULL);
+    ProtocolExternalConfig cfg;
+    GbRegisterParam gbRegister;
+    std::string deviceId;
+    if (SnapshotConfig(cfg, gbRegister, deviceId) != 0) {
+        return -1;
+    }
+
+    const std::vector<int> retryPolicy = ParseRetryPolicy(cfg.gat_upload.retry_policy);
+    int finalRet = -1;
+    const std::string requestTarget = (overrideUrl != NULL && !overrideUrl->empty()) ? *overrideUrl : path;
+    const std::string requestPath = (overrideUrl != NULL) ? "" : path;
+    std::string lastError("ret=-1");
+    for (size_t attempt = 0;; ++attempt) {
+        HttpResponse response;
+        const int reqRet = ExecuteRequest(cfg,
+                                          deviceId,
+                                          "POST",
+                                          requestPath,
+                                          kJsonContentType,
+                                          data,
+                                          response,
+                                          overrideUrl);
+        if (reqRet == 0) {
+            GAT1400_RESPONSESTATUS_ST responseStatus;
+            if (GAT1400Json::UnPackResponseStatus(response.body, responseStatus) == 0 && responseStatus.StatusCode == OK) {
+                printf("[GAT1400] module=gat1400 event=%s trace=client error=0 path=%s\n",
+                       action != NULL ? action : "post_binary",
+                       path.c_str());
+                return 0;
+            }
+            finalRet = -2;
+        } else {
+            finalRet = reqRet;
+        }
+
+        char errorText[64] = {0};
+        snprintf(errorText, sizeof(errorText), "ret=%d", finalRet);
+        lastError = errorText;
+
+        if (attempt >= retryPolicy.size()) {
+            break;
+        }
+        sleep(static_cast<unsigned int>(retryPolicy[attempt]));
+    }
+
+    if (ShouldPersistFailedUpload(finalRet)) {
+        EnqueuePendingUpload(action,
+                             "POST",
+                             requestTarget,
+                             kJsonContentType,
+                             kResponseKindStatus,
+                             data,
+                             "",
+                             lastError);
+    }
+    return finalRet;
 }
 
 int GAT1400ClientService::RegisterNow()
@@ -1126,16 +1976,25 @@ int GAT1400ClientService::RegisterNow()
                                       deviceId,
                                       "POST",
                                       "/VIID/System/Register",
+                                      kJsonContentType,
                                       GAT1400Json::PackRegisterJson(deviceId.c_str()),
                                       response,
                                       NULL);
     if (reqRet != 0) {
+        {
+            std::lock_guard<std::mutex> lock(m_state_mutex);
+            m_registered = false;
+        }
         UpdateRegistState(EM_REGIST_OFF);
         return reqRet;
     }
 
     GAT1400_RESPONSESTATUS_ST responseStatus;
     if (GAT1400Json::UnPackResponseStatus(response.body, responseStatus) != 0 || responseStatus.StatusCode != OK) {
+        {
+            std::lock_guard<std::mutex> lock(m_state_mutex);
+            m_registered = false;
+        }
         UpdateRegistState(EM_REGIST_OFF);
         return -2;
     }
@@ -1150,6 +2009,7 @@ int GAT1400ClientService::RegisterNow()
            cfg.gat_register.server_port,
            deviceId.c_str(),
            cfg.gat_register.listen_port);
+    ReplayPendingUploads();
     return 0;
 }
 
@@ -1173,6 +2033,7 @@ int GAT1400ClientService::UnregisterNow()
                                       deviceId,
                                       "POST",
                                       "/VIID/System/UnRegister",
+                                      kJsonContentType,
                                       GAT1400Json::PackUnRegisterJson(deviceId.c_str()),
                                       response,
                                       NULL);
@@ -1207,6 +2068,7 @@ int GAT1400ClientService::SendKeepaliveNow()
                                       deviceId,
                                       "POST",
                                       "/VIID/System/Keepalive",
+                                      kJsonContentType,
                                       GAT1400Json::PackKeepAliveJson(deviceId.c_str()),
                                       response,
                                       NULL);
@@ -1231,7 +2093,7 @@ int GAT1400ClientService::GetTime(std::string& outTime)
     }
 
     HttpResponse response;
-    const int reqRet = ExecuteRequest(cfg, deviceId, "GET", "/VIID/System/Time", "", response, NULL);
+    const int reqRet = ExecuteRequest(cfg, deviceId, "GET", "/VIID/System/Time", kJsonContentType, "", response, NULL);
     if (reqRet != 0) {
         return reqRet;
     }
@@ -1244,6 +2106,99 @@ int GAT1400ClientService::GetTime(std::string& outTime)
     return 0;
 }
 
+int GAT1400ClientService::Register()
+{
+    return RegisterNow();
+}
+
+int GAT1400ClientService::Unregister()
+{
+    return UnregisterNow();
+}
+
+int GAT1400ClientService::Keepalive()
+{
+    return SendKeepaliveNow();
+}
+
+int GAT1400ClientService::SendHttpCommand(const std::string& url,
+                                          unsigned int method,
+                                          unsigned int format,
+                                          const std::string& content)
+{
+    switch (format) {
+        case POST_REGISTER:
+            return RegisterNow();
+        case POST_UNREGISTER:
+            return UnregisterNow();
+        case POST_KEEPALIVE:
+            return SendKeepaliveNow();
+        case GET_SYNCTIME: {
+            std::string remoteTime;
+            return GetTime(remoteTime);
+        }
+        default:
+            break;
+    }
+
+    const char* methodText = HttpMethodToString(method);
+    if (methodText == NULL) {
+        return -1;
+    }
+
+    const std::string target = !TrimCopy(url).empty() ? TrimCopy(url) : DefaultPathForUriType(format);
+    if (target.empty()) {
+        return -2;
+    }
+
+    const std::string* overrideUrl = IsAbsoluteRequestTarget(target) ? &target : NULL;
+    const std::string requestPath = (overrideUrl != NULL) ? "" : target;
+    if (method == HTTP_REQUEST_POST) {
+        if (IsBinaryUploadUriType(format)) {
+            return PostBinaryData("sdk_http_cmd", requestPath.empty() ? target : requestPath, content, overrideUrl);
+        }
+        if (IsListResponseUriType(format)) {
+            return PostJsonWithResponseList("sdk_http_cmd", requestPath.c_str(), content, overrideUrl);
+        }
+        return PostJsonWithResponseStatus("sdk_http_cmd", requestPath.c_str(), content, overrideUrl);
+    }
+
+    ProtocolExternalConfig cfg;
+    GbRegisterParam gbRegister;
+    std::string deviceId;
+    if (SnapshotConfig(cfg, gbRegister, deviceId) != 0) {
+        return -3;
+    }
+
+    HttpResponse response;
+    const int reqRet = ExecuteRequest(cfg,
+                                      deviceId,
+                                      methodText,
+                                      requestPath,
+                                      kJsonContentType,
+                                      content,
+                                      response,
+                                      overrideUrl);
+    if (reqRet != 0) {
+        return reqRet;
+    }
+    if (response.status_code < 200 || response.status_code >= 300) {
+        return -4;
+    }
+
+    int statusCode = 0;
+    const int parseRet = IsListResponseUriType(format)
+                             ? ParseResponseStatusListBody(response.body, statusCode)
+                             : ParseResponseStatusBody(response.body, statusCode);
+    if (parseRet == 0) {
+        return 0;
+    }
+    if (statusCode != 0) {
+        return statusCode;
+    }
+    return 0;
+}
+
 void GAT1400ClientService::HeartbeatLoop()
 {
     while (m_heartbeat_running.load()) {
@@ -1252,6 +2207,39 @@ void GAT1400ClientService::HeartbeatLoop()
         std::string deviceId;
         if (SnapshotConfig(cfg, gbRegister, deviceId) != 0) {
             break;
+        }
+
+        bool registered = false;
+        {
+            std::lock_guard<std::mutex> lock(m_state_mutex);
+            registered = m_registered;
+        }
+        if (!registered) {
+            std::vector<int> backoff = ParseRetryPolicy(cfg.gat_register.retry_backoff_policy);
+            if (backoff.empty()) {
+                backoff.push_back(5);
+            }
+
+            size_t attempt = 0;
+            while (m_heartbeat_running.load()) {
+                const int regRet = RegisterNow();
+                if (regRet == 0) {
+                    break;
+                }
+
+                const int delay = backoff[std::min(attempt, backoff.size() - 1)];
+                printf("[GAT1400] module=gat1400 event=register trace=client error=%d attempt=%zu delay=%d\n",
+                       regRet,
+                       attempt + 1,
+                       delay);
+                for (int i = 0; i < delay && m_heartbeat_running.load(); ++i) {
+                    sleep(1);
+                }
+                if (attempt + 1 < backoff.size()) {
+                    ++attempt;
+                }
+            }
+            continue;
         }
 
         const int interval = std::max(1, cfg.gat_register.keepalive_interval_sec);
@@ -1274,17 +2262,16 @@ void GAT1400ClientService::HeartbeatLoop()
         } while (retry < maxRetry && m_heartbeat_running.load());
 
         if (ret == 0) {
+            ReplayPendingUploadsIfDue();
             continue;
         }
 
         printf("[GAT1400] module=gat1400 event=keepalive trace=client error=%d retry=%d\n", ret, retry);
-        UpdateRegistState(EM_REGIST_OFF);
-        while (m_heartbeat_running.load()) {
-            if (RegisterNow() == 0) {
-                break;
-            }
-            sleep(5);
+        {
+            std::lock_guard<std::mutex> lock(m_state_mutex);
+            m_registered = false;
         }
+        UpdateRegistState(EM_REGIST_OFF);
     }
 }
 
@@ -1312,6 +2299,12 @@ int GAT1400ClientService::Start(const ProtocolExternalConfig& cfg, const GbRegis
             m_device_id.clear();
             return -2;
         }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_pending_mutex);
+        LoadPendingUploadsLocked(cfg);
+        m_last_replay_time = 0;
     }
 
     const int regRet = RegisterNow();
@@ -1376,6 +2369,8 @@ int GAT1400ClientService::Reload(const ProtocolExternalConfig& cfg, const GbRegi
                                      (!gbRegister.device_id.empty() ? gbRegister.device_id : gbRegister.username);
     bool started = false;
     bool restartRequired = false;
+    bool pendingConfigChanged = false;
+    bool replayConfigChanged = false;
     {
         std::lock_guard<std::mutex> lock(m_state_mutex);
         started = m_started;
@@ -1385,6 +2380,10 @@ int GAT1400ClientService::Reload(const ProtocolExternalConfig& cfg, const GbRegi
                           (m_cfg.gat_register.username != cfg.gat_register.username) ||
                           (m_cfg.gat_register.password != cfg.gat_register.password) ||
                           (m_device_id != nextDeviceId);
+        pendingConfigChanged = (m_cfg.gat_upload.queue_dir != cfg.gat_upload.queue_dir) ||
+                               (m_cfg.gat_upload.max_pending_count != cfg.gat_upload.max_pending_count);
+        replayConfigChanged = pendingConfigChanged ||
+                              (m_cfg.gat_upload.replay_interval_sec != cfg.gat_upload.replay_interval_sec);
         if (!started) {
             m_cfg = cfg;
             m_gb_register = gbRegister;
@@ -1398,10 +2397,27 @@ int GAT1400ClientService::Reload(const ProtocolExternalConfig& cfg, const GbRegi
         return Start(cfg, gbRegister);
     }
 
-    std::lock_guard<std::mutex> lock(m_state_mutex);
-    m_cfg = cfg;
-    m_gb_register = gbRegister;
-    m_device_id = nextDeviceId;
+    {
+        std::lock_guard<std::mutex> lock(m_state_mutex);
+        m_cfg = cfg;
+        m_gb_register = gbRegister;
+        m_device_id = nextDeviceId;
+    }
+
+    if (pendingConfigChanged || replayConfigChanged) {
+        std::lock_guard<std::mutex> pendingLock(m_pending_mutex);
+        if (pendingConfigChanged) {
+            LoadPendingUploadsLocked(cfg);
+        }
+        while (static_cast<int>(m_pending_uploads.size()) > std::max(1, cfg.gat_upload.max_pending_count)) {
+            const PendingUploadItem oldest = m_pending_uploads.front();
+            RemoveFileIfExists(oldest.persist_path);
+            m_pending_uploads.pop_front();
+        }
+        if (replayConfigChanged) {
+            m_last_replay_time = 0;
+        }
+    }
     return 0;
 }
 

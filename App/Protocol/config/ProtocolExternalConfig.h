@@ -191,8 +191,10 @@ struct GbListenParam
 
 struct GatRegisterParam
 {
+    std::string scheme;
     std::string server_ip;
     int server_port;
+    std::string base_path;
     std::string device_id;
     std::string username;
     std::string password;
@@ -201,14 +203,20 @@ struct GatRegisterParam
     int expires_sec;
     int keepalive_interval_sec;
     int max_retry;
+    int request_timeout_ms;
+    std::string retry_backoff_policy;
 
     GatRegisterParam()
-        : server_port(0),
+        : scheme("http"),
+          server_port(0),
+          base_path(""),
           auth_method("digest"),
           listen_port(18080),
           expires_sec(3600),
           keepalive_interval_sec(60),
-          max_retry(3) {}
+          max_retry(3),
+          request_timeout_ms(5000),
+          retry_backoff_policy("5,10,30") {}
 };
 
 struct GatUploadParam
@@ -216,8 +224,19 @@ struct GatUploadParam
     int batch_size;
     int flush_interval_ms;
     std::string retry_policy;
+    std::string queue_dir;
+    int max_pending_count;
+    int replay_interval_sec;
+    int enable_apes_post_compat;
 
-    GatUploadParam() : batch_size(10), flush_interval_ms(500), retry_policy("1,2,5") {}
+    GatUploadParam()
+        : batch_size(10),
+          flush_interval_ms(500),
+          retry_policy("1,2,5"),
+          queue_dir("/tmp/gat1400_queue"),
+          max_pending_count(200),
+          replay_interval_sec(15),
+          enable_apes_post_compat(0) {}
 };
 
 struct GatCaptureParam

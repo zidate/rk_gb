@@ -76,7 +76,7 @@ std::string BuildConfigLogSummary(const protocol::ProtocolExternalConfig& cfg)
     char buffer[512] = {0};
     snprintf(buffer,
              sizeof(buffer),
-             "version=%s gb_enable=%d gb=%s:%d live=%s/%s:%d flip=%s gat=%s:%d/%d talk=%s/%d/%d broadcast=%s/%d listen=%s/%s:%d",
+             "version=%s gb_enable=%d gb=%s:%d live=%s/%s:%d flip=%s gat=%s://%s:%d%s listen=%d timeout=%d queue=%s apes_post_compat=%d talk=%s/%d/%d broadcast=%s/%d listen=%s/%s:%d",
              cfg.version.c_str(),
              cfg.gb_register.enabled,
              cfg.gb_register.server_ip.c_str(),
@@ -85,9 +85,14 @@ std::string BuildConfigLogSummary(const protocol::ProtocolExternalConfig& cfg)
              cfg.gb_live.target_ip.c_str(),
              cfg.gb_live.target_port,
              cfg.gb_image.flip_mode.c_str(),
+             cfg.gat_register.scheme.c_str(),
              cfg.gat_register.server_ip.c_str(),
              cfg.gat_register.server_port,
+             cfg.gat_register.base_path.c_str(),
              cfg.gat_register.listen_port,
+             cfg.gat_register.request_timeout_ms,
+             cfg.gat_upload.queue_dir.c_str(),
+             cfg.gat_upload.enable_apes_post_compat,
              cfg.gb_talk.codec.c_str(),
              cfg.gb_talk.recv_port,
              cfg.gb_talk.sample_rate,
@@ -183,6 +188,111 @@ bool LoadLocalConfigFile(protocol::ProtocolExternalConfig& cfg)
     }
 
     memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_scheme", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_register.scheme = value;
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_server_ip", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_register.server_ip = value;
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_server_port", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_register.server_port = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_base_path", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_register.base_path = value;
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_device_id", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_register.device_id = value;
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_username", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_register.username = value;
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_password", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_register.password = value;
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_auth_method", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_register.auth_method = value;
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_listen_port", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_register.listen_port = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_expires_sec", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_register.expires_sec = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_keepalive_interval_sec", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_register.keepalive_interval_sec = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_max_retry", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_register.max_retry = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_request_timeout_ms", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_register.request_timeout_ms = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_retry_backoff_policy", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_register.retry_backoff_policy = value;
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_upload_batch_size", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_upload.batch_size = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_upload_flush_interval_ms", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_upload.flush_interval_ms = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_upload_retry_policy", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_upload.retry_policy = value;
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_upload_queue_dir", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_upload.queue_dir = value;
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_upload_max_pending_count", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_upload.max_pending_count = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_upload_replay_interval_sec", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_upload.replay_interval_sec = atoi(value);
+    }
+
+    memset(value, 0, sizeof(value));
+    if (ini.read_profile_string(kLocalGbConfigSection, "gat_upload_enable_apes_post_compat", value, sizeof(value), kLocalGbConfigFile) == 0) {
+        cfg.gat_upload.enable_apes_post_compat = atoi(value) != 0 ? 1 : 0;
+    }
+
+    memset(value, 0, sizeof(value));
     if (ini.read_profile_string(kLocalGbConfigSection, "image_flip_mode", value, sizeof(value), kLocalGbConfigFile) == 0) {
         cfg.gb_image.flip_mode = value;
     }
@@ -258,6 +368,27 @@ int SaveLocalConfigFile(const protocol::ProtocolExternalConfig& cfg)
     fprintf(fp, "server_port=%d\n", cfg.gb_register.server_port);
     fprintf(fp, "device_id=%s\n", cfg.gb_register.device_id.c_str());
     fprintf(fp, "password=%s\n", cfg.gb_register.password.c_str());
+    fprintf(fp, "gat_scheme=%s\n", cfg.gat_register.scheme.c_str());
+    fprintf(fp, "gat_server_ip=%s\n", cfg.gat_register.server_ip.c_str());
+    fprintf(fp, "gat_server_port=%d\n", cfg.gat_register.server_port);
+    fprintf(fp, "gat_base_path=%s\n", cfg.gat_register.base_path.c_str());
+    fprintf(fp, "gat_device_id=%s\n", cfg.gat_register.device_id.c_str());
+    fprintf(fp, "gat_username=%s\n", cfg.gat_register.username.c_str());
+    fprintf(fp, "gat_password=%s\n", cfg.gat_register.password.c_str());
+    fprintf(fp, "gat_auth_method=%s\n", cfg.gat_register.auth_method.c_str());
+    fprintf(fp, "gat_listen_port=%d\n", cfg.gat_register.listen_port);
+    fprintf(fp, "gat_expires_sec=%d\n", cfg.gat_register.expires_sec);
+    fprintf(fp, "gat_keepalive_interval_sec=%d\n", cfg.gat_register.keepalive_interval_sec);
+    fprintf(fp, "gat_max_retry=%d\n", cfg.gat_register.max_retry);
+    fprintf(fp, "gat_request_timeout_ms=%d\n", cfg.gat_register.request_timeout_ms);
+    fprintf(fp, "gat_retry_backoff_policy=%s\n", cfg.gat_register.retry_backoff_policy.c_str());
+    fprintf(fp, "gat_upload_batch_size=%d\n", cfg.gat_upload.batch_size);
+    fprintf(fp, "gat_upload_flush_interval_ms=%d\n", cfg.gat_upload.flush_interval_ms);
+    fprintf(fp, "gat_upload_retry_policy=%s\n", cfg.gat_upload.retry_policy.c_str());
+    fprintf(fp, "gat_upload_queue_dir=%s\n", cfg.gat_upload.queue_dir.c_str());
+    fprintf(fp, "gat_upload_max_pending_count=%d\n", cfg.gat_upload.max_pending_count);
+    fprintf(fp, "gat_upload_replay_interval_sec=%d\n", cfg.gat_upload.replay_interval_sec);
+    fprintf(fp, "gat_upload_enable_apes_post_compat=%d\n", cfg.gat_upload.enable_apes_post_compat != 0 ? 1 : 0);
     fprintf(fp, "image_flip_mode=%s\n", cfg.gb_image.flip_mode.c_str());
     fprintf(fp, "talk_codec=%s\n", cfg.gb_talk.codec.c_str());
     fprintf(fp, "talk_recv_port=%d\n", cfg.gb_talk.recv_port);
@@ -342,6 +473,8 @@ void LocalConfigProvider::InitDefaultConfig()
 
     m_cached_cfg.gat_register.server_ip = "127.0.0.1";
     m_cached_cfg.gat_register.server_port = 80;
+    m_cached_cfg.gat_register.scheme = "http";
+    m_cached_cfg.gat_register.base_path = "";
     m_cached_cfg.gat_register.device_id = "34020000001320000001";
     m_cached_cfg.gat_register.username = "admin";
     m_cached_cfg.gat_register.password = "admin";
@@ -350,6 +483,12 @@ void LocalConfigProvider::InitDefaultConfig()
     m_cached_cfg.gat_register.expires_sec = 3600;
     m_cached_cfg.gat_register.keepalive_interval_sec = 60;
     m_cached_cfg.gat_register.max_retry = 3;
+    m_cached_cfg.gat_register.request_timeout_ms = 5000;
+    m_cached_cfg.gat_register.retry_backoff_policy = "5,10,30";
+    m_cached_cfg.gat_upload.queue_dir = "/tmp/gat1400_queue";
+    m_cached_cfg.gat_upload.max_pending_count = 200;
+    m_cached_cfg.gat_upload.replay_interval_sec = 15;
+    m_cached_cfg.gat_upload.enable_apes_post_compat = 0;
 
     m_cached_cfg.gb_talk.codec = "g711a";
     m_cached_cfg.gb_talk.recv_port = 30003;
@@ -484,7 +623,8 @@ int LocalConfigProvider::Validate(const ProtocolExternalConfig& cfg)
         }
     }
 
-    if (cfg.gat_register.server_ip.empty() || cfg.gat_register.server_port <= 0) {
+    if ((cfg.gat_register.scheme != "http" && cfg.gat_register.scheme != "https") ||
+        cfg.gat_register.server_ip.empty() || cfg.gat_register.server_port <= 0) {
         LogConfigValidateFail(cfg, -7, "gat_register_endpoint");
         return -7;
     }
@@ -499,9 +639,24 @@ int LocalConfigProvider::Validate(const ProtocolExternalConfig& cfg)
         return -13;
     }
 
+    if (cfg.gat_register.request_timeout_ms <= 0) {
+        LogConfigValidateFail(cfg, -24, "gat_register_request_timeout_ms");
+        return -24;
+    }
+
     if (cfg.gat_upload.batch_size <= 0 || cfg.gat_upload.flush_interval_ms <= 0) {
         LogConfigValidateFail(cfg, -14, "gat_upload");
         return -14;
+    }
+
+    if (cfg.gat_upload.queue_dir.empty() || cfg.gat_upload.max_pending_count <= 0 || cfg.gat_upload.replay_interval_sec <= 0) {
+        LogConfigValidateFail(cfg, -25, "gat_upload_queue");
+        return -25;
+    }
+
+    if (cfg.gat_upload.enable_apes_post_compat != 0 && cfg.gat_upload.enable_apes_post_compat != 1) {
+        LogConfigValidateFail(cfg, -26, "gat_upload_enable_apes_post_compat");
+        return -26;
     }
 
     if (cfg.gat_capture.concurrent_limit <= 0) {

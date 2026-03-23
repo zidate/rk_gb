@@ -2586,7 +2586,11 @@ static std::string BuildConfigDiffSummary(const protocol::ProtocolExternalConfig
 
     AppendConfigDiff(diff, "gat.register.server_ip", before.gat_register.server_ip, after.gat_register.server_ip);
 
+    AppendConfigDiff(diff, "gat.register.scheme", before.gat_register.scheme, after.gat_register.scheme);
+
     AppendConfigDiff(diff, "gat.register.server_port", before.gat_register.server_port, after.gat_register.server_port);
+
+    AppendConfigDiff(diff, "gat.register.base_path", before.gat_register.base_path, after.gat_register.base_path);
 
     AppendConfigDiff(diff, "gat.register.device_id", before.gat_register.device_id, after.gat_register.device_id);
 
@@ -2604,11 +2608,23 @@ static std::string BuildConfigDiffSummary(const protocol::ProtocolExternalConfig
 
     AppendConfigDiff(diff, "gat.register.max_retry", before.gat_register.max_retry, after.gat_register.max_retry);
 
+    AppendConfigDiff(diff, "gat.register.request_timeout_ms", before.gat_register.request_timeout_ms, after.gat_register.request_timeout_ms);
+
+    AppendConfigDiff(diff, "gat.register.retry_backoff_policy", before.gat_register.retry_backoff_policy, after.gat_register.retry_backoff_policy);
+
     AppendConfigDiff(diff, "gat.upload.batch_size", before.gat_upload.batch_size, after.gat_upload.batch_size);
 
     AppendConfigDiff(diff, "gat.upload.flush_interval_ms", before.gat_upload.flush_interval_ms, after.gat_upload.flush_interval_ms);
 
     AppendConfigDiff(diff, "gat.upload.retry_policy", before.gat_upload.retry_policy, after.gat_upload.retry_policy);
+
+    AppendConfigDiff(diff, "gat.upload.queue_dir", before.gat_upload.queue_dir, after.gat_upload.queue_dir);
+
+    AppendConfigDiff(diff, "gat.upload.max_pending_count", before.gat_upload.max_pending_count, after.gat_upload.max_pending_count);
+
+    AppendConfigDiff(diff, "gat.upload.replay_interval_sec", before.gat_upload.replay_interval_sec, after.gat_upload.replay_interval_sec);
+
+    AppendConfigDiff(diff, "gat.upload.enable_apes_post_compat", before.gat_upload.enable_apes_post_compat, after.gat_upload.enable_apes_post_compat);
 
     AppendConfigDiff(diff, "gat.capture.face_profile", before.gat_capture.face_profile, after.gat_capture.face_profile);
 
@@ -3620,9 +3636,13 @@ int ProtocolManager::ReloadExternalConfig()
                                   (m_cfg.gb_osd.alert_enabled != latest.gb_osd.alert_enabled);
     const bool applyImageFlipConfig = (m_cfg.gb_image.flip_mode != latest.gb_image.flip_mode);
 
-    const bool reloadGat = (m_cfg.gat_register.server_ip != latest.gat_register.server_ip) ||
+    const bool reloadGat = (m_cfg.gat_register.scheme != latest.gat_register.scheme) ||
+
+                           (m_cfg.gat_register.server_ip != latest.gat_register.server_ip) ||
 
                            (m_cfg.gat_register.server_port != latest.gat_register.server_port) ||
+
+                           (m_cfg.gat_register.base_path != latest.gat_register.base_path) ||
 
                            (m_cfg.gat_register.device_id != latest.gat_register.device_id) ||
 
@@ -3640,11 +3660,23 @@ int ProtocolManager::ReloadExternalConfig()
 
                            (m_cfg.gat_register.max_retry != latest.gat_register.max_retry) ||
 
+                           (m_cfg.gat_register.request_timeout_ms != latest.gat_register.request_timeout_ms) ||
+
+                           (m_cfg.gat_register.retry_backoff_policy != latest.gat_register.retry_backoff_policy) ||
+
                            (m_cfg.gat_upload.batch_size != latest.gat_upload.batch_size) ||
 
                            (m_cfg.gat_upload.flush_interval_ms != latest.gat_upload.flush_interval_ms) ||
 
                            (m_cfg.gat_upload.retry_policy != latest.gat_upload.retry_policy) ||
+
+                           (m_cfg.gat_upload.queue_dir != latest.gat_upload.queue_dir) ||
+
+                           (m_cfg.gat_upload.max_pending_count != latest.gat_upload.max_pending_count) ||
+
+                           (m_cfg.gat_upload.replay_interval_sec != latest.gat_upload.replay_interval_sec) ||
+
+                           (m_cfg.gat_upload.enable_apes_post_compat != latest.gat_upload.enable_apes_post_compat) ||
 
                            (m_cfg.gat_capture.face_profile != latest.gat_capture.face_profile) ||
 
@@ -10726,6 +10758,5 @@ int ProtocolManager::OnGbMediaPlayInfoRespond(StreamHandle handle, const MediaIn
 }
 
 }
-
 
 

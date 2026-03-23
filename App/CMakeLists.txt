@@ -194,6 +194,7 @@ set(Protocol_SRC
 	Protocol/gb28181/GB28181RtpPsSender.cpp
 	Protocol/gb28181/GB28181ClientReceiverAdapter.cpp
 	Protocol/gat1400/GAT1400ClientService.cpp
+	Protocol/gat1400/LowerGAT1400SDK.cpp
 )
 #??????? ??
 set(Encryption_SRC Encryption/Encryption.cpp)

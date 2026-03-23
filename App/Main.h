@@ -19,6 +19,8 @@ public:
 	bool start();
 	/// 启动后收尾工作
 	bool postStart();
+	protocol::ProtocolManager* GetProtocolManager();
+	const protocol::ProtocolManager* GetProtocolManager() const;
 	
 private:
 	/// 启动与 Tuya 线程解耦的本地业务

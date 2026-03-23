@@ -365,16 +365,21 @@ std::string BuildConfigLogSummary(const protocol::ProtocolExternalConfig& cfg)
     char buffer[512] = {0};
     snprintf(buffer,
              sizeof(buffer),
-             "version=%s gb=%s:%d live=%s/%s:%d gat=%s:%d/%d talk=%s/%d/%d broadcast=%s/%d listen=%s/%s:%d",
+             "version=%s gb=%s:%d live=%s/%s:%d gat=%s://%s:%d%s listen=%d timeout=%d queue=%s apes_post_compat=%d talk=%s/%d/%d broadcast=%s/%d listen=%s/%s:%d",
              cfg.version.c_str(),
              cfg.gb_register.server_ip.c_str(),
              cfg.gb_register.server_port,
              cfg.gb_live.transport.c_str(),
              cfg.gb_live.target_ip.c_str(),
              cfg.gb_live.target_port,
+             cfg.gat_register.scheme.c_str(),
              cfg.gat_register.server_ip.c_str(),
              cfg.gat_register.server_port,
+             cfg.gat_register.base_path.c_str(),
              cfg.gat_register.listen_port,
+             cfg.gat_register.request_timeout_ms,
+             cfg.gat_upload.queue_dir.c_str(),
+             cfg.gat_upload.enable_apes_post_compat,
              cfg.gb_talk.codec.c_str(),
              cfg.gb_talk.recv_port,
              cfg.gb_talk.sample_rate,
@@ -445,6 +450,8 @@ void HttpConfigProvider::InitDefaultConfig()
 
     m_cached_cfg.gat_register.server_ip = "127.0.0.1";
     m_cached_cfg.gat_register.server_port = 80;
+    m_cached_cfg.gat_register.scheme = "http";
+    m_cached_cfg.gat_register.base_path = "";
     m_cached_cfg.gat_register.device_id = "34020000001320000001";
     m_cached_cfg.gat_register.username = "admin";
     m_cached_cfg.gat_register.password = "admin";
@@ -453,6 +460,12 @@ void HttpConfigProvider::InitDefaultConfig()
     m_cached_cfg.gat_register.expires_sec = 3600;
     m_cached_cfg.gat_register.keepalive_interval_sec = 60;
     m_cached_cfg.gat_register.max_retry = 3;
+    m_cached_cfg.gat_register.request_timeout_ms = 5000;
+    m_cached_cfg.gat_register.retry_backoff_policy = "5,10,30";
+    m_cached_cfg.gat_upload.queue_dir = "/tmp/gat1400_queue";
+    m_cached_cfg.gat_upload.max_pending_count = 200;
+    m_cached_cfg.gat_upload.replay_interval_sec = 15;
+    m_cached_cfg.gat_upload.enable_apes_post_compat = 0;
 
     m_cached_cfg.gb_talk.codec = "g711a";
     m_cached_cfg.gb_talk.recv_port = 30003;
@@ -572,6 +585,8 @@ std::string HttpConfigProvider::ToMinimalJson(const ProtocolExternalConfig& cfg)
     json += "\"gat_register_server_ip\":\"" + cfg.gat_register.server_ip + "\",";
     snprintf(tmp, sizeof(tmp), "%d", cfg.gat_register.server_port);
     json += "\"gat_register_server_port\":" + std::string(tmp) + ",";
+    json += "\"gat_register_scheme\":\"" + cfg.gat_register.scheme + "\",";
+    json += "\"gat_register_base_path\":\"" + cfg.gat_register.base_path + "\",";
     json += "\"gat_register_device_id\":\"" + cfg.gat_register.device_id + "\",";
     json += "\"gat_register_username\":\"" + cfg.gat_register.username + "\",";
     json += "\"gat_register_password\":\"" + cfg.gat_register.password + "\",";
@@ -584,12 +599,22 @@ std::string HttpConfigProvider::ToMinimalJson(const ProtocolExternalConfig& cfg)
     json += "\"gat_register_keepalive_interval_sec\":" + std::string(tmp) + ",";
     snprintf(tmp, sizeof(tmp), "%d", cfg.gat_register.max_retry);
     json += "\"gat_register_max_retry\":" + std::string(tmp) + ",";
+    snprintf(tmp, sizeof(tmp), "%d", cfg.gat_register.request_timeout_ms);
+    json += "\"gat_register_request_timeout_ms\":" + std::string(tmp) + ",";
+    json += "\"gat_register_retry_backoff_policy\":\"" + cfg.gat_register.retry_backoff_policy + "\",";
 
     snprintf(tmp, sizeof(tmp), "%d", cfg.gat_upload.batch_size);
     json += "\"gat_upload_batch_size\":" + std::string(tmp) + ",";
     snprintf(tmp, sizeof(tmp), "%d", cfg.gat_upload.flush_interval_ms);
     json += "\"gat_upload_flush_interval_ms\":" + std::string(tmp) + ",";
     json += "\"gat_upload_retry_policy\":\"" + cfg.gat_upload.retry_policy + "\",";
+    json += "\"gat_upload_queue_dir\":\"" + cfg.gat_upload.queue_dir + "\",";
+    snprintf(tmp, sizeof(tmp), "%d", cfg.gat_upload.max_pending_count);
+    json += "\"gat_upload_max_pending_count\":" + std::string(tmp) + ",";
+    snprintf(tmp, sizeof(tmp), "%d", cfg.gat_upload.replay_interval_sec);
+    json += "\"gat_upload_replay_interval_sec\":" + std::string(tmp) + ",";
+    snprintf(tmp, sizeof(tmp), "%d", cfg.gat_upload.enable_apes_post_compat);
+    json += "\"gat_upload_enable_apes_post_compat\":" + std::string(tmp) + ",";
 
     json += "\"gat_capture_face_profile\":\"" + cfg.gat_capture.face_profile + "\",";
     json += "\"gat_capture_nonmotor_profile\":\"" + cfg.gat_capture.nonmotor_profile + "\",";
@@ -774,6 +799,12 @@ int HttpConfigProvider::PullLatest(ProtocolExternalConfig& out)
     if (FindIntField(body, "gat_register_server_port", ivalue)) {
         next.gat_register.server_port = ivalue;
     }
+    if (FindStringField(body, "gat_register_scheme", value)) {
+        next.gat_register.scheme = value;
+    }
+    if (FindStringField(body, "gat_register_base_path", value)) {
+        next.gat_register.base_path = value;
+    }
     if (FindStringField(body, "gat_register_device_id", value)) {
         next.gat_register.device_id = value;
     }
@@ -798,6 +829,12 @@ int HttpConfigProvider::PullLatest(ProtocolExternalConfig& out)
     if (FindIntField(body, "gat_register_max_retry", ivalue)) {
         next.gat_register.max_retry = ivalue;
     }
+    if (FindIntField(body, "gat_register_request_timeout_ms", ivalue)) {
+        next.gat_register.request_timeout_ms = ivalue;
+    }
+    if (FindStringField(body, "gat_register_retry_backoff_policy", value)) {
+        next.gat_register.retry_backoff_policy = value;
+    }
 
     if (FindIntField(body, "gat_upload_batch_size", ivalue)) {
         next.gat_upload.batch_size = ivalue;
@@ -807,6 +844,18 @@ int HttpConfigProvider::PullLatest(ProtocolExternalConfig& out)
     }
     if (FindStringField(body, "gat_upload_retry_policy", value)) {
         next.gat_upload.retry_policy = value;
+    }
+    if (FindStringField(body, "gat_upload_queue_dir", value)) {
+        next.gat_upload.queue_dir = value;
+    }
+    if (FindIntField(body, "gat_upload_max_pending_count", ivalue)) {
+        next.gat_upload.max_pending_count = ivalue;
+    }
+    if (FindIntField(body, "gat_upload_replay_interval_sec", ivalue)) {
+        next.gat_upload.replay_interval_sec = ivalue;
+    }
+    if (FindIntField(body, "gat_upload_enable_apes_post_compat", ivalue)) {
+        next.gat_upload.enable_apes_post_compat = (ivalue != 0) ? 1 : 0;
     }
     if (FindStringField(body, "gat_capture_face_profile", value)) {
         next.gat_capture.face_profile = value;
@@ -961,7 +1010,8 @@ int HttpConfigProvider::Validate(const ProtocolExternalConfig& cfg)
         }
     }
 
-    if (cfg.gat_register.server_ip.empty() || cfg.gat_register.server_port <= 0) {
+    if ((cfg.gat_register.scheme != "http" && cfg.gat_register.scheme != "https") ||
+        cfg.gat_register.server_ip.empty() || cfg.gat_register.server_port <= 0) {
         LogConfigValidateFail(cfg, -7, "gat_register_endpoint");
         return -7;
     }
@@ -976,9 +1026,24 @@ int HttpConfigProvider::Validate(const ProtocolExternalConfig& cfg)
         return -13;
     }
 
+    if (cfg.gat_register.request_timeout_ms <= 0) {
+        LogConfigValidateFail(cfg, -24, "gat_register_request_timeout_ms");
+        return -24;
+    }
+
     if (cfg.gat_upload.batch_size <= 0 || cfg.gat_upload.flush_interval_ms <= 0) {
         LogConfigValidateFail(cfg, -14, "gat_upload");
         return -14;
+    }
+
+    if (cfg.gat_upload.queue_dir.empty() || cfg.gat_upload.max_pending_count <= 0 || cfg.gat_upload.replay_interval_sec <= 0) {
+        LogConfigValidateFail(cfg, -25, "gat_upload_queue");
+        return -25;
+    }
+
+    if (cfg.gat_upload.enable_apes_post_compat != 0 && cfg.gat_upload.enable_apes_post_compat != 1) {
+        LogConfigValidateFail(cfg, -26, "gat_upload_enable_apes_post_compat");
+        return -26;
     }
 
     if (cfg.gat_capture.concurrent_limit <= 0) {

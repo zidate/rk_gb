@@ -56,6 +56,16 @@ CSofia::~CSofia()
 #endif
 }
 
+protocol::ProtocolManager* CSofia::GetProtocolManager()
+{
+	return &m_protocolManager;
+}
+
+const protocol::ProtocolManager* CSofia::GetProtocolManager() const
+{
+	return &m_protocolManager;
+}
+
 void CSofia::StartLocalRuntimeServices()
 {
 	AppInfo("start local runtime services without tuya thread\n");
