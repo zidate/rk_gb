@@ -12,15 +12,12 @@ struct alarm_Info_t
 {
     uint32_t AlarmType;
     std::string AlarmTypeParam;
-    std::string ExtraInfo;
 
     void skip_AlarmType() { __skip_AlarmType = true; }
     void skip_AlarmTypeParam() { __skip_AlarmTypeParam = true; }
-    void skip_ExtraInfo() { __skip_ExtraInfo = true; }
 
     bool xml_has_AlarmType() const { return __xml_has_AlarmType; }
     bool xml_has_AlarmTypeParam() const { return __xml_has_AlarmTypeParam; }
-    bool xml_has_ExtraInfo() const { return __xml_has_ExtraInfo; }
 
     alarm_Info_t();
     alarm_Info_t& operator=(const alarm_Info_t& obj_val);
@@ -31,11 +28,9 @@ struct alarm_Info_t
 private:
     bool __skip_AlarmType;
     bool __skip_AlarmTypeParam;
-    bool __skip_ExtraInfo;
 
     bool __xml_has_AlarmType;
     bool __xml_has_AlarmTypeParam;
-    bool __xml_has_ExtraInfo;
 };
 
 bool encode(const alarm_Info_t& obj_val, xml_document_t& doc, xml_element_t& xml_val);

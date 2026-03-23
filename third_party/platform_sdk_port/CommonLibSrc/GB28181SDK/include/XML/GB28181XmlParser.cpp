@@ -1967,25 +1967,12 @@ void CGB28181XmlParser::PackAlarmNotify(int sn ,const AlarmNotifyInfo* info, std
 {
     slothxml::alarm_notify_t notify;
     notify.CmdType = "Alarm";
-    notify.SN = (sn > 0) ? (uint32_t)sn : m_sn.Increment();
+    notify.SN = m_sn.Increment();
     notify.DeviceID = info->DeviceID;
     notify.AlarmTime = info->AlarmTime;
     notify.AlarmPriority = info->AlarmPriority;
     notify.AlarmMethod = info->AlarmMethod;
 	notify.Info.AlarmType = info->AlarmType;
-    if (info->AlarmTypeParam[0] != '\0') {
-        notify.Info.AlarmTypeParam.assign(info->AlarmTypeParam);
-    } else {
-        notify.Info.skip_AlarmTypeParam();
-    }
-    if (info->ExtendInfo[0] != '\0') {
-        notify.Info.ExtraInfo.assign(info->ExtendInfo);
-    } else if (info->AlarmID[0] != '\0') {
-        notify.Info.ExtraInfo.assign("alarm_id=");
-        notify.Info.ExtraInfo.append(info->AlarmID);
-    } else {
-        notify.Info.skip_ExtraInfo();
-    }
 	notify.AlarmDescription.assign(info->AlarmDescription);
 	notify.AlarmState = info->AlarmState;
 
@@ -2023,12 +2010,6 @@ bool CGB28181XmlParser::UnPackAlarmNotify(const std::string &xml_str, int& sn,  
 	memcpy(info->AlarmDescription,notify.AlarmDescription.c_str(),notify.AlarmDescription.length());
 	memcpy(info->DeviceID,notify.DeviceID.c_str(),notify.DeviceID.length());
 	info->AlarmType = notify.Info.AlarmType;
-    if (!notify.Info.AlarmTypeParam.empty()) {
-        memcpy(info->AlarmTypeParam, notify.Info.AlarmTypeParam.c_str(), notify.Info.AlarmTypeParam.length());
-    }
-    if (!notify.Info.ExtraInfo.empty()) {
-        memcpy(info->ExtendInfo, notify.Info.ExtraInfo.c_str(), notify.Info.ExtraInfo.length());
-    }
 	info->AlarmState = notify.AlarmState;
    
     return true;

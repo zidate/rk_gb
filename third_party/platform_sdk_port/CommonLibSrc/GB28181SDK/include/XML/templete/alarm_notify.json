@@ -9,10 +9,9 @@
             [
 
 				["uint32_t","AlarmType"],
-				["string","AlarmTypeParam"],
-				["string","ExtraInfo"]
-	            ]
-	        },
+				["string","AlarmTypeParam"]
+            ]
+        },
 
         {
             "type": "alarm_notify_t",

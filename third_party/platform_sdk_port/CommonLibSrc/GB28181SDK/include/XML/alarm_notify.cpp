@@ -13,16 +13,12 @@ alarm_Info_t::alarm_Info_t()
 
     __skip_AlarmTypeParam = false;
     __xml_has_AlarmTypeParam = false;
-
-    __skip_ExtraInfo = false;
-    __xml_has_ExtraInfo = false;
 }
 
 alarm_Info_t& alarm_Info_t::operator=(const alarm_Info_t& obj_val)
 {
     this->AlarmType = obj_val.AlarmType;
     this->AlarmTypeParam = obj_val.AlarmTypeParam;
-    this->ExtraInfo = obj_val.ExtraInfo;
     return *this;
 }
 
@@ -30,7 +26,6 @@ bool alarm_Info_t::operator==(const alarm_Info_t& obj_val) const
 {
     if (!(this->AlarmType == obj_val.AlarmType)) return false;
     if (!(this->AlarmTypeParam == obj_val.AlarmTypeParam)) return false;
-    if (!(this->ExtraInfo == obj_val.ExtraInfo)) return false;
     return true;
 }
 
@@ -40,7 +35,6 @@ bool alarm_Info_t::encode(xml_document_t& doc, xml_element_t& xml_val) const
     {
         if (!__skip_AlarmType && !encode_field(AlarmType, "AlarmType", doc, xml_val)) break;
         if (!__skip_AlarmTypeParam && !encode_field(AlarmTypeParam, "AlarmTypeParam", doc, xml_val)) break;
-        if (!__skip_ExtraInfo && !encode_field(ExtraInfo, "ExtraInfo", doc, xml_val)) break;
 
         return true;
     } while (0);
@@ -54,7 +48,6 @@ bool alarm_Info_t::decode(const xml_element_t& xml_val)
     {
         if (!decode_field(xml_val, "AlarmType", AlarmType, __xml_has_AlarmType)) break;
         if (!decode_field(xml_val, "AlarmTypeParam", AlarmTypeParam, __xml_has_AlarmTypeParam)) break;
-        if (!decode_field(xml_val, "ExtraInfo", ExtraInfo, __xml_has_ExtraInfo)) break;
 
         return true;
     } while (0);

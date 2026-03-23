@@ -106,10 +106,6 @@ namespace
 
 static protocol::ProtocolManager* g_gb_live_audio_manager = NULL;
 
-static const int kLocalAlarmTypeMotionBit = (1 << 0);
-static const int kLocalAlarmTypeHumanBit = (1 << 1);
-static const int kLocalAlarmTypeVehicleBit = (1 << 2);
-
 static const char* kGbLiveDmcModuleName = "gb28181_live";
 static const int kRkOsdDateTimeId = 1;
 static const int kRkOsdCustomTextId = 2;
@@ -653,128 +649,6 @@ static std::string SafeStr(const char* s, size_t maxLen)
 
 
     return std::string(s, len);
-
-}
-
-struct LocalGbAlarmMapping
-
-{
-
-    unsigned int alarm_type;
-
-    unsigned int alarm_method;
-
-    unsigned int alarm_priority;
-
-    std::string alarm_id;
-
-    std::string alarm_type_param;
-
-    std::string description;
-
-    LocalGbAlarmMapping()
-
-        : alarm_type(kGB_ALARM_TYPE_VIDEO_MOTION),
-
-          alarm_method(kGB_ALARM_METHOD_VIDEO),
-
-          alarm_priority(1U),
-
-          alarm_id("local_motion_alarm"),
-
-          alarm_type_param("motion"),
-
-          description("motion_detect")
-
-    {
-
-    }
-
-};
-
-static void FormatCurrentGbAlarmTime(char* dst, size_t dstSize)
-
-{
-
-    if (dst == NULL || dstSize == 0) {
-
-        return;
-
-    }
-
-
-
-    time_t now = time(NULL);
-
-    struct tm tm_now;
-
-    memset(&tm_now, 0, sizeof(tm_now));
-
-#if defined(_WIN32)
-
-    localtime_s(&tm_now, &now);
-
-#else
-
-    localtime_r(&now, &tm_now);
-
-#endif
-
-    snprintf(dst,
-
-             dstSize,
-
-             "%04d-%02d-%02dT%02d:%02d:%02d",
-
-             tm_now.tm_year + 1900,
-
-             tm_now.tm_mon + 1,
-
-             tm_now.tm_mday,
-
-             tm_now.tm_hour,
-
-             tm_now.tm_min,
-
-             tm_now.tm_sec);
-
-}
-
-static LocalGbAlarmMapping BuildLocalGbAlarmMapping(int alarmTypeBits)
-
-{
-
-    LocalGbAlarmMapping mapping;
-
-    if ((alarmTypeBits & kLocalAlarmTypeHumanBit) != 0) {
-
-        mapping.alarm_id = "local_human_alarm";
-
-        mapping.alarm_type_param = "human";
-
-        mapping.description = "human_detect";
-
-        return mapping;
-
-    }
-
-
-
-    if ((alarmTypeBits & kLocalAlarmTypeVehicleBit) != 0) {
-
-        mapping.alarm_id = "local_vehicle_alarm";
-
-        mapping.alarm_type_param = "vehicle";
-
-        mapping.description = "vehicle_detect";
-
-        return mapping;
-
-    }
-
-
-
-    return mapping;
 
 }
 
@@ -3377,17 +3251,13 @@ ProtocolManager::ProtocolManager()
       m_gb_register_success_ms(0),
       m_gb_register_expires_sec(0),
 
-	      m_gb_catalog_subscribe_handle(NULL),
+      m_gb_catalog_subscribe_handle(NULL),
 
-	      m_gb_alarm_subscribe_handle(NULL),
+      m_gb_alarm_subscribe_handle(NULL),
 
-	      m_gb_mobile_position_subscribe_handle(NULL),
+      m_gb_mobile_position_subscribe_handle(NULL),
 
-          m_local_gb_alarm_active(false),
-
-          m_local_gb_alarm_type_bits(0),
-
-	      m_gb_current_media_ssrc(0),
+      m_gb_current_media_ssrc(0),
       m_gb_current_media_port(0),
 
       m_gb_replay_generation(0),
@@ -6746,7 +6616,6 @@ int ProtocolManager::HandleGbAlarmResetControl(const DevControlCmd* cmd)
 
 
     Storage_Module_ClearAlarmRecord();
-    ClearLocalGbAlarmState();
 
     printf("[ProtocolManager] gb alarm reset method=%s type=%s gb=%s\n",
 
@@ -7556,92 +7425,6 @@ int ProtocolManager::NotifyGbCatalog(const char* gbCode)
 
 
 
-int ProtocolManager::SyncLocalVideoAlarm(bool active, int alarmTypeBits)
-
-{
-
-    bool shouldNotify = false;
-
-    bool notifyActive = active;
-
-    int effectiveAlarmTypeBits = alarmTypeBits;
-
-    {
-
-        std::lock_guard<std::mutex> lock(m_gb_alarm_state_mutex);
-
-        if (active) {
-
-            if (!m_local_gb_alarm_active || m_local_gb_alarm_type_bits != alarmTypeBits) {
-
-                m_local_gb_alarm_active = true;
-
-                m_local_gb_alarm_type_bits = alarmTypeBits;
-
-                shouldNotify = true;
-
-            }
-
-        } else if (m_local_gb_alarm_active) {
-
-            notifyActive = false;
-
-            effectiveAlarmTypeBits = m_local_gb_alarm_type_bits;
-
-            m_local_gb_alarm_active = false;
-
-            m_local_gb_alarm_type_bits = 0;
-
-            shouldNotify = true;
-
-        }
-
-    }
-
-
-
-    if (!shouldNotify) {
-
-        return 0;
-
-    }
-
-
-
-    const LocalGbAlarmMapping mapping = BuildLocalGbAlarmMapping(effectiveAlarmTypeBits);
-
-    AlarmNotifyInfo info;
-
-    memset(&info, 0, sizeof(info));
-
-    CopyBounded(info.AlarmID, sizeof(info.AlarmID), mapping.alarm_id);
-
-    info.AlarmPriority = mapping.alarm_priority;
-
-    info.AlarmMethod = mapping.alarm_method;
-
-    info.AlarmType = mapping.alarm_type;
-
-    info.AlarmState = notifyActive ? 1U : 0U;
-
-    FormatCurrentGbAlarmTime(info.AlarmTime, sizeof(info.AlarmTime));
-
-    CopyBounded(info.AlarmDescription, sizeof(info.AlarmDescription), mapping.description);
-
-    CopyBounded(info.AlarmTypeParam, sizeof(info.AlarmTypeParam), mapping.alarm_type_param);
-
-    CopyBounded(info.ExtendInfo,
-
-                sizeof(info.ExtendInfo),
-
-                std::string("alarm_id=") + mapping.alarm_id + ";event=" + mapping.alarm_type_param);
-
-    return NotifyGbAlarm(&info);
-
-}
-
-
-
 int ProtocolManager::NotifyGbAlarm(AlarmNotifyInfo* info)
 
 {
@@ -7651,9 +7434,7 @@ int ProtocolManager::NotifyGbAlarm(AlarmNotifyInfo* info)
         return -91;
 
     }
-
-    strncpy(info->DeviceID, m_cfg.gb_register.device_id.c_str(), GB_ID_LEN - 1);
-    info->DeviceID[GB_ID_LEN - 1] = '\0';
+        strncpy(info->DeviceID, m_cfg.gb_register.device_id.c_str(), GB_ID_LEN - 1);
 
     SubscribeHandle handle = NULL;
 
@@ -7697,7 +7478,7 @@ int ProtocolManager::NotifyGbAlarm(AlarmNotifyInfo* info)
 
 
 
-    printf("[ProtocolManager] module=gb28181 event=alarm_notify device=%s session=%p trace=manager error=0 alarm=%s priority=%d method=%d state=%u type=%u param=%s\n",
+    printf("[ProtocolManager] module=gb28181 event=alarm_notify device=%s session=%p trace=manager error=0 alarm=%s priority=%d method=%d\n",
 
            info->DeviceID,
 
@@ -7707,23 +7488,10 @@ int ProtocolManager::NotifyGbAlarm(AlarmNotifyInfo* info)
 
            info->AlarmPriority,
 
-           info->AlarmMethod,
-
-           info->AlarmState,
-
-           info->AlarmType,
-
-           info->AlarmTypeParam);
+           info->AlarmMethod);
 
     return 0;
 
-}
-
-void ProtocolManager::ClearLocalGbAlarmState()
-{
-    std::lock_guard<std::mutex> lock(m_gb_alarm_state_mutex);
-    m_local_gb_alarm_active = false;
-    m_local_gb_alarm_type_bits = 0;
 }
 
 
