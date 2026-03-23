@@ -35,6 +35,7 @@
 #include "GB28181ClientReceiverAdapter.h"
 
 #include "Storage_api.h"
+#include "config/ProtocolExternalConfig.h"
 
 
 
@@ -97,6 +98,9 @@ public:
     virtual int ReloadExternalConfig();
 
     const ProtocolExternalConfig& GetConfig() const;
+
+    int SetGbRegisterConfig(const GbRegisterParam& param);
+    GbRegisterParam GetGbRegisterConfig() const;
 
 
 

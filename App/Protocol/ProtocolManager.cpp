@@ -4737,6 +4737,17 @@ const ProtocolExternalConfig& ProtocolManager::GetConfig() const
 
 }
 
+int ProtocolManager::SetGbRegisterConfig(const GbRegisterParam& param)
+{
+    m_cfg.gb_register = param;
+    return 0;
+}
+
+GbRegisterParam ProtocolManager::GetGbRegisterConfig() const
+{
+    return m_cfg.gb_register;
+}
+
 
 
 int ProtocolManager::PushLiveVideoEsFrame(const uint8_t* data,
