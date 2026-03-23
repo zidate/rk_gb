@@ -155,7 +155,7 @@ public:
 
     int NotifyGbCatalog(const char* gbCode);
 
-    int NotifyGbAlarm(const AlarmNotifyInfo* info);
+    int NotifyGbAlarm(AlarmNotifyInfo* info);
 
     int NotifyGbMobilePosition(const MobilePositionInfo* info);
 

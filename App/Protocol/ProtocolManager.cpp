@@ -7317,7 +7317,7 @@ int ProtocolManager::NotifyGbCatalog(const char* gbCode)
 
 
 
-int ProtocolManager::NotifyGbAlarm(const AlarmNotifyInfo* info)
+int ProtocolManager::NotifyGbAlarm(AlarmNotifyInfo* info)
 
 {
 
@@ -7326,8 +7326,7 @@ int ProtocolManager::NotifyGbAlarm(const AlarmNotifyInfo* info)
         return -91;
 
     }
-
-
+        strncpy(info->DeviceID, m_cfg.gb_register.device_id.c_str(), GB_ID_LEN - 1);
 
     SubscribeHandle handle = NULL;
 
