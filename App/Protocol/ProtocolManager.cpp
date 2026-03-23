@@ -4615,6 +4615,10 @@ int ProtocolManager::SetGbRegisterConfig(const GbRegisterParam& param)
 
 GbRegisterParam ProtocolManager::GetGbRegisterConfig() const
 {
+    if (m_cfg.gb_register.server_ip.empty()) {
+        GbRegisterParam default_param;
+        return default_param;
+    }
     return m_cfg.gb_register;
 }
 
