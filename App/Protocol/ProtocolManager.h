@@ -88,7 +88,11 @@ public:
 
     virtual void Stop();
 
+    int GBManager_Start();
 
+    int GBManager_Stop();
+
+    void OnGbConfigChanged();
 
     virtual int ReloadExternalConfig();
 

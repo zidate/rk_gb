@@ -172,8 +172,9 @@ struct GbBroadcastParam
     std::string codec;
     int recv_port;
     std::string file_cache_dir;
+    std::string transport;
 
-    GbBroadcastParam() : input_mode("stream"), codec("g711a"), recv_port(0), file_cache_dir("/tmp") {}
+    GbBroadcastParam() : input_mode("stream"), codec("g711a"), recv_port(0), file_cache_dir("/tmp"), transport("tcp") {}
 };
 
 struct GbListenParam

@@ -766,7 +766,7 @@ static bool IsUpgradeUrlAllowed(const std::string& url, const std::vector<std::s
 
 static void RemoveFileQuietly(const char* path)
 {
-    if (path != NULL && path[0] != ' ') {
+    if (path != NULL && path[0] != '\0') {
         remove(path);
     }
 }
@@ -774,7 +774,7 @@ static void RemoveFileQuietly(const char* path)
 static bool ReadFileSizeBytes(const char* path, unsigned long long& outSize)
 {
     outSize = 0;
-    if (path == NULL || path[0] == ' ') {
+    if (path == NULL || path[0] == '\0') {
         return false;
     }
 
@@ -819,7 +819,7 @@ static bool ReadShellOutput(const std::string& command, std::string& output)
 
 static int DownloadFileByCurl(const std::string& url, const char* outputPath, int timeoutSec)
 {
-    if (url.empty() || outputPath == NULL || outputPath[0] == ' ') {
+    if (url.empty() || outputPath == NULL || outputPath[0] == '\0') {
         return -1;
     }
 
@@ -846,7 +846,7 @@ static std::string ResolveUpgradeDigestMode(const std::string& checksum, const p
 
 static bool ComputeFileDigest(const char* path, const std::string& mode, std::string& digest)
 {
-    if (path == NULL || path[0] == ' ') {
+    if (path == NULL || path[0] == '\0') {
         return false;
     }
 
@@ -871,7 +871,7 @@ static bool ComputeFileDigest(const char* path, const std::string& mode, std::st
 
 static bool TouchFileMarker(const char* path)
 {
-    if (path == NULL || path[0] == ' ') {
+    if (path == NULL || path[0] == '\0') {
         return false;
     }
 
@@ -4091,7 +4091,47 @@ void ProtocolManager::StopGbClientLifecycle()
 
 }
 
+int ProtocolManager::GBManager_Start()
+{
+    printf("[ProtocolManager] GBManager_Start called\n");
+    return Start();
+}
 
+int ProtocolManager::GBManager_Stop()
+{
+    printf("[ProtocolManager] GBManager_Stop called\n");
+    Stop();
+    return 0;
+}
+
+void ProtocolManager::OnGbConfigChanged()
+{
+    printf("[ProtocolManager] OnGbConfigChanged, reloading config and restarting GB...\n");
+
+    if (!m_provider.get()) {
+        printf("[ProtocolManager] OnGbConfigChanged failed, no provider\n");
+        return;
+    }
+
+    ProtocolExternalConfig latest;
+    int ret = m_provider->PullLatest(latest);
+    if (ret != 0) {
+        printf("[ProtocolManager] OnGbConfigChanged failed to pull config ret=%d\n", ret);
+        return;
+    }
+
+    ret = m_provider->Validate(latest);
+    if (ret != 0) {
+        printf("[ProtocolManager] OnGbConfigChanged failed to validate config ret=%d\n", ret);
+        return;
+    }
+
+    m_cfg = latest;
+    m_gb_device_name = m_cfg.gb_register.device_name;
+
+    Stop();
+    Start();
+}
 
 int ProtocolManager::RegisterGbClient(bool force)
 
@@ -4869,6 +4909,10 @@ int ProtocolManager::BuildGbBroadcastMediaInfo(const std::string& localIp,
 
         localRecvPort = m_cfg.gb_broadcast.recv_port;
 
+        const std::string& broadcastTransport = m_cfg.gb_broadcast.transport;
+
+        transportType = (ToLowerCopy(broadcastTransport) == "tcp") ? kRtpOverTcpActive : kRtpOverUdp;
+
     }
 
 
@@ -5191,11 +5235,7 @@ int ProtocolManager::HandleGbBroadcastNotifyResponse(const char* gbCode, const B
     memset(&request, 0, sizeof(request));
 
     const std::string mediaDeviceId = sourceId.empty() ? resolvedGbCode : sourceId;
-    const std::string registerPeerId =
-        (LooksLikeGbCode(m_cfg.gb_register.username) && m_cfg.gb_register.username != deviceId)
-            ? m_cfg.gb_register.username
-            : "";
-    const std::string inviteTargetId = !registerPeerId.empty() ? registerPeerId : mediaDeviceId;
+    const std::string inviteTargetId = mediaDeviceId;
 
     int ret = BuildGbBroadcastMediaInfo(localIp, mediaDeviceId, request, requestMap);
     if (ret != 0) {
@@ -5216,13 +5256,12 @@ int ProtocolManager::HandleGbBroadcastNotifyResponse(const char* gbCode, const B
     memset(&answer, 0, sizeof(answer));
 
     StreamHandle handle = NULL;
-    printf("[ProtocolManager] gb broadcast active invite start gb=%s source=%s target=%s invite_target=%s media_device=%s register_peer=%s transport=%s local=%s:%u codec=%s pt=%u\n",
+    printf("[ProtocolManager] gb broadcast active invite start gb=%s source=%s target=%s invite_target=%s media_device=%s transport=%s local=%s:%u codec=%s pt=%u\n",
            resolvedGbCode.c_str(),
            sourceId.c_str(),
            targetId.c_str(),
            inviteTargetId.c_str(),
            mediaDeviceId.c_str(),
-           registerPeerId.c_str(),
            GbNetTransportName(request.RtpType),
            request.IP,
            request.Port,
@@ -5230,6 +5269,7 @@ int ProtocolManager::HandleGbBroadcastNotifyResponse(const char* gbCode, const B
            requestMap.MediaFormat);
 
     ret = sdk->StartBroadcastStreamRequest(inviteTargetId.c_str(), &request, &answer, &handle);
+
     if (!IsGbSdkSuccess(ret) || handle == NULL) {
 
         printf("[ProtocolManager] gb broadcast active invite failed ret=%d gb=%s source=%s target=%s invite_target=%s\n",
@@ -10685,81 +10725,7 @@ int ProtocolManager::OnGbMediaPlayInfoRespond(StreamHandle handle, const MediaIn
 
 }
 
-
-
-
-
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 

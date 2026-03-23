@@ -463,6 +463,7 @@ void HttpConfigProvider::InitDefaultConfig()
     m_cached_cfg.gb_broadcast.codec = "g711a";
     m_cached_cfg.gb_broadcast.recv_port = 30001;
     m_cached_cfg.gb_broadcast.file_cache_dir = "/tmp";
+    m_cached_cfg.gb_broadcast.transport = "tcp";
 
     m_cached_cfg.gb_listen.transport = "udp";
     m_cached_cfg.gb_listen.target_ip = "127.0.0.1";
@@ -601,6 +602,7 @@ std::string HttpConfigProvider::ToMinimalJson(const ProtocolExternalConfig& cfg)
     snprintf(tmp, sizeof(tmp), "%d", cfg.gb_broadcast.recv_port);
     json += "\"gb_broadcast_recv_port\":" + std::string(tmp) + ",";
     json += "\"gb_broadcast_file_cache_dir\":\"" + cfg.gb_broadcast.file_cache_dir + "\",";
+    json += "\"gb_broadcast_transport\":\"" + cfg.gb_broadcast.transport + "\",";
     json += "\"gb_upgrade_url_whitelist\":\"" + JoinConfigList(cfg.gb_upgrade.url_whitelist) + "\",";
     snprintf(tmp, sizeof(tmp), "%d", cfg.gb_upgrade.max_package_mb);
     json += "\"gb_upgrade_max_package_mb\":" + std::string(tmp) + ",";
@@ -830,6 +832,9 @@ int HttpConfigProvider::PullLatest(ProtocolExternalConfig& out)
     if (FindStringField(body, "gb_broadcast_file_cache_dir", value)) {
         next.gb_broadcast.file_cache_dir = value;
     }
+    if (FindStringField(body, "gb_broadcast_transport", value)) {
+        next.gb_broadcast.transport = value;
+    }
     if (FindStringField(body, "gb_upgrade_url_whitelist", value)) {
         next.gb_upgrade.url_whitelist = SplitConfigList(value);
     }
@@ -994,6 +999,11 @@ int HttpConfigProvider::Validate(const ProtocolExternalConfig& cfg)
     if (cfg.gb_broadcast.codec.empty() || cfg.gb_broadcast.recv_port <= 0) {
         LogConfigValidateFail(cfg, -9, "gb_broadcast_params");
         return -9;
+    }
+
+    if (cfg.gb_broadcast.transport != "udp" && cfg.gb_broadcast.transport != "tcp") {
+        LogConfigValidateFail(cfg, -22, "gb_broadcast_transport");
+        return -22;
     }
 
     if (cfg.gb_listen.target_ip.empty() || cfg.gb_listen.target_port <= 0) {

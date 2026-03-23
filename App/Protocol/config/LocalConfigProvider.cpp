@@ -366,6 +366,7 @@ void LocalConfigProvider::InitDefaultConfig()
     m_cached_cfg.gb_broadcast.codec = "g711a";
     m_cached_cfg.gb_broadcast.recv_port = 30001;
     m_cached_cfg.gb_broadcast.file_cache_dir = "/tmp";
+    m_cached_cfg.gb_broadcast.transport = "tcp";
 
     m_cached_cfg.gb_listen.transport = "udp";
     m_cached_cfg.gb_listen.target_ip = "127.0.0.1";
@@ -516,6 +517,11 @@ int LocalConfigProvider::Validate(const ProtocolExternalConfig& cfg)
     if (cfg.gb_broadcast.codec.empty() || cfg.gb_broadcast.recv_port <= 0) {
         LogConfigValidateFail(cfg, -9, "gb_broadcast_params");
         return -9;
+    }
+
+    if (cfg.gb_broadcast.transport != "udp" && cfg.gb_broadcast.transport != "tcp") {
+        LogConfigValidateFail(cfg, -22, "gb_broadcast_transport");
+        return -22;
     }
 
     if (cfg.gb_listen.target_ip.empty() || cfg.gb_listen.target_port <= 0) {
