@@ -3037,16 +3037,16 @@ void CGBClientImpl::OnAlarmSub(ProtocolType  type, const SipData* data)
 
 
 
-	if (m_subscribe_manager->FindSubscribeHandle(m_alarm_sub.key.DialogId))
+		if (m_subscribe_manager->FindSubscribeHandle(m_alarm_sub.key.DialogId))
 
 
-	{
+		{
 
 
-		m_subscribe_manager->DeleteSubscribeHandle((SubscribeHandle)(&m_alarm_sub));
+			m_subscribe_manager->DeleteSubscribeHandle((SubscribeHandle)(&m_alarm_sub.key));
 
 
-	}
+		}
 
 
 

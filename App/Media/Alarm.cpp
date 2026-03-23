@@ -1,6 +1,7 @@
 #include <unistd.h>
 #include <time.h>
 #include "Common.h"
+#include "Main.h"
 
 extern unsigned char bStartPrivateMode; 		//是否开启隐私模式
 
@@ -209,24 +210,30 @@ void CAlarm::ThreadProc()
 				g_RecordManager.DoRecord(0);
             }
 		}
-		else
-		{
-			//No motion detect for more than 110 seconds, stop the event
-			g_TuyaHandle.EventNotification(0,m_AlarmType);
+			else
+			{
+				//No motion detect for more than 110 seconds, stop the event
+				g_TuyaHandle.EventNotification(0,m_AlarmType);
 //			g_AnBaoLightManager.SetMDStatus(0);
 			g_Siren.SetMDStatus(0);
 
             if(current_time - last_time > 110 && alarm_is_triggerd)
             {
 				//通知停止录像
-				g_RecordManager.ClearRecord(0);
-                alarm_is_triggerd = false;
-            }
+					g_RecordManager.ClearRecord(0);
+	                alarm_is_triggerd = false;
+	            }
+			}
+
+			protocol::ProtocolManager* protocolManager = CSofia::instance()->GetProtocolManager();
+			if (protocolManager != NULL)
+			{
+				protocolManager->SyncLocalVideoAlarm(bOtherTrigger, m_AlarmType);
+			}
+			m_bAlarmFlag = false;
+			usleep(50000);
 		}
-		m_bAlarmFlag = false;
-		usleep(50000);
 	}
-}
 
 bool CAlarm::GetAlarmStatus()
 {

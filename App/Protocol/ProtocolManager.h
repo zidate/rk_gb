@@ -155,6 +155,8 @@ public:
 
     int NotifyGbCatalog(const char* gbCode);
 
+    int SyncLocalVideoAlarm(bool active, int alarmTypeBits);
+
     int NotifyGbAlarm(AlarmNotifyInfo* info);
 
     int NotifyGbMobilePosition(const MobilePositionInfo* info);
@@ -670,6 +672,12 @@ private:
 
     SubscribeHandle m_gb_mobile_position_subscribe_handle;
 
+    std::mutex m_gb_alarm_state_mutex;
+
+    bool m_local_gb_alarm_active;
+
+    int m_local_gb_alarm_type_bits;
+
     std::mutex m_gb_replay_mutex;
 
     GbReplaySession m_gb_replay_session;
@@ -698,6 +706,8 @@ private:
 
 
     bool m_started;
+
+    void ClearLocalGbAlarmState();
 
 };
 
