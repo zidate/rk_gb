@@ -156,10 +156,10 @@ protocol::GbRegisterParam BuildDefaultGbRegisterParam()
     param.enabled = 1;
     param.server_ip = "183.252.186.165";
     param.server_port = 15566;
-    param.device_id = "35010101001320124879";
+    param.device_id = "35010101001320124929";
     param.device_name = "IPC";
     param.username = "35010000002000000001";
-    param.password = "CG939Xvv";
+    param.password = "YjrvNBUy";
     return param;
 }
 
@@ -207,13 +207,13 @@ void InitDefaultLocalConfig(protocol::ProtocolExternalConfig& cfg)
     cfg.gb_video.sub_bitrate_kbps = 512;
     cfg.gb_image.flip_mode = "close";
 
-    cfg.gat_register.server_ip = "127.0.0.1";
-    cfg.gat_register.server_port = 80;
+    cfg.gat_register.server_ip = "183.252.186.166";
+    cfg.gat_register.server_port = 33855;
     cfg.gat_register.scheme = "http";
     cfg.gat_register.base_path = "";
-    cfg.gat_register.device_id = "34020000001320000001";
+    cfg.gat_register.device_id = "35010200001190000010";
     cfg.gat_register.username = "admin";
-    cfg.gat_register.password = "admin";
+    cfg.gat_register.password = "Dz8h6kM9";
     cfg.gat_register.auth_method = "digest";
     cfg.gat_register.listen_port = 18080;
     cfg.gat_register.expires_sec = 3600;
