@@ -8,6 +8,7 @@
 
 | 时间戳 | 功能名称 | 类型 | 状态 | 方案包路径 |
 |--------|----------|------|------|------------|
+| 202603251654 | issue38_drop_legacy_gb_config | 轻量迭代 | ✅已完成 | [2026-03/202603251654_issue38_drop_legacy_gb_config](2026-03/202603251654_issue38_drop_legacy_gb_config/) |
 | 202603251549 | protocol_manager_singleton | 轻量迭代 | ✅已完成 | [2026-03/202603251549_protocol_manager_singleton](2026-03/202603251549_protocol_manager_singleton/) |
 | 202603251207 | issue38_gb_gat_config_split | 修复 | ✅已完成 | [2026-03/202603251207_issue38_gb_gat_config_split](2026-03/202603251207_issue38_gb_gat_config_split/) |
 | 202603251130 | gb_register_cold_start_retry | 轻量迭代 | ✅已完成 | [2026-03/202603251130_gb_register_cold_start_retry](2026-03/202603251130_gb_register_cold_start_retry/) |
@@ -47,6 +48,7 @@
 
 ### 2026-03
 
+- [202603251654_issue38_drop_legacy_gb_config](2026-03/202603251654_issue38_drop_legacy_gb_config/) - 按 issue38 2026-03-25 最新评论移除旧 `/userdata/conf/Config/gb28181.ini` 兼容，只保留 `GB/` 目录下单份 GB/GAT 本地配置
 - [202603251549_protocol_manager_singleton](2026-03/202603251549_protocol_manager_singleton/) - 将 `ProtocolManager` 收口为进程内唯一协议入口，并把 `GB28181ClientSDK` 生命周期下沉到 `ProtocolManager` 内部
 - [202603251207_issue38_gb_gat_config_split](2026-03/202603251207_issue38_gb_gat_config_split/) - 按 issue38 最新评论把本地注册配置迁到 `/userdata/conf/Config/GB/`，新增独立 `gat1400.ini` 与 GAT1400 显式重载接口
 - [202603251130_gb_register_cold_start_retry](2026-03/202603251130_gb_register_cold_start_retry/) - 修复 GB28181 冷启动首次注册失败后生命周期直接退出的问题，改为保留后台线程并按 `gb_keepalive.interval_sec` 周期继续重试注册

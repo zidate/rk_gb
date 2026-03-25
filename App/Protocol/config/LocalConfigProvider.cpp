@@ -13,7 +13,6 @@
 namespace
 {
 
-const char* kLegacyLocalGbConfigFile = "/userdata/conf/Config/gb28181.ini";
 const char* kLocalConfigDir = "/userdata/conf/Config/GB";
 const char* kLocalGbConfigFile = "/userdata/conf/Config/GB/gb28181.ini";
 const char* kLocalGbConfigSection = "gb28181";
@@ -23,8 +22,7 @@ const char* kLocalGatConfigSection = "gat1400";
 enum LocalConfigLoadSource
 {
     kLocalConfigLoadNone = 0,
-    kLocalConfigLoadCurrent = 1,
-    kLocalConfigLoadLegacy = 2
+    kLocalConfigLoadCurrent = 1
 };
 
 struct LocalConfigSyncState
@@ -379,37 +377,10 @@ bool LoadGatRegisterConfigFromFile(const char* path, protocol::GatRegisterParam&
     return true;
 }
 
-bool LoadLegacyGatRegisterConfigFromFile(const char* path, protocol::GatRegisterParam& out)
-{
-    if (path == NULL || access(path, F_OK) != 0) {
-        return false;
-    }
-
-    CInifile ini;
-    ReadIniString(ini, kLocalGbConfigSection, "gat_scheme", path, out.scheme);
-    ReadIniString(ini, kLocalGbConfigSection, "gat_server_ip", path, out.server_ip);
-    ReadIniInt(ini, kLocalGbConfigSection, "gat_server_port", path, out.server_port);
-    ReadIniString(ini, kLocalGbConfigSection, "gat_base_path", path, out.base_path);
-    ReadIniString(ini, kLocalGbConfigSection, "gat_device_id", path, out.device_id);
-    ReadIniString(ini, kLocalGbConfigSection, "gat_username", path, out.username);
-    ReadIniString(ini, kLocalGbConfigSection, "gat_password", path, out.password);
-    ReadIniString(ini, kLocalGbConfigSection, "gat_auth_method", path, out.auth_method);
-    ReadIniInt(ini, kLocalGbConfigSection, "gat_listen_port", path, out.listen_port);
-    ReadIniInt(ini, kLocalGbConfigSection, "gat_expires_sec", path, out.expires_sec);
-    ReadIniInt(ini, kLocalGbConfigSection, "gat_keepalive_interval_sec", path, out.keepalive_interval_sec);
-    ReadIniInt(ini, kLocalGbConfigSection, "gat_max_retry", path, out.max_retry);
-    ReadIniInt(ini, kLocalGbConfigSection, "gat_request_timeout_ms", path, out.request_timeout_ms);
-    ReadIniString(ini, kLocalGbConfigSection, "gat_retry_backoff_policy", path, out.retry_backoff_policy);
-    return true;
-}
-
 LocalConfigLoadSource LoadExistingGbRegisterConfig(protocol::GbRegisterParam& out)
 {
     if (LoadGbRegisterConfigFromFile(kLocalGbConfigFile, out)) {
         return kLocalConfigLoadCurrent;
-    }
-    if (LoadGbRegisterConfigFromFile(kLegacyLocalGbConfigFile, out)) {
-        return kLocalConfigLoadLegacy;
     }
     return kLocalConfigLoadNone;
 }
@@ -418,9 +389,6 @@ LocalConfigLoadSource LoadExistingGatRegisterConfig(protocol::GatRegisterParam& 
 {
     if (LoadGatRegisterConfigFromFile(kLocalGatConfigFile, out)) {
         return kLocalConfigLoadCurrent;
-    }
-    if (LoadLegacyGatRegisterConfigFromFile(kLegacyLocalGbConfigFile, out)) {
-        return kLocalConfigLoadLegacy;
     }
     return kLocalConfigLoadNone;
 }
@@ -494,8 +462,6 @@ const char* DescribeLocalConfigSource(LocalConfigLoadSource source)
     switch (source) {
         case kLocalConfigLoadCurrent:
             return "current";
-        case kLocalConfigLoadLegacy:
-            return "legacy";
         default:
             return "default";
     }

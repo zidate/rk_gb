@@ -68,7 +68,7 @@
 - `gat_upload`、`gat_capture` 等其他 1400 协议项不写入本地 `ini`
 - `SetGatRegisterConfig()` 成功仅表示 flash 落盘成功；运行中如需生效，需再显式调用 `RestartGatRegisterService()`
 - `RestartGatRegisterService()` 在 `ProtocolManager` 已启动且 `m_gat_client` 已构造时会复用现有 `Reload()` 逻辑决定是否热更新或重启本地 1400 服务
-- 首次切换到新目录时，会兼容读取旧的 `/userdata/conf/Config/gb28181.ini` 中历史 `gat_*` 字段，并迁移生成新的 `gat1400.ini`
+- 当前本地注册配置只认 `/userdata/conf/Config/GB/gb28181.ini` 与 `/userdata/conf/Config/GB/gat1400.ini` 两个新路径；旧的 `/userdata/conf/Config/gb28181.ini` 不再作为读取或迁移来源
 
 ### ProtocolManager 核心回调
 

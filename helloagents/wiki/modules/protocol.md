@@ -21,7 +21,7 @@
 - GB28181 远程抓拍与目录订阅专项审查记录见 [`gb28181-snapshot-subscribe-review.md`](gb28181-snapshot-subscribe-review.md)。
 
 ## 注意事项
-- `LocalConfigProvider` 现在会优先读取 `/userdata/conf/Config/GB/gb28181.ini` 与 `/userdata/conf/Config/GB/gat1400.ini`；文件不存在时使用代码默认值自动生成，并兼容把旧的 `/userdata/conf/Config/gb28181.ini` 迁移到新目录。
+- `LocalConfigProvider` 现在只读取 `/userdata/conf/Config/GB/gb28181.ini` 与 `/userdata/conf/Config/GB/gat1400.ini`；文件不存在时使用代码默认值自动生成，不再兼容旧的 `/userdata/conf/Config/gb28181.ini`。
 - `ProtocolManager` 现已改为进程内单例；主程序在正常启动路径中通过 `ProtocolManager::Instance().Init()/Start()` 拉起协议栈，`LowerGAT1400SDK` 等外部模块也统一直接取这个单例，不再经过 `CSofia::GetProtocolManager()` 转发。
 - `GB28181ClientSDK` 的创建、绑定、释放现全部下沉到 `ProtocolManager` 私有生命周期中；`CSofia` 不再持有 SDK 指针，也不再负责 `Bind/Unbind`。
 - `GetGbRegisterConfig()` 现在始终直接读取 `/userdata/conf/Config/GB/gb28181.ini`；即使 `ProtocolManager::Init()` 之前被外部模块调用，也会先按默认值补齐配置文件再返回结果。
