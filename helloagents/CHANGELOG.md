@@ -25,6 +25,7 @@
 - 增加 issue bot 本机定时巡检脚本、Codex 修复器包装脚本与 cron 安装脚本，默认基于 `silver` 分支在隔离仓库中执行 triage / repair。
 
 ### 变更
+- 调整 SipSDK 的响应侧 client 匹配顺序：`GetClientInfo()` 处理响应事件时改为优先使用 `event->response` 匹配对端，再回退到 `event->request`，避免心跳等自发 `MESSAGE` 收到响应时先把本机 `From` 误判成 peer 而频繁打印 `sip peer match failed`。
 - 根据 issue38 于 2026-03-25 08:50:22 的最新评论，移除本地协议配置对旧 `/userdata/conf/Config/gb28181.ini` 的兼容读取/迁移逻辑，只保留 `/userdata/conf/Config/GB/gb28181.ini` 与 `/userdata/conf/Config/GB/gat1400.ini` 两个新路径。
 - 将 `ProtocolManager` 收口为进程内唯一访问入口，外部模块改为直接通过 `ProtocolManager::Instance()` 取用运行中的协议服务；`GB28181ClientSDK` 所有权同步下沉到 `ProtocolManager`，不再由 `CSofia` 持有或转发。
 - 更新 `helloagents/wiki/overview.md`，将 ZeroConfig 纳入模块索引，并明确“零配置”在项目语境下是“免现场手工录参”而非“零出厂预置”。

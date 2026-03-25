@@ -572,18 +572,17 @@ finally:
 ClientInfo* CSipEventManager::GetClientInfo(eXosip_event_t* event)
 {
        ClientInfo*  client  = NULL;
-        PeerInfo*  peer =  m_client_manager->GetPeerInfo( event->request ,true);
-        if(!peer) {
-            goto reponse;
-        }
+       PeerInfo*  peer =  m_client_manager->GetPeerInfo( event->response ,false);
+       if(!peer) {
+            goto request;
+       }
        client =  m_client_manager->FindClient(peer);
        delete peer;
-       if(!client) {
-            goto reponse;
-       }
-       return client;
-reponse:
-       peer =  m_client_manager->GetPeerInfo( event->response ,false);
+       if(client) {
+           return client;
+        }
+request:
+       peer =  m_client_manager->GetPeerInfo( event->request ,true);
        if(!peer) {
            return  NULL;
        }
@@ -591,8 +590,8 @@ reponse:
        delete peer;
        if(!client) {
            return  NULL;
-        }
-          return client;
+       }
+       return client;
 }
 
 
