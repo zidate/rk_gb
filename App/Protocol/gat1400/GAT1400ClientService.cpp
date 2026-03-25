@@ -2085,24 +2085,7 @@ int GAT1400ClientService::SendKeepaliveNow()
 
 int GAT1400ClientService::GetTime(std::string& outTime)
 {
-    ProtocolExternalConfig cfg;
-    GbRegisterParam gbRegister;
-    std::string deviceId;
-    if (SnapshotConfig(cfg, gbRegister, deviceId) != 0) {
-        return -1;
-    }
-
-    HttpResponse response;
-    const int reqRet = ExecuteRequest(cfg, deviceId, "GET", "/VIID/System/Time", kJsonContentType, "", response, NULL);
-    if (reqRet != 0) {
-        return reqRet;
-    }
-
-    GAT1400_SYSTEMTIME_ST timeInfo;
-    if (GAT1400Json::UnPackSystemTime(response.body, timeInfo) != 0) {
-        return -2;
-    }
-    outTime = timeInfo.LocalTime;
+    outTime.clear();
     return 0;
 }
 
@@ -2315,12 +2298,14 @@ int GAT1400ClientService::Start(const ProtocolExternalConfig& cfg, const GbRegis
         UpdateRegistState(EM_REGIST_OFF);
     }
 
-    std::string remoteTime;
-    const int timeRet = (regRet == 0) ? GetTime(remoteTime) : regRet;
-    printf("[GAT1400] module=gat1400 event=get_time trace=client error=%d device=%s time=%s\n",
-           timeRet,
-           deviceId.c_str(),
-           remoteTime.c_str());
+    if (regRet == 0) {
+        printf("[GAT1400] module=gat1400 event=get_time trace=client error=0 device=%s note=disabled\n",
+               deviceId.c_str());
+    } else {
+        printf("[GAT1400] module=gat1400 event=get_time trace=client error=%d device=%s note=skip_register_failed\n",
+               regRet,
+               deviceId.c_str());
+    }
 
     m_heartbeat_running.store(true);
     m_heartbeat_thread = std::thread(&GAT1400ClientService::HeartbeatLoop, this);
