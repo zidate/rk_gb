@@ -41,7 +41,7 @@
 | `username` | `std::string` | 注册用户名 / 接入编码 |
 | `password` | `std::string` | 注册密码 |
 
-**说明:** 当前 `gb28181.ini` 只持久化上述 7 个注册字段；`device_name`、`expires_sec`、`gb_talk`、`gb_broadcast`、`gb_upgrade`、`gb_reboot` 等其余 GB 协议项统一使用代码默认值，不再落本地 `ini`。
+**说明:** 当前 `gb28181.ini` 只持久化上述 7 个注册字段；`device_name`、`expires_sec`、`gb_talk`、`gb_broadcast`、`gb_upgrade`、`gb_reboot` 等其余 GB 协议项统一使用代码默认值，不再落本地 `ini`。在 `register_mode=zero_config` 下，这里的 `server_ip/server_port` 仍表示首次重定向接入入口，而不是 `302` 返回的正式平台地址。
 
 ### `GbRegisterParam` 零配置持久化子集
 
@@ -56,7 +56,7 @@
 | `manufacturer` | `std::string` | 首次重定向注册扩展头 `Manufacturer` |
 | `model` | `std::string` | 首次重定向注册扩展头 `Model` |
 
-**说明:** 当前 `zero_config.ini` 只持久化上述 8 个零配置字段；只有当 `gb28181.ini` 中 `register_mode=zero_config` 时，`LocalConfigProvider` 才要求该文件存在，缺失时会直接记录日志并返回错误，不做兼容迁移或自动补文件。
+**说明:** 当前 `zero_config.ini` 只持久化上述 8 个零配置字段；只有当 `gb28181.ini` 中 `register_mode=zero_config` 时，`LocalConfigProvider` 才要求该文件存在，缺失时会直接记录日志并返回错误，不做兼容迁移或自动补文件。运行期 `302` 返回的正式平台 `ServerIp/ServerPort/ServerDomain/ServerId/deviceId` 不会写入该文件，而是只保存在 SDK 进程内存中。
 
 ### `GatRegisterParam` 本地持久化子集
 

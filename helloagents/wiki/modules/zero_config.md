@@ -89,10 +89,11 @@
 - 同时允许通过设备 Web 界面登录后，手工录入方式接入平台，作为兜底方案。
 
 ## 当前代码落点
-- `gb28181.ini` 新增 `register_mode=standard|zero_config` 作为运行时模式开关；`zero_config.ini` 继续只承载 `StringCode/Mac/Line/redirect_domain/redirect_server_id/CustomProtocolVersion/manufacturer/model` 这些零配置专属字段，不承担模式判定职责。
+- `gb28181.ini` 新增 `register_mode=standard|zero_config` 作为运行时模式开关；`zero_config.ini` 继续只承载 `StringCode/Mac/Line/redirect_domain/redirect_server_id/CustomProtocolVersion/manufacturer/model` 这些零配置专属入口字段，不承担模式判定职责，也不保存 `302` 返回的正式平台 `ServerIp/ServerPort/ServerDomain/ServerId/deviceId`。
 - `register_mode=zero_config` 时，`LocalConfigProvider` / `HttpConfigProvider` 会校验 `StringCode`、`redirect_server_id` 等关键字段，且本地 flash 中 `/userdata/conf/Config/GB/zero_config.ini` 缺失时会直接记录日志并返回错误，不做兼容迁移；`register_mode=standard` 时忽略该文件缺失。
 - `SipEventManager` 已在首次零配置 `REGISTER` 时补齐 `Mac/StringCode/Line/Manufacturer/Model/Name/CustomProtocolVersion` 扩展头，并解析 `302` 返回的 `Contact/ServerDomain/ServerId/ServerIp/ServerPort/deviceId`。
-- `GBClientImpl::Register` 已实现单次零配置事务：`StringCode -> 401 -> 302 -> 正式平台注册 -> 401 -> 200`，且会缓存正式平台目标用于后续直接重注册。
+- `GBClientImpl::Register` 已实现单次零配置事务：`StringCode -> 401 -> 302 -> 正式平台注册 -> 401 -> 200`，且只会在 `GBClientImpl` 进程内缓存正式平台目标，用于同一轮进程存活期间的后续直接重注册，不会写入 flash。
+- `CGBClientImpl::Stop()` 会调用 `ResetZeroConfigState()` 清空这份正式平台内存缓存；进程退出或设备重启后同样会失效，下次启动零配置流程时，`ProtocolManager` 仍基于 flash 中保存的入口参数重新发起 `302` 获取正式平台注册信息。
 - `ProtocolManager::GbHeartbeatLoop` 已实现外层重试节奏：正式平台注册失败 `30 秒` 重试，连续 `3 次` 失败后等待 `1 分钟` 并通过 `ResetZeroConfigState()` 重新获取重定向地址。
 - `ProtocolManager::ResponseGbQueryDeviceInfo` 已补齐 `StringCode/Mac/Line/CustomProtocolVersion`，并按白皮书 `A.19/附录 G` 回最小真实能力节点：`DeviceCapabilityList` 与 `ProtocolFunctionList`。
 - `register_mode=standard` 时仍走原有标准国标注册路径，不发送零配置扩展头，也不进入 `302` 重定向流程。
@@ -104,10 +105,10 @@
 ## 设备侧实现清单
 
 ### P0 必须具备
-- 能从本地配置中读取并持久化 `StringCode`、重定向地址、端口、域、`SIPID`、接入口令；当前设备侧本地落盘拆成 `gb28181.ini` 保存标准注册字段、`zero_config.ini` 保存零配置扩展字段。
+- 能从本地配置中读取并持久化零配置入口参数；当前设备侧本地落盘拆成 `gb28181.ini` 保存通用注册字段和首次接入 `server_ip/server_port`，`zero_config.ini` 保存 `StringCode/Mac/Line/redirect_domain/redirect_server_id/CustomProtocolVersion/manufacturer/model`，`302` 返回的正式平台参数当前不落盘。
 - 首次上电和重启后，自动走重定向注册闭环，无需人工点击。
 - 首次 REGISTER 使用 `StringCode` 身份，并带齐 `Mac/StringCode/Line/Manufacturer/Model/Name/CustomProtocolVersion`。
-- 能正确解析 `302 Moved` 返回的正式平台信息，并切换到 `deviceId` 完成正式注册。
+- 能正确解析 `302 Moved` 返回的正式平台信息，并切换到 `deviceId` 完成正式注册；这组正式平台参数当前只允许进程内缓存，不写回 flash。
 - 严格实现 `30 秒 / 3 次 / 1 分钟 / 重新获取重定向地址` 的重试状态机。
 
 ### P1 建议同步补齐
@@ -125,12 +126,13 @@
 | 报文完整性 | 首次 REGISTER 中能看到 `Mac/StringCode/Line/Manufacturer/Model/Name/CustomProtocolVersion` |
 | 身份切换 | `302` 前使用 `StringCode`，`302` 后使用 `deviceId` |
 | 重试策略 | 注册失败时能看到 `30 秒重试`、`3 次失败后 1 分钟重取地址` |
-| 重启恢复 | 设备断电重启后，仍能自动重走零配置闭环 |
+| 重启恢复 | 设备断电重启后，会基于 flash 中保留的入口参数重新发起 `302`，并自动重走零配置闭环 |
 
 ## 容易混淆的点
 - **“零配置”不是零预置。** 真正减少的是现场人工配置，而不是厂家出厂配置。
 - **`StringCode` 与 `CMEI` 不总是同义。** 但对白皮书覆盖的中国移动定制非蜂窝终端，附录已明确 `StringCode = CMEI`。
 - **二维码字段存在两处表述。** `4.7.1` 强调“二维码包含串码”，`B.3.2` 强调“二维码需包含 CMEI、MAC”；结合附录接口定义，项目实现时应覆盖 `CMEI/StringCode + MAC`。
+- **`302` 返回的正式平台信息当前不会持久化。** 这部分数据只缓存在 SDK 进程内存中；`Stop`、进程退出或设备重启后会清空，下次仍需重新通过重定向获取。
 
 ## 开发 / 审核建议
 - 任何“零配置”联调都不要只看注册是否成功，还要核对首次 REGISTER 的扩展头和身份切换。
@@ -139,6 +141,7 @@
 - 若后续要改动注册链路，应同时回看 `helloagents/wiki/modules/terminal_requirements.md` 中的整体需求矩阵与 `helloagents/wiki/modules/gb28181.md` 中的实现映射。
 
 ## 变更历史
+- 2026-03-27: 明确零配置 `302` 返回的正式平台参数只保存在 SDK 进程内存，不写入 flash；`Stop` / 进程重启 / 设备重启后清空，下次启动重新通过重定向获取
 - 2026-03-27: 将“标准国标 / 零配置”切换方式从编译期开关改为 `gb28181.ini::register_mode` 运行时控制，`zero_config.ini` 只保留零配置扩展字段
 - 2026-03-27: 将零配置字段从 `gb28181.ini` 拆到独立 `zero_config.ini`；宏开启且文件缺失时直接记录日志并返回错误，不做兼容迁移
 - 2026-03-27: 补齐 `DeviceInfo` 的 `A.19` 扩展身份字段和最小能力清单节点，按真实实现回报 `FrameMirror/MultiStream/Upgrade/Alarm` 等缺陷

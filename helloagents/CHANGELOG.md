@@ -27,6 +27,7 @@
 ### 变更
 - 将 GB28181 “标准国标 / 零配置” 切换方式从编译期开关改为 `gb28181.ini::register_mode` 运行时控制，并同步补齐 `HttpConfigProvider` 的 `gb_register_mode` 字段；`register_mode=standard` 时忽略 `zero_config.ini` 缺失，`register_mode=zero_config` 时按零配置流程校验与启动。
 - 将零配置字段 `StringCode/Mac/Line/redirect_domain/redirect_server_id/CustomProtocolVersion/manufacturer/model` 从 `gb28181.ini` 拆到独立 `/userdata/conf/Config/GB/zero_config.ini`；当 `register_mode=zero_config` 且缺少该文件时，配置加载会直接记录日志并返回错误，不再做兼容迁移或自动生成。
+- 明确知识库口径：零配置 `302` 返回的正式平台 `ServerIp/ServerPort/ServerDomain/ServerId/deviceId` 只保存在 `GBClientImpl` 进程内存，不写入 flash；`Stop` / 进程重启 / 设备重启后清空，下次启动重新基于 flash 中的入口参数发起重定向获取。
 - 更新 `helloagents/wiki/modules/zero_config.md`、`helloagents/wiki/modules/gb28181.md`、`helloagents/wiki/modules/terminal_requirements.md`、`helloagents/wiki/api.md`、`helloagents/wiki/data.md`，同步 `DeviceInfo` 的 `A.19` 扩展字段、最小能力清单和剩余真实缺陷。
 - 调整 SipSDK 的响应侧 client 匹配顺序：`GetClientInfo()` 处理响应事件时改为优先使用 `event->response` 匹配对端，再回退到 `event->request`，避免心跳等自发 `MESSAGE` 收到响应时先把本机 `From` 误判成 peer 而频繁打印 `sip peer match failed`。
 - 根据 issue38 于 2026-03-25 08:50:22 的最新评论，移除本地协议配置对旧 `/userdata/conf/Config/gb28181.ini` 的兼容读取/迁移逻辑，只保留 `/userdata/conf/Config/GB/gb28181.ini` 与 `/userdata/conf/Config/GB/gat1400.ini` 两个新路径。
