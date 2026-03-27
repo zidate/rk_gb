@@ -422,16 +422,17 @@ void HttpConfigProvider::InitDefaultConfig()
 
     m_cached_cfg.gb_register.enabled = 1;
     m_cached_cfg.gb_register.register_mode = kGbRegisterModeStandard;
-    m_cached_cfg.gb_register.server_ip = "183.252.186.165";
-    m_cached_cfg.gb_register.server_port = 15566;
+    m_cached_cfg.gb_register.server_ip = "183.252.186.135";
+    m_cached_cfg.gb_register.server_port = 16656;
     m_cached_cfg.gb_register.device_id = "35010101001320124879";
     m_cached_cfg.gb_register.device_name = "IPC";
     m_cached_cfg.gb_register.username = "35010000002000000001";
-    m_cached_cfg.gb_register.password = "CG939Xvv";
-    m_cached_cfg.gb_register.string_code = m_cached_cfg.gb_register.device_id;
+    m_cached_cfg.gb_register.password = "2CE09989747C";
+    m_cached_cfg.gb_register.string_code = "C04403261010000000101";
+    m_cached_cfg.gb_register.mac_address = "2CE09989747C";
     m_cached_cfg.gb_register.line_id = "1";
-    m_cached_cfg.gb_register.redirect_domain = m_cached_cfg.gb_register.username;
-    m_cached_cfg.gb_register.redirect_server_id = m_cached_cfg.gb_register.username;
+    m_cached_cfg.gb_register.redirect_domain = "35010000002000000001";
+    m_cached_cfg.gb_register.redirect_server_id = "35010000002000000001";
     m_cached_cfg.gb_register.custom_protocol_version = "1.0";
     m_cached_cfg.gb_register.manufacturer = "IPC";
     m_cached_cfg.gb_register.model = "RC0240";
