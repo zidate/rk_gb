@@ -553,15 +553,19 @@ enum ConfigType
     kVideoParamOpt,       //视频参数配置范围
     kSVACEncodeConfig,  //SVAC编码配置
     kSVACDecodeConfig,  //SVAC解码配置
-    kOsdConfig          //前端OSD配置
+    kOsdConfig,         //前端OSD配置
+    kVideoParamAttribute //GB/T 28181-2022 视频参数属性
 };
+
+#define MAX_CONFIG_TYPE_NUM 8
+#define VIDEO_PARAM_TEXT_LEN 32
 
 //配置查询条件描述
 struct ConfigDownloadQuery
 {
     char                  DeviceID[GB_ID_LEN];
     unsigned int       Num;						                //想要查询的配置类型的数量
-    ConfigType         Type[4];	                                               //具体的配置类型 max 4
+    ConfigType         Type[MAX_CONFIG_TYPE_NUM];	                               //具体的配置类型
 };
 
 //用于回答查询请求的基础配置参数结构体
@@ -619,6 +623,26 @@ struct CfgVideoParamOpt
     char  DownloadSpeedOpt;		//视频下载速度可选范围,各可选参数以"/"分隔
     char  Resolution[52];				//摄像机支持分辨率范围,各可选参数以"/"分隔
     char  ImageFlip[32];               //???????????
+};
+
+struct CfgVideoParamAttribute
+{
+    unsigned int StreamNumber;                    //码流序号
+    char VideoFormat[VIDEO_PARAM_TEXT_LEN];       //视频编码格式
+    char Resolution[VIDEO_PARAM_TEXT_LEN];        //分辨率
+    unsigned int FrameRate;                       //帧率
+    unsigned int BitRateType;                     //码率类型
+    unsigned int VideoBitRate;                    //视频码率
+};
+
+struct VideoParamAttributeSetting
+{
+    unsigned int StreamNumber;                    //码流序号
+    char VideoFormat[VIDEO_PARAM_TEXT_LEN];       //视频编码格式
+    char Resolution[VIDEO_PARAM_TEXT_LEN];        //分辨率
+    unsigned int FrameRate;                       //帧率
+    unsigned int BitRateType;                     //码率类型
+    unsigned int VideoBitRate;                    //视频码率
 };
 
 //?????????????
@@ -786,6 +810,7 @@ union  UnionConfigParam
         CfgSVACDecode     CfgDecode;				//SVAC解码配置
         CfgSVACEncode     CfgEncode;				//SVAC编码配置
         CfgOsdConfig      CfgOsd;                //前端OSD配置
+        CfgVideoParamAttribute CfgVideoAttr;     //GB/T 28181-2022 视频参数属性
 };
 
 
@@ -798,6 +823,7 @@ union UnionSettingParam
     SVACEncodeSetting    EncodeSetting;		    //SVAC编码设置
     ImageSetting            Image;                  //???????????
     OsdSetting              Osd;                    //前端OSD设置
+    VideoParamAttributeSetting VideoAttr;          //GB/T 28181-2022 视频参数属性设置
 };
 
 
@@ -816,7 +842,8 @@ enum SettingType
     kEncodeSetting,
     kDecodeSetting,
     kImageSetting,
-    kOsdSetting
+    kOsdSetting,
+    kVideoParamAttributeSetting
 };
 
 //进行设备配置设置的参数

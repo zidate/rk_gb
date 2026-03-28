@@ -8,6 +8,8 @@
 
 | 时间戳 | 功能名称 | 类型 | 状态 | 方案包路径 |
 |--------|----------|------|------|------------|
+| 202603281114 | gb_video_param_attribute_2022_align | 开发 | ✅已完成 | [2026-03/202603281114_gb_video_param_attribute_2022_align](2026-03/202603281114_gb_video_param_attribute_2022_align/) |
+| 202603281047 | gb_video_encode_media_boundary | 开发 | ✅已完成 | [2026-03/202603281047_gb_video_encode_media_boundary](2026-03/202603281047_gb_video_encode_media_boundary/) |
 | 202603281014 | gb_osd_media_boundary | 开发 | ✅已完成 | [2026-03/202603281014_gb_osd_media_boundary](2026-03/202603281014_gb_osd_media_boundary/) |
 | 202603271900 | gb_live_replay_concurrency | 修复 | ✅已完成 | [2026-03/202603271900_gb_live_replay_concurrency](2026-03/202603271900_gb_live_replay_concurrency/) |
 | 202603271815 | gb28181_osdconfig_compat | 修复 | ✅已完成 | [2026-03/202603271815_gb28181_osdconfig_compat](2026-03/202603271815_gb28181_osdconfig_compat/) |
@@ -56,6 +58,8 @@
 
 ### 2026-03
 
+- [202603281114_gb_video_param_attribute_2022_align](2026-03/202603281114_gb_video_param_attribute_2022_align/) - 按 `GB/T 28181-2022` 将 GB 编码参数 XML 对齐到 `VideoParamAttribute`，补齐查询回包、设备配置解析和码率控制模式映射
+- [202603281047_gb_video_encode_media_boundary](2026-03/202603281047_gb_video_encode_media_boundary/) - 将 GB28181 的编码参数访问链路下沉到 `App/Media/VideoEncodeControl.*`，统一承接主辅码流 `codec/fps/bitrate/gop/resolution` 的查询与后续设置入口
 - [202603281014_gb_osd_media_boundary](2026-03/202603281014_gb_osd_media_boundary/) - 将 GB OSD 的设备落地能力下沉到 `App/Media/VideoOsdControl.*`，GB 模块只保留协议映射与查询/设置转发
 - [202603271900_gb_live_replay_concurrency](2026-03/202603271900_gb_live_replay_concurrency/) - 将 GB 实时预览与回放/下载拆成独立媒体 sender，支持一条 live 与一条 replay/download 同时运行
 - [202603271815_gb28181_osdconfig_compat](2026-03/202603271815_gb28181_osdconfig_compat/) - 补齐白皮书 `OSDConfig` 的 GB28181 设备侧兼容，支持查询回包和设置落地，并明确 OSD 真实能力边界

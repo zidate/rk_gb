@@ -146,6 +146,25 @@ static std::string BuildOsdConfigXml(const CfgOsdConfig& osd)
     return markup.GetDoc();
 }
 
+static std::string BuildVideoParamAttributeXml(const CfgVideoParamAttribute& attr)
+{
+    CMarkupSTL markup;
+    markup.AddElem("VideoParamAttribute");
+    if (!markup.IntoElem()) {
+        return "";
+    }
+
+    markup.AddElem("StreamNumber", (int)attr.StreamNumber);
+    markup.AddElem("VideoFormat", attr.VideoFormat);
+    markup.AddElem("Resolution", attr.Resolution);
+    markup.AddElem("FrameRate", (int)attr.FrameRate);
+    markup.AddElem("BitRateType", (int)attr.BitRateType);
+    markup.AddElem("VideoBitRate", (int)attr.VideoBitRate);
+
+    markup.OutOfElem();
+    return markup.GetDoc();
+}
+
 static bool InjectXmlBeforeClosingTag(std::string& xml, const std::string& payload, const char* closingTag)
 {
     if (payload.empty() || closingTag == NULL || closingTag[0] == '\0') {
@@ -219,6 +238,57 @@ static bool ParseOsdConfigElement(const std::string& xml_str, OsdSetting* settin
     }
 
     return true;
+}
+
+static bool ParseVideoParamAttributeElements(const std::string& xml_str,
+                                            std::vector<VideoParamAttributeSetting>* settings)
+{
+    if (settings == NULL) {
+        return false;
+    }
+
+    settings->clear();
+
+    CMarkupSTL markup;
+    if (!markup.SetDoc(xml_str.c_str(), xml_str.size()) ||
+        !markup.FindElem(CONTROL) ||
+        !markup.IntoElem()) {
+        return false;
+    }
+
+    bool found = false;
+    while (markup.FindElem("VideoParamAttribute")) {
+        found = true;
+        if (!markup.IntoElem()) {
+            break;
+        }
+
+        VideoParamAttributeSetting setting;
+        memset(&setting, 0, sizeof(setting));
+        if (!ReadMarkupUnsigned(markup, "StreamNumber", &setting.StreamNumber, true)) {
+            markup.OutOfElem();
+            return false;
+        }
+
+        if (markup.FindElem("VideoFormat")) {
+            CopyMarkupText(setting.VideoFormat,
+                           sizeof(setting.VideoFormat),
+                           markup.GetData());
+        }
+        if (markup.FindElem("Resolution")) {
+            CopyMarkupText(setting.Resolution,
+                           sizeof(setting.Resolution),
+                           markup.GetData());
+        }
+        (void)ReadMarkupUnsigned(markup, "FrameRate", &setting.FrameRate, false, 0);
+        (void)ReadMarkupUnsigned(markup, "BitRateType", &setting.BitRateType, false, 0);
+        (void)ReadMarkupUnsigned(markup, "VideoBitRate", &setting.VideoBitRate, false, 0);
+
+        markup.OutOfElem();
+        settings->push_back(setting);
+    }
+
+    return found && !settings->empty();
 }
 
 } // namespace
@@ -1513,7 +1583,7 @@ int CGB28181XmlParser::PackConfigDownloadQuery(const ConfigDownloadQuery* param,
     std::vector<std::string>  configtype;
     const unsigned int maxTypeNum = sizeof(param->Type) / sizeof(param->Type[0]);
     const unsigned int queryCount = (param->Num < maxTypeNum) ? param->Num : maxTypeNum;
-    //   BasicParam/VideoParamOpt/SVACEncodeConfig/SVACDecodeConfig/OSDConfig
+    //   BasicParam/VideoParamOpt/VideoParamAttribute/SVACEncodeConfig/SVACDecodeConfig/OSDConfig
     for (unsigned int i = 0; i < queryCount; ++i) {
 
           if ( param->Type[i] == kBasicParam) {
@@ -1522,6 +1592,10 @@ int CGB28181XmlParser::PackConfigDownloadQuery(const ConfigDownloadQuery* param,
 
           if ( param->Type[i] == kVideoParamOpt) {
               configtype.push_back("VideoParamOpt");
+          }
+
+          if ( param->Type[i] == kVideoParamAttribute) {
+              configtype.push_back("VideoParamAttribute");
           }
 
           if ( param->Type[i] == kSVACEncodeConfig) {
@@ -1574,6 +1648,10 @@ bool CGB28181XmlParser::UnPackConfigDownloadQuery(const std::string &xml_str, in
 		{
 			param->query_descri.config_param.Type[i] = kVideoParamOpt;
 		}
+		else if (configtype[i] == "VideoParamAttribute")
+		{
+			param->query_descri.config_param.Type[i] = kVideoParamAttribute;
+		}
 		else if (configtype[i] == "SVACEncodeConfig")
 		{
 			param->query_descri.config_param.Type[i] = kSVACEncodeConfig;
@@ -1602,8 +1680,7 @@ bool CGB28181XmlParser::UnPackConfigDownloadQuery(const std::string &xml_str, in
 void CGB28181XmlParser::PackConfigDownloadResponse(int sn,const DeviceConfigDownload* param, std::string &result)
 {
 	slothxml::configdownload_response_t config;
-    std::string osdConfigXml;
-    bool hasOsdConfig = false;
+    std::string extraConfigXml;
 	config.DeviceID = param->GBCode;
 	config.CmdType = "ConfigDownload";
 	config.SN = sn;
@@ -1628,6 +1705,10 @@ void CGB28181XmlParser::PackConfigDownloadResponse(int sn,const DeviceConfigDown
 				config.VideoParamOpt.Resolution = param->CfgParam[i].UnionCfgParam.CfgVideoOpt.Resolution;
 				config.VideoParamOpt.ImageFlip = param->CfgParam[i].UnionCfgParam.CfgVideoOpt.ImageFlip;
 				break;
+			case kVideoParamAttribute:
+				extraConfigXml += BuildVideoParamAttributeXml(
+                    param->CfgParam[i].UnionCfgParam.CfgVideoAttr);
+				break;
 			case kSVACEncodeConfig:
 				{
 					config.SVACEncodeConfig.ROIParam.ROIFlag = param->CfgParam[i].UnionCfgParam.CfgEncode.stuRoiParam.ROIFlag;
@@ -1648,8 +1729,7 @@ void CGB28181XmlParser::PackConfigDownloadResponse(int sn,const DeviceConfigDown
 			case kSVACDecodeConfig:
 				break;
             case kOsdConfig:
-                osdConfigXml = BuildOsdConfigXml(param->CfgParam[i].UnionCfgParam.CfgOsd);
-                hasOsdConfig = !osdConfigXml.empty();
+                extraConfigXml += BuildOsdConfigXml(param->CfgParam[i].UnionCfgParam.CfgOsd);
                 break;
 			default:
 				break;
@@ -1696,8 +1776,8 @@ void CGB28181XmlParser::PackConfigDownloadResponse(int sn,const DeviceConfigDown
 		result = "";
 	}
 
-    if (!result.empty() && hasOsdConfig &&
-        !InjectXmlBeforeClosingTag(result, osdConfigXml, "</Response>")) {
+    if (!result.empty() && !extraConfigXml.empty() &&
+        !InjectXmlBeforeClosingTag(result, extraConfigXml, "</Response>")) {
         result = "";
     }
 }
@@ -2537,6 +2617,18 @@ bool CGB28181XmlParser::UnPackConfigControl(const std::string &xml_str, int& sn 
 	if (control.xml_has_SVACEncodeConfig())
 	{
 	}
+    std::vector<VideoParamAttributeSetting> videoParamSettings;
+    if (ParseVideoParamAttributeElements(xml_str, &videoParamSettings))
+    {
+        for (size_t i = 0; i < videoParamSettings.size(); ++i)
+        {
+            SettingParam videoConfigParam;
+            memset(&videoConfigParam, 0, sizeof(SettingParam));
+            videoConfigParam.SetType = kVideoParamAttributeSetting;
+            videoConfigParam.unionSetParam.VideoAttr = videoParamSettings[i];
+            configParamVector.push_back(videoConfigParam);
+        }
+    }
     OsdSetting osdSetting;
     if (ParseOsdConfigElement(xml_str, &osdSetting))
     {
@@ -2565,6 +2657,9 @@ bool CGB28181XmlParser::UnPackConfigControl(const std::string &xml_str, int& sn 
 			cmd.control_param.config_set_param.arySetParam[i] = configParamVector[i];
 			break;
         case kOsdSetting:
+            cmd.control_param.config_set_param.arySetParam[i] = configParamVector[i];
+            break;
+        case kVideoParamAttributeSetting:
             cmd.control_param.config_set_param.arySetParam[i] = configParamVector[i];
             break;
 		}

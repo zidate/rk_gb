@@ -38,6 +38,7 @@
 #include "Storage_api.h"
 #include "Manager/ConfigManager.h"
 #include "Manager/EventManager.h"
+#include "Media/VideoEncodeControl.h"
 #include "Media/VideoOsdControl.h"
 #include "ExchangeAL/CameraExchange.h"
 #include "ExchangeAL/ExchangeKind.h"
@@ -49,15 +50,6 @@ extern "C"
 {
 #include "PAL/Capture.h"
 #include "PAL/Audio_coder.h"
-int rk_video_get_gop(int stream_id, int *value);
-int rk_video_set_gop(int stream_id, int value);
-int rk_video_get_max_rate(int stream_id, int *value);
-int rk_video_set_max_rate(int stream_id, int value);
-int rk_video_get_output_data_type(int stream_id, const char **value);
-int rk_video_set_output_data_type(int stream_id, const char *value);
-int rk_video_get_frame_rate(int stream_id, char **value);
-int rk_video_set_frame_rate(int stream_id, const char *value);
-int rk_video_set_resolution(int stream_id, const char *value);
 int rk_isp_get_image_flip(int cam_id, const char **value);
 int rk_isp_set_image_flip(int cam_id, const char *value);
 }
@@ -400,7 +392,17 @@ static bool QueryMainStreamResolution(int& width, int& height)
 {
     width = 0;
     height = 0;
-    return CaptureGetResolution(0, &width, &height) == 0 && width > 0 && height > 0;
+    media::VideoEncodeStreamState state;
+    if (!media::QueryVideoEncodeStreamState(0, &state) ||
+        !state.has_resolution ||
+        state.width <= 0 ||
+        state.height <= 0) {
+        return false;
+    }
+
+    width = state.width;
+    height = state.height;
+    return true;
 }
 
 
@@ -529,6 +531,154 @@ static std::string TrimWhitespaceCopy(const std::string& text)
     }
 
     return text.substr(begin, end - begin);
+}
+
+static unsigned int ParseUnsignedTextValue(const std::string& text)
+{
+    const std::string trimmed = TrimWhitespaceCopy(text);
+    if (trimmed.empty()) {
+        return 0;
+    }
+
+    char* end = NULL;
+    const unsigned long value = strtoul(trimmed.c_str(), &end, 10);
+    if (end == trimmed.c_str()) {
+        return 0;
+    }
+
+    return (unsigned int)value;
+}
+
+static std::string BuildUnsignedTextValue(unsigned int value)
+{
+    char buffer[16] = {0};
+    snprintf(buffer, sizeof(buffer), "%u", value);
+    return buffer;
+}
+
+static unsigned int ResolveGb2022VideoFormatCode(const std::string& codecIn)
+{
+    const std::string codec = ToLowerCopy(TrimWhitespaceCopy(codecIn));
+    if (codec == "mpeg4" || codec == "mpeg-4" || codec == "mp4v-es") {
+        return 1;
+    }
+    if (codec == "h264" || codec == "h.264" || codec == "avc") {
+        return 2;
+    }
+    if (codec == "avs") {
+        return 3;
+    }
+    if (codec == "svac") {
+        return 4;
+    }
+    if (codec == "h265" || codec == "h.265" || codec == "hevc") {
+        return 5;
+    }
+    return 0;
+}
+
+static std::string BuildGb2022VideoFormatValue(const std::string& codecIn)
+{
+    const unsigned int code = ResolveGb2022VideoFormatCode(codecIn);
+    return (code > 0) ? BuildUnsignedTextValue(code) : "";
+}
+
+static std::string ResolveCodecByGb2022VideoFormat(const std::string& valueIn)
+{
+    switch (ParseUnsignedTextValue(valueIn)) {
+        case 1:
+            return "MPEG4";
+        case 2:
+            return "H.264";
+        case 3:
+            return "AVS";
+        case 4:
+            return "SVAC";
+        case 5:
+            return "H.265";
+        default:
+            return NormalizeRkVideoCodec(valueIn);
+    }
+}
+
+static std::string BuildGb2022ResolutionValue(const std::string& resolutionIn)
+{
+    const std::string normalized = NormalizeResolutionValue(resolutionIn, 'x');
+    if (normalized == "176x144") {
+        return "1";
+    }
+    if (normalized == "352x288") {
+        return "2";
+    }
+    if (normalized == "704x576") {
+        return "3";
+    }
+    if (normalized == "720x576") {
+        return "4";
+    }
+    if (normalized == "1280x720") {
+        return "5";
+    }
+    if (normalized == "1920x1080") {
+        return "6";
+    }
+    return normalized;
+}
+
+static std::string ResolveResolutionByGb2022Value(const std::string& valueIn)
+{
+    switch (ParseUnsignedTextValue(valueIn)) {
+        case 1:
+            return "176x144";
+        case 2:
+            return "352x288";
+        case 3:
+            return "704x576";
+        case 4:
+            return "720x576";
+        case 5:
+            return "1280x720";
+        case 6:
+            return "1920x1080";
+        default:
+            return NormalizeResolutionValue(valueIn, 'x');
+    }
+}
+
+static unsigned int ResolveGb2022BitRateTypeCode(const std::string& valueIn)
+{
+    const std::string value = ToLowerCopy(TrimWhitespaceCopy(valueIn));
+    if (value == "1" || value == "cbr" || value == "fixed" || value == "constant") {
+        return 1;
+    }
+    if (value == "2" || value == "vbr" || value == "avbr" || value == "cvbr" ||
+        value == "qvbr" || value == "smtrc" || value == "variable" ||
+        value == "fixqp" || value == "cqp") {
+        return 2;
+    }
+    return 0;
+}
+
+static std::string ResolveBitrateTypeByGb2022Code(unsigned int value)
+{
+    switch (value) {
+        case 1:
+            return "CBR";
+        case 2:
+            return "VBR";
+        default:
+            return "";
+    }
+}
+
+static bool HasVideoEncodeStreamState(const media::VideoEncodeStreamState& state)
+{
+    return state.has_codec ||
+           state.has_resolution ||
+           state.has_frame_rate ||
+           state.has_bitrate ||
+           state.has_bitrate_type ||
+           state.has_gop;
 }
 
 static std::string NormalizeHexDigest(const std::string& text)
@@ -1395,12 +1545,11 @@ static int ResolveGbStreamNumber(const MediaInfo* input, const protocol::Protoco
 static std::string BuildGbStreamNumberList()
 
 {
-
-    int subWidth = 0;
-
-    int subHeight = 0;
-
-    if (CaptureGetResolution(1, &subWidth, &subHeight) == 0 && subWidth > 0 && subHeight > 0) {
+    media::VideoEncodeStreamState subState;
+    if (media::QueryVideoEncodeStreamState(1, &subState) &&
+        subState.has_resolution &&
+        subState.width > 0 &&
+        subState.height > 0) {
 
         return "0/1";
 
@@ -1648,83 +1797,14 @@ static bool IsConfigTypeRequested(const QueryParam* param, ConfigType type)
 
 
 
-static std::string BuildGbVideoResolutionSummary()
+static std::string BuildGbVideoResolutionSummary(const media::VideoEncodeState* runtimeState)
 
 {
-
-    int mainWidth = 0;
-
-    int mainHeight = 0;
-
-    int subWidth = 0;
-
-    int subHeight = 0;
-
-
-
-    char buffer[64] = {0};
-
-    const int mainRet = CaptureGetResolution(0, &mainWidth, &mainHeight);
-
-    const int subRet = CaptureGetResolution(1, &subWidth, &subHeight);
-
-    if (mainRet == 0 && mainWidth > 0 && mainHeight > 0 &&
-
-        subRet == 0 && subWidth > 0 && subHeight > 0) {
-
-        snprintf(buffer, sizeof(buffer), "%dx%d/%dx%d", mainWidth, mainHeight, subWidth, subHeight);
-
-        return buffer;
-
+    if (runtimeState != NULL && !runtimeState->resolution_summary.empty()) {
+        return runtimeState->resolution_summary;
     }
-
-
-
-    if (mainRet == 0 && mainWidth > 0 && mainHeight > 0) {
-
-        snprintf(buffer, sizeof(buffer), "%dx%d", mainWidth, mainHeight);
-
-        return buffer;
-
-    }
-
-
-
-    if (subRet == 0 && subWidth > 0 && subHeight > 0) {
-
-        snprintf(buffer, sizeof(buffer), "%dx%d", subWidth, subHeight);
-
-        return buffer;
-
-    }
-
-
-
     return "1920x1080/640x360";
 
-}
-
-static bool ReadRkVideoFrameRateString(int streamId, std::string& value)
-{
-    char buffer[32] = {0};
-    char* out = buffer;
-    if (rk_video_get_frame_rate(streamId, &out) != 0 || buffer[0] == '\0') {
-        return false;
-    }
-
-    value = buffer;
-    return true;
-}
-
-static bool ReadRkVideoOutputTypeString(int streamId, std::string& value)
-{
-    const char* out = NULL;
-    if (rk_video_get_output_data_type(streamId, &out) != 0 || out == NULL || out[0] == '\0') {
-        return false;
-    }
-
-    value = out;
-    return true;
 }
 
 static bool ReadRkImageFlipMode(std::string& value)
@@ -1742,83 +1822,6 @@ static bool ReadRkImageFlipMode(std::string& value)
 }
 
 static std::string NormalizeGbOsdTextTemplate(const std::string& textIn);
-
-static void ApplyRkVideoStreamConfig(const char* streamName,
-                                     int streamId,
-                                     const std::string& desiredCodec,
-                                     const std::string& desiredResolution,
-                                     int desiredFps,
-                                     int desiredBitrate)
-{
-    const std::string normalizedCodec = NormalizeRkVideoCodec(desiredCodec);
-    if (!normalizedCodec.empty()) {
-        std::string currentCodec;
-        const bool codecKnown = ReadRkVideoOutputTypeString(streamId, currentCodec);
-        if (!codecKnown || NormalizeRkVideoCodec(currentCodec) != normalizedCodec) {
-            const int ret = rk_video_set_output_data_type(streamId, normalizedCodec.c_str());
-            printf("[ProtocolManager] module=config event=media_apply trace=manager error=%d target=video_codec stream=%s stream_id=%d value=%s current=%s\n",
-                   ret,
-                   streamName,
-                   streamId,
-                   normalizedCodec.c_str(),
-                   codecKnown ? currentCodec.c_str() : "unknown");
-        }
-    }
-
-    const std::string frameRateValue = BuildFrameRateValue(desiredFps);
-    if (!frameRateValue.empty()) {
-        std::string currentFrameRate;
-        const bool fpsKnown = ReadRkVideoFrameRateString(streamId, currentFrameRate);
-        if (!fpsKnown || currentFrameRate != frameRateValue) {
-            const int ret = rk_video_set_frame_rate(streamId, frameRateValue.c_str());
-            printf("[ProtocolManager] module=config event=media_apply trace=manager error=%d target=video_fps stream=%s stream_id=%d value=%s current=%s\n",
-                   ret,
-                   streamName,
-                   streamId,
-                   frameRateValue.c_str(),
-                   fpsKnown ? currentFrameRate.c_str() : "unknown");
-        }
-    }
-
-    if (desiredBitrate > 0) {
-        int currentBitrate = 0;
-        const bool bitrateKnown = (rk_video_get_max_rate(streamId, &currentBitrate) == 0);
-        if (!bitrateKnown || currentBitrate != desiredBitrate) {
-            const int ret = rk_video_set_max_rate(streamId, desiredBitrate);
-            printf("[ProtocolManager] module=config event=media_apply trace=manager error=%d target=video_bitrate stream=%s stream_id=%d value=%d current=%d\n",
-                   ret,
-                   streamName,
-                   streamId,
-                   desiredBitrate,
-                   bitrateKnown ? currentBitrate : -1);
-        }
-    }
-
-    const std::string normalizedResolution = NormalizeResolutionValue(desiredResolution, '*');
-    if (!normalizedResolution.empty()) {
-        int currentWidth = 0;
-        int currentHeight = 0;
-        std::string currentResolution;
-        const bool resolutionKnown = (CaptureGetResolution(streamId, &currentWidth, &currentHeight) == 0 &&
-                                      currentWidth > 0 &&
-                                      currentHeight > 0);
-        if (resolutionKnown) {
-            char buffer[32] = {0};
-            snprintf(buffer, sizeof(buffer), "%d*%d", currentWidth, currentHeight);
-            currentResolution = buffer;
-        }
-
-        if (!resolutionKnown || currentResolution != normalizedResolution) {
-            const int ret = rk_video_set_resolution(streamId, normalizedResolution.c_str());
-            printf("[ProtocolManager] module=config event=media_apply trace=manager error=%d target=video_resolution stream=%s stream_id=%d value=%s current=%s\n",
-                   ret,
-                   streamName,
-                   streamId,
-                   normalizedResolution.c_str(),
-                   resolutionKnown ? currentResolution.c_str() : "unknown");
-        }
-    }
-}
 
 static std::string NormalizeGbOsdTextTemplate(const std::string& textIn)
 {
@@ -3979,22 +3982,8 @@ int ProtocolManager::ReloadExternalConfig()
 
            m_started ? 1 : 0);
 
-    // if (applyMediaConfig) {
-    //     ApplyRkVideoStreamConfig("main",
-    //                              0,
-    //                              m_cfg.gb_video.main_codec,
-    //                              m_cfg.gb_video.main_resolution,
-    //                              m_cfg.gb_video.main_fps,
-    //                              m_cfg.gb_video.main_bitrate_kbps);
-    //     ApplyRkVideoStreamConfig("sub",
-    //                              1,
-    //                              m_cfg.gb_video.sub_codec,
-    //                              m_cfg.gb_video.sub_resolution,
-    //                              m_cfg.gb_video.sub_fps,
-    //                              m_cfg.gb_video.sub_bitrate_kbps);
-    //     ApplyRkImageFlipConfig(m_cfg.gb_image.flip_mode);
-    //     media::ApplyVideoOsdConfig(BuildVideoOsdConfig(m_cfg.gb_osd));
-    // }
+    (void)applyMediaConfig;
+    // GB 外部配置的媒体参数变更当前只做配置更新，设备侧是否即时重载仍由显式重启路径控制。
 
 
 
@@ -7295,6 +7284,8 @@ int ProtocolManager::HandleGbConfigControl(const DevControlCmd* cmd)
 
     bool applyImageFlip = false;
 
+    int applyVideoError = 0;
+
     std::string imageFlipMode;
 
     for (unsigned int index = 0; index < configParam.Num; ++index) {
@@ -7510,6 +7501,138 @@ int ProtocolManager::HandleGbConfigControl(const DevControlCmd* cmd)
 
 
 
+        if (setting.SetType == kVideoParamAttributeSetting) {
+
+            handled = true;
+
+            const VideoParamAttributeSetting& video = setting.unionSetParam.VideoAttr;
+            if (video.StreamNumber > 1U) {
+
+                printf("[ProtocolManager] gb config ignore video_param_attribute invalid_stream=%u gb=%s\n",
+
+                       video.StreamNumber,
+
+                       cmd->GBCode);
+
+                continue;
+
+            }
+
+            const int streamId = (int)video.StreamNumber;
+            const std::string nextCodec = ResolveCodecByGb2022VideoFormat(
+                SafeStr(video.VideoFormat, sizeof(video.VideoFormat)));
+            const std::string nextResolution = ResolveResolutionByGb2022Value(
+                SafeStr(video.Resolution, sizeof(video.Resolution)));
+            const int nextFps = (int)video.FrameRate;
+            const int nextBitrate = (int)video.VideoBitRate;
+            const std::string nextBitrateType = ResolveBitrateTypeByGb2022Code(video.BitRateType);
+
+            media::VideoEncodeStreamConfig desired;
+            desired.codec = nextCodec;
+            desired.resolution = nextResolution;
+            desired.fps = nextFps;
+            desired.bitrate_kbps = nextBitrate;
+            desired.bitrate_type = nextBitrateType;
+
+            const int videoRet = media::ApplyVideoEncodeStreamConfig(streamId, desired);
+            if (videoRet != 0 && applyVideoError == 0) {
+
+                applyVideoError = videoRet;
+
+            }
+
+            if (streamId == 0) {
+
+                if (!nextCodec.empty() && m_cfg.gb_video.main_codec != nextCodec) {
+
+                    m_cfg.gb_video.main_codec = nextCodec;
+
+                    updated = true;
+
+                }
+
+                if (!nextResolution.empty() && m_cfg.gb_video.main_resolution != nextResolution) {
+
+                    m_cfg.gb_video.main_resolution = nextResolution;
+
+                    updated = true;
+
+                }
+
+                if (nextFps > 0 && m_cfg.gb_video.main_fps != nextFps) {
+
+                    m_cfg.gb_video.main_fps = nextFps;
+
+                    updated = true;
+
+                }
+
+                if (nextBitrate > 0 && m_cfg.gb_video.main_bitrate_kbps != nextBitrate) {
+
+                    m_cfg.gb_video.main_bitrate_kbps = nextBitrate;
+
+                    updated = true;
+
+                }
+
+            } else {
+
+                if (!nextCodec.empty() && m_cfg.gb_video.sub_codec != nextCodec) {
+
+                    m_cfg.gb_video.sub_codec = nextCodec;
+
+                    updated = true;
+
+                }
+
+                if (!nextResolution.empty() && m_cfg.gb_video.sub_resolution != nextResolution) {
+
+                    m_cfg.gb_video.sub_resolution = nextResolution;
+
+                    updated = true;
+
+                }
+
+                if (nextFps > 0 && m_cfg.gb_video.sub_fps != nextFps) {
+
+                    m_cfg.gb_video.sub_fps = nextFps;
+
+                    updated = true;
+
+                }
+
+                if (nextBitrate > 0 && m_cfg.gb_video.sub_bitrate_kbps != nextBitrate) {
+
+                    m_cfg.gb_video.sub_bitrate_kbps = nextBitrate;
+
+                    updated = true;
+
+                }
+
+            }
+
+            printf("[ProtocolManager] gb config apply video_param_attribute ret=%d stream=%d codec=%s resolution=%s fps=%d bitrate_type=%u bitrate=%u gb=%s\n",
+
+                   videoRet,
+
+                   streamId,
+
+                   nextCodec.empty() ? "unchanged" : nextCodec.c_str(),
+
+                   nextResolution.empty() ? "unchanged" : nextResolution.c_str(),
+
+                   nextFps,
+
+                   video.BitRateType,
+
+                   video.VideoBitRate,
+
+                   cmd->GBCode);
+
+            continue;
+
+        }
+
         if (setting.SetType == kImageSetting) {
 
             handled = true;
@@ -7625,6 +7748,12 @@ int ProtocolManager::HandleGbConfigControl(const DevControlCmd* cmd)
         StopGbClientLifecycle();
 
         return StartGbClientLifecycle();
+
+    }
+
+    if (applyVideoError != 0) {
+
+        return applyVideoError;
 
     }
 
@@ -9010,11 +9139,16 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
         runtimeOsdEnabled = runtimeOsdState.master_enabled;
     }
 
-
+    media::VideoEncodeState runtimeVideoState;
+    const bool hasRuntimeVideoState = media::QueryVideoEncodeState(&runtimeVideoState);
 
     std::string mainCodec = NormalizeRkVideoCodec(m_cfg.gb_video.main_codec);
 
     std::string subCodec = NormalizeRkVideoCodec(m_cfg.gb_video.sub_codec);
+
+    std::string mainResolution = NormalizeResolutionValue(m_cfg.gb_video.main_resolution, 'x');
+
+    std::string subResolution = NormalizeResolutionValue(m_cfg.gb_video.sub_resolution, 'x');
 
     std::string mainFrameRate = BuildFrameRateValue(m_cfg.gb_video.main_fps);
 
@@ -9024,25 +9158,61 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
 
     int subBitrate = m_cfg.gb_video.sub_bitrate_kbps;
 
+    std::string mainBitrateType = "VBR";
+
+    std::string subBitrateType = "VBR";
+
     int mainGop = 0;
 
     int subGop = 0;
 
-    (void)ReadRkVideoOutputTypeString(0, mainCodec);
+    if (hasRuntimeVideoState && runtimeVideoState.main_stream.has_codec) {
+        mainCodec = NormalizeRkVideoCodec(runtimeVideoState.main_stream.codec);
+    }
 
-    (void)ReadRkVideoOutputTypeString(1, subCodec);
+    if (hasRuntimeVideoState && runtimeVideoState.sub_stream.has_codec) {
+        subCodec = NormalizeRkVideoCodec(runtimeVideoState.sub_stream.codec);
+    }
 
-    (void)ReadRkVideoFrameRateString(0, mainFrameRate);
+    if (hasRuntimeVideoState && runtimeVideoState.main_stream.has_resolution) {
+        mainResolution = NormalizeResolutionValue(runtimeVideoState.main_stream.resolution, 'x');
+    }
 
-    (void)ReadRkVideoFrameRateString(1, subFrameRate);
+    if (hasRuntimeVideoState && runtimeVideoState.sub_stream.has_resolution) {
+        subResolution = NormalizeResolutionValue(runtimeVideoState.sub_stream.resolution, 'x');
+    }
 
-    (void)rk_video_get_max_rate(0, &mainBitrate);
+    if (hasRuntimeVideoState && runtimeVideoState.main_stream.has_frame_rate) {
+        mainFrameRate = runtimeVideoState.main_stream.frame_rate;
+    }
 
-    (void)rk_video_get_max_rate(1, &subBitrate);
+    if (hasRuntimeVideoState && runtimeVideoState.sub_stream.has_frame_rate) {
+        subFrameRate = runtimeVideoState.sub_stream.frame_rate;
+    }
 
-    (void)rk_video_get_gop(0, &mainGop);
+    if (hasRuntimeVideoState && runtimeVideoState.main_stream.has_bitrate) {
+        mainBitrate = runtimeVideoState.main_stream.bitrate_kbps;
+    }
 
-    (void)rk_video_get_gop(1, &subGop);
+    if (hasRuntimeVideoState && runtimeVideoState.sub_stream.has_bitrate) {
+        subBitrate = runtimeVideoState.sub_stream.bitrate_kbps;
+    }
+
+    if (hasRuntimeVideoState && runtimeVideoState.main_stream.has_bitrate_type) {
+        mainBitrateType = runtimeVideoState.main_stream.bitrate_type;
+    }
+
+    if (hasRuntimeVideoState && runtimeVideoState.sub_stream.has_bitrate_type) {
+        subBitrateType = runtimeVideoState.sub_stream.bitrate_type;
+    }
+
+    if (hasRuntimeVideoState && runtimeVideoState.main_stream.has_gop) {
+        mainGop = runtimeVideoState.main_stream.gop;
+    }
+
+    if (hasRuntimeVideoState && runtimeVideoState.sub_stream.has_gop) {
+        subGop = runtimeVideoState.sub_stream.gop;
+    }
 
 
 
@@ -9094,7 +9264,7 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
 
                     sizeof(item.UnionCfgParam.CfgVideoOpt.Resolution),
 
-                    BuildGbVideoResolutionSummary());
+                    BuildGbVideoResolutionSummary(hasRuntimeVideoState ? &runtimeVideoState : NULL));
 
         std::string imageFlip = NormalizeGbImageFlipMode(m_cfg.gb_image.flip_mode);
 
@@ -9113,6 +9283,75 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
                     imageFlip);
 
         configList.push_back(item);
+
+    }
+
+    if (IsConfigTypeRequested(param, kVideoParamAttribute)) {
+
+        ConfigParam mainItem;
+
+        memset(&mainItem, 0, sizeof(mainItem));
+
+        mainItem.CfgType = kVideoParamAttribute;
+
+        mainItem.UnionCfgParam.CfgVideoAttr.StreamNumber = 0;
+
+        CopyBounded(mainItem.UnionCfgParam.CfgVideoAttr.VideoFormat,
+
+                    sizeof(mainItem.UnionCfgParam.CfgVideoAttr.VideoFormat),
+
+                    BuildGb2022VideoFormatValue(mainCodec));
+
+        CopyBounded(mainItem.UnionCfgParam.CfgVideoAttr.Resolution,
+
+                    sizeof(mainItem.UnionCfgParam.CfgVideoAttr.Resolution),
+
+                    BuildGb2022ResolutionValue(mainResolution));
+
+        mainItem.UnionCfgParam.CfgVideoAttr.FrameRate = ParseUnsignedTextValue(mainFrameRate);
+
+        mainItem.UnionCfgParam.CfgVideoAttr.BitRateType = ResolveGb2022BitRateTypeCode(mainBitrateType);
+
+        mainItem.UnionCfgParam.CfgVideoAttr.VideoBitRate = (mainBitrate > 0) ? (unsigned int)mainBitrate : 0U;
+
+        configList.push_back(mainItem);
+
+        const bool hasSubStream = (hasRuntimeVideoState && HasVideoEncodeStreamState(runtimeVideoState.sub_stream)) ||
+                                  !subCodec.empty() ||
+                                  !subResolution.empty() ||
+                                  !subFrameRate.empty() ||
+                                  subBitrate > 0;
+        if (hasSubStream) {
+
+            ConfigParam subItem;
+
+            memset(&subItem, 0, sizeof(subItem));
+
+            subItem.CfgType = kVideoParamAttribute;
+
+            subItem.UnionCfgParam.CfgVideoAttr.StreamNumber = 1;
+
+            CopyBounded(subItem.UnionCfgParam.CfgVideoAttr.VideoFormat,
+
+                        sizeof(subItem.UnionCfgParam.CfgVideoAttr.VideoFormat),
+
+                        BuildGb2022VideoFormatValue(subCodec));
+
+            CopyBounded(subItem.UnionCfgParam.CfgVideoAttr.Resolution,
+
+                        sizeof(subItem.UnionCfgParam.CfgVideoAttr.Resolution),
+
+                        BuildGb2022ResolutionValue(subResolution));
+
+            subItem.UnionCfgParam.CfgVideoAttr.FrameRate = ParseUnsignedTextValue(subFrameRate);
+
+            subItem.UnionCfgParam.CfgVideoAttr.BitRateType = ResolveGb2022BitRateTypeCode(subBitrateType);
+
+            subItem.UnionCfgParam.CfgVideoAttr.VideoBitRate = (subBitrate > 0) ? (unsigned int)subBitrate : 0U;
+
+            configList.push_back(subItem);
+
+        }
 
     }
 
@@ -9193,13 +9432,17 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
 
 
 
-    printf("[ProtocolManager] gb query config response num=%u main_codec=%s main_fps=%s main_bitrate=%d main_gop=%d sub_codec=%s sub_fps=%s sub_bitrate=%d sub_gop=%d osd(time=%d,event=%d,alert=%d,enabled=%d) gb=%s\n",
+    printf("[ProtocolManager] gb query config response num=%u main_codec=%s main_resolution=%s main_fps=%s main_bitrate_type=%s main_bitrate=%d main_gop=%d sub_codec=%s sub_resolution=%s sub_fps=%s sub_bitrate_type=%s sub_bitrate=%d sub_gop=%d osd(time=%d,event=%d,alert=%d,enabled=%d) gb=%s\n",
 
            deviceConfig.Num,
 
            mainCodec.empty() ? "unknown" : mainCodec.c_str(),
 
+           mainResolution.empty() ? "unknown" : mainResolution.c_str(),
+
            mainFrameRate.empty() ? "unknown" : mainFrameRate.c_str(),
+
+           mainBitrateType.empty() ? "unknown" : mainBitrateType.c_str(),
 
            mainBitrate,
 
@@ -9207,7 +9450,11 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
 
            subCodec.empty() ? "unknown" : subCodec.c_str(),
 
+           subResolution.empty() ? "unknown" : subResolution.c_str(),
+
            subFrameRate.empty() ? "unknown" : subFrameRate.c_str(),
+
+           subBitrateType.empty() ? "unknown" : subBitrateType.c_str(),
 
            subBitrate,
 
@@ -9665,9 +9912,10 @@ int ProtocolManager::ReconfigureGbLiveSender(const MediaInfo* input, const char*
                             ? m_cfg.gb_live.ssrc
                             : static_cast<int>(GenerateGbMediaSsrc(remotePort));
 
-    std::string runtimeVideoCodec;
-    if (ReadRkVideoOutputTypeString(requestedStreamNum, runtimeVideoCodec)) {
-        const std::string normalizedRuntimeCodec = NormalizeGbLiveVideoCodec(runtimeVideoCodec);
+    media::VideoEncodeStreamState runtimeVideoState;
+    if (media::QueryVideoEncodeStreamState(requestedStreamNum, &runtimeVideoState) &&
+        runtimeVideoState.has_codec) {
+        const std::string normalizedRuntimeCodec = NormalizeGbLiveVideoCodec(runtimeVideoState.codec);
         if (!normalizedRuntimeCodec.empty()) {
             runtimeParam.video_codec = normalizedRuntimeCodec;
         }

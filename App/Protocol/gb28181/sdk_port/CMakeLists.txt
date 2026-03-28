@@ -100,6 +100,7 @@ link_directories(
 set(Media_SRC
 	Media/AVManager.cpp
 	Media/VideoOsdControl.cpp
+	Media/VideoEncodeControl.cpp
 	Media/Storage.cpp
 	Media/MediaDefaultConfig.cpp
 	Media/Record.cpp

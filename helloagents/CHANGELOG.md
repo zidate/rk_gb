@@ -25,6 +25,8 @@
 - 增加 issue bot 本机定时巡检脚本、Codex 修复器包装脚本与 cron 安装脚本，默认基于 `silver` 分支在隔离仓库中执行 triage / repair。
 
 ### 变更
+- 按 `GB/T 28181-2022` 对齐 GB28181 编码参数 XML：新增 `ConfigDownload/DeviceConfig` 的 `VideoParamAttribute` 查询与设置链路，`VideoFormat/Resolution/FrameRate/BitRateType/VideoBitRate` 现按 2022 字段回包与解析，并通过 `App/Media/VideoEncodeControl.*` 下发 `codec/fps/bitrate/bitrate_type/resolution`。
+- 将 GB28181 编码参数访问链路从 `ProtocolManager` 下沉到 `App/Media/VideoEncodeControl.*`：GB 模块现在通过媒体接口统一读取主/辅码流 `codec/fps/bitrate/gop/resolution` 运行态，并保留 `ApplyVideoEncodeStreamConfig()` 作为后续设备侧应用入口，不再直接调用 `rk_video_*` / `CaptureGetResolution`。
 - 将 GB28181 OSD 的设备落地职责从 `ProtocolManager` 下沉到 `App/Media/VideoOsdControl.*`：GB 模块现在只保留协议字段映射、配置持久化和查询应答组包，媒体/编码侧统一负责 `CaptureSetOSDSwitch`、`rk_osd_*` 的默认适配实现。
 - 补齐 GB28181 白皮书 `OSDConfig` 设备侧兼容：`ConfigDownload + OSDConfig` 现可返回 `<OSDConfig>`，`DeviceConfig + OSDConfig` 现可映射到 `gb_osd.time_enabled/time_format/position/text_template` 并下沉到 `rk_osd_*`；同时明确当前设备仅支持 1 条文本项，`TimeType=1` 仅做协议保留与回显。
 - 补充 `helloagents/wiki/modules/gb28181.md` 中的 GB28181 OSD 对接说明，明确当前 OSD 获取/设置联调已通、实际生效路径为 `GB28181ClientReceiverAdapter -> ProtocolManager -> Capture/rk_osd_*`，并标注 `DevInterface` 的 OSD 四个虚接口尚未作为当前 GB OSD 正式入口使用。
