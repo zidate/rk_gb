@@ -25,6 +25,7 @@
 - 增加 issue bot 本机定时巡检脚本、Codex 修复器包装脚本与 cron 安装脚本，默认基于 `silver` 分支在隔离仓库中执行 triage / repair。
 
 ### 变更
+- 收口 GB28181 协议层散落硬编码：新增 `App/Protocol/gb28181/GB28181ProtocolConstants.h` 统一默认设备 ID、注册/保活缺省值、分辨率摘要、音频 payload/mime、`ConfigType/CmdType` 字符串与 `FrameMirror` 映射，`ProtocolManager`、`GB28181XmlParser`、`GB28181BroadcastBridge` 现复用同一套定义。
 - 将 GB28181 画面反转的正式协议口径从旧 `VideoParamOpt/ImageFlip` 切到平台联调实际使用的 `FrameMirror`，并把设备侧 `get/set` 统一下沉到 `App/Media/VideoImageControl.*`；当前按 `0=还原`、`1=左右`、`2=上下`、`3=中心` 映射到底层 `close/mirror/flip/centrosymmetric`，同时保留旧 `ImageFlip` 兼容。
 - 按 `GB/T 28181-2022` 对齐 GB28181 编码参数 XML：新增 `ConfigDownload/DeviceConfig` 的 `VideoParamAttribute` 查询与设置链路，`VideoFormat/Resolution/FrameRate/BitRateType/VideoBitRate` 现按 2022 字段回包与解析，并通过 `App/Media/VideoEncodeControl.*` 下发 `codec/fps/bitrate/bitrate_type/resolution`。
 - 将 GB28181 编码参数访问链路从 `ProtocolManager` 下沉到 `App/Media/VideoEncodeControl.*`：GB 模块现在通过媒体接口统一读取主/辅码流 `codec/fps/bitrate/gop/resolution` 运行态，并保留 `ApplyVideoEncodeStreamConfig()` 作为后续设备侧应用入口，不再直接调用 `rk_video_*` / `CaptureGetResolution`。

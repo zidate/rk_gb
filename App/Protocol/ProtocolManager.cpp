@@ -41,6 +41,7 @@
 #include "Media/VideoEncodeControl.h"
 #include "Media/VideoImageControl.h"
 #include "Media/VideoOsdControl.h"
+#include "GB28181ProtocolConstants.h"
 #include "ExchangeAL/CameraExchange.h"
 #include "ExchangeAL/ExchangeKind.h"
 #include "Update/update.h"
@@ -280,34 +281,7 @@ static const char* GbVideoStartStateName(GbVideoStartState state)
 static std::string NormalizeCodec(const std::string& codecIn)
 
 {
-
-    const std::string codec = ToLowerCopy(codecIn);
-
-    if (codec == "pcma" || codec == "g711a") {
-
-        return "g711a";
-
-    }
-
-
-
-    if (codec == "pcmu" || codec == "g711u") {
-
-        return "g711u";
-
-    }
-
-
-
-    if (codec == "pcm" || codec == "l16" || codec == "pcm16" || codec == "pcm_s16le") {
-
-        return "pcm";
-
-    }
-
-
-
-    return "";
+    return protocol::gb28181::NormalizeGbAudioCodec(codecIn);
 
 }
 
@@ -367,42 +341,12 @@ static std::string NormalizeResolutionValue(const std::string& value, char separ
 
 static std::string NormalizeGbImageFlipMode(const std::string& modeIn)
 {
-    const std::string mode = ToLowerCopy(modeIn);
-    if (mode.empty() || mode == "0" || mode == "none" || mode == "close" || mode == "off" ||
-        mode == "restore" || mode == "reset") {
-        return "close";
-    }
-
-    if (mode == "1" || mode == "mirror" || mode == "horizontal" || mode == "hflip" ||
-        mode == "leftright" || mode == "left_right") {
-        return "mirror";
-    }
-
-    if (mode == "2" || mode == "flip" || mode == "vertical" || mode == "vflip" ||
-        mode == "updown" || mode == "up_down") {
-        return "flip";
-    }
-
-    if (mode == "3" || mode == "centrosymmetric" || mode == "center" || mode == "both" || mode == "all") {
-        return "centrosymmetric";
-    }
-
-    return modeIn;
+    return protocol::gb28181::NormalizeGbImageFlipModeOrKeepInput(modeIn);
 }
 
 static std::string ResolveGbFrameMirrorValue(const std::string& modeIn)
 {
-    const std::string mode = NormalizeGbImageFlipMode(modeIn);
-    if (mode == "mirror") {
-        return "1";
-    }
-    if (mode == "flip") {
-        return "2";
-    }
-    if (mode == "centrosymmetric") {
-        return "3";
-    }
-    return "0";
+    return protocol::gb28181::ResolveGbFrameMirrorValue(modeIn);
 }
 
 static bool QueryMainStreamResolution(int& width, int& height)
@@ -427,26 +371,7 @@ static bool QueryMainStreamResolution(int& width, int& height)
 static int ResolvePayloadTypeByCodec(const std::string& codec)
 
 {
-
-    const std::string normalized = NormalizeCodec(codec);
-
-    if (normalized == "g711a") {
-
-        return 8;
-
-    }
-
-
-
-    if (normalized == "g711u") {
-
-        return 0;
-
-    }
-
-
-
-    return 96;
+    return protocol::gb28181::ResolveGbAudioPayloadType(codec);
 
 }
 
@@ -455,26 +380,7 @@ static int ResolvePayloadTypeByCodec(const std::string& codec)
 static const char* ResolveMimeByCodec(const std::string& codec)
 
 {
-
-    const std::string normalized = NormalizeCodec(codec);
-
-    if (normalized == "g711a") {
-
-        return "PCMA";
-
-    }
-
-
-
-    if (normalized == "g711u") {
-
-        return "PCMU";
-
-    }
-
-
-
-    return "L16";
+    return protocol::gb28181::ResolveGbAudioMimeName(codec);
 
 }
 
@@ -530,6 +436,20 @@ static std::string SafeStr(const char* s, size_t maxLen)
 
     return std::string(s, len);
 
+}
+
+static std::string ResolveGbDeviceIdOrDefault(const std::string& requested,
+                                              const protocol::ProtocolExternalConfig& cfg)
+{
+    if (!requested.empty()) {
+        return requested;
+    }
+
+    if (!cfg.gb_register.device_id.empty()) {
+        return cfg.gb_register.device_id;
+    }
+
+    return protocol::gb28181::kDefaultDeviceId;
 }
 
 
@@ -1820,7 +1740,7 @@ static std::string BuildGbVideoResolutionSummary(const media::VideoEncodeState* 
     if (runtimeState != NULL && !runtimeState->resolution_summary.empty()) {
         return runtimeState->resolution_summary;
     }
-    return "1920x1080/640x360";
+    return protocol::gb28181::kDefaultResolutionSummary;
 
 }
 
@@ -1876,8 +1796,8 @@ static void ResolveGbOsdCanvasSize(const std::string& configuredResolution,
     int canvasHeight = 0;
     if (!QueryMainStreamResolution(canvasWidth, canvasHeight) &&
         !ParseResolutionPair(configuredResolution, &canvasWidth, &canvasHeight)) {
-        canvasWidth = 1920;
-        canvasHeight = 1080;
+        canvasWidth = protocol::gb28181::kDefaultOsdCanvasWidth;
+        canvasHeight = protocol::gb28181::kDefaultOsdCanvasHeight;
     }
 
     *length = (canvasHeight > 0) ? (unsigned int)canvasHeight : 0U;
@@ -8421,13 +8341,9 @@ int ProtocolManager::NotifyGbCatalogInternal(const char* gbCode)
 
 
 
-    std::string deviceId = (gbCode != NULL && gbCode[0] != '\0') ? gbCode : m_cfg.gb_register.device_id;
-
-    if (deviceId.empty()) {
-
-        deviceId = "34020000001320000001";
-
-    }
+    std::string deviceId = ResolveGbDeviceIdOrDefault(
+        (gbCode != NULL && gbCode[0] != '\0') ? gbCode : "",
+        m_cfg);
 
 
 
@@ -8483,7 +8399,7 @@ int ProtocolManager::NotifyGbCatalogInternal(const char* gbCode)
 
     printf("[ProtocolManager] module=gb28181 event=catalog_notify device=%s session=%p trace=manager error=0 catalog_count=%d manufacturer=%s model=%s\n",
 
-           (gbCode != NULL && gbCode[0] != '\0') ? gbCode : m_cfg.gb_register.device_id.c_str(),
+           deviceId.c_str(),
 
            handle,
 
@@ -8601,19 +8517,9 @@ int ProtocolManager::ResponseGbQueryDeviceInfo(ResponseHandle handle, const Quer
 
 
 
-    std::string gbCode = SafeStr(param->GBCode, sizeof(param->GBCode));
-
-    if (gbCode.empty()) {
-
-        gbCode = m_cfg.gb_register.device_id;
-
-    }
-
-    if (gbCode.empty()) {
-
-        gbCode = "34020000001320000001";
-
-    }
+    std::string gbCode = ResolveGbDeviceIdOrDefault(
+        SafeStr(param->GBCode, sizeof(param->GBCode)),
+        m_cfg);
 
 
 
@@ -8751,21 +8657,9 @@ int ProtocolManager::ResponseGbQueryDeviceStatus(ResponseHandle handle, const Qu
 
 
 
-    std::string gbCode = SafeStr(param->GBCode, sizeof(param->GBCode));
-
-    if (gbCode.empty()) {
-
-        gbCode = m_cfg.gb_register.device_id;
-
-    }
-
-    if (gbCode.empty()) {
-
-        gbCode = "34020000001320000001";
-
-    }
-
-
+    std::string gbCode = ResolveGbDeviceIdOrDefault(
+        SafeStr(param->GBCode, sizeof(param->GBCode)),
+        m_cfg);
 
     CopyBounded(status.GBCode, sizeof(status.GBCode), gbCode);
 
@@ -8857,21 +8751,9 @@ int ProtocolManager::ResponseGbQueryCatalog(ResponseHandle handle, const QueryPa
 
 
 
-    std::string gbCode = SafeStr(param->GBCode, sizeof(param->GBCode));
-
-    if (gbCode.empty()) {
-
-        gbCode = m_cfg.gb_register.device_id;
-
-    }
-
-    if (gbCode.empty()) {
-
-        gbCode = "34020000001320000001";
-
-    }
-
-
+    std::string gbCode = ResolveGbDeviceIdOrDefault(
+        SafeStr(param->GBCode, sizeof(param->GBCode)),
+        m_cfg);
 
     CopyBounded(catalogList.GBCode, sizeof(catalogList.GBCode), gbCode);
 
@@ -8949,21 +8831,9 @@ int ProtocolManager::ResponseGbQueryRecord(ResponseHandle handle, const QueryPar
 
 
 
-    std::string gbCode = SafeStr(param->GBCode, sizeof(param->GBCode));
-
-    if (gbCode.empty()) {
-
-        gbCode = m_cfg.gb_register.device_id;
-
-    }
-
-    if (gbCode.empty()) {
-
-        gbCode = "34020000001320000001";
-
-    }
-
-
+    std::string gbCode = ResolveGbDeviceIdOrDefault(
+        SafeStr(param->GBCode, sizeof(param->GBCode)),
+        m_cfg);
 
     CopyBounded(recordIndex.GBCode, sizeof(recordIndex.GBCode), gbCode);
     const std::string deviceName = ResolveGbDeviceName(m_cfg, m_gb_device_name);
@@ -9099,21 +8969,9 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
 
 
 
-    std::string gbCode = SafeStr(param->GBCode, sizeof(param->GBCode));
-
-    if (gbCode.empty()) {
-
-        gbCode = m_cfg.gb_register.device_id;
-
-    }
-
-    if (gbCode.empty()) {
-
-        gbCode = "34020000001320000001";
-
-    }
-
-
+    std::string gbCode = ResolveGbDeviceIdOrDefault(
+        SafeStr(param->GBCode, sizeof(param->GBCode)),
+        m_cfg);
 
     int runtimeOsdEnabled = ((m_cfg.gb_osd.time_enabled != 0) ||
                              (m_cfg.gb_osd.event_enabled != 0) ||
@@ -9146,9 +9004,9 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
 
     int subBitrate = m_cfg.gb_video.sub_bitrate_kbps;
 
-    std::string mainBitrateType = "VBR";
+    std::string mainBitrateType = protocol::gb28181::kDefaultBitrateType;
 
-    std::string subBitrateType = "VBR";
+    std::string subBitrateType = protocol::gb28181::kDefaultBitrateType;
 
     int mainGop = 0;
 
@@ -9220,11 +9078,20 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
 
                     ResolveGbDeviceName(m_cfg, m_gb_device_name));
 
-        item.UnionCfgParam.CfgBasic.Expiration = (unsigned int)((m_cfg.gb_register.expires_sec > 0) ? m_cfg.gb_register.expires_sec : 3600);
+        item.UnionCfgParam.CfgBasic.Expiration = (unsigned int)(
+            (m_cfg.gb_register.expires_sec > 0) ?
+            m_cfg.gb_register.expires_sec :
+            protocol::gb28181::kDefaultRegisterExpiresSec);
 
-        item.UnionCfgParam.CfgBasic.HeartBeatInterval = (unsigned int)((m_cfg.gb_keepalive.interval_sec > 0) ? m_cfg.gb_keepalive.interval_sec : 60);
+        item.UnionCfgParam.CfgBasic.HeartBeatInterval = (unsigned int)(
+            (m_cfg.gb_keepalive.interval_sec > 0) ?
+            m_cfg.gb_keepalive.interval_sec :
+            protocol::gb28181::kDefaultKeepaliveIntervalSec);
 
-        item.UnionCfgParam.CfgBasic.HeartBeatcount = (unsigned int)((m_cfg.gb_keepalive.max_retry > 0) ? m_cfg.gb_keepalive.max_retry : 3);
+        item.UnionCfgParam.CfgBasic.HeartBeatcount = (unsigned int)(
+            (m_cfg.gb_keepalive.max_retry > 0) ?
+            m_cfg.gb_keepalive.max_retry :
+            protocol::gb28181::kDefaultKeepaliveRetryCount);
 
         item.UnionCfgParam.CfgBasic.PosCapability = 0;
 
@@ -9530,21 +9397,9 @@ int ProtocolManager::ResponseGbQueryPreset(ResponseHandle handle, const QueryPar
 
 
 
-    std::string gbCode = SafeStr(param->GBCode, sizeof(param->GBCode));
-
-    if (gbCode.empty()) {
-
-        gbCode = m_cfg.gb_register.device_id;
-
-    }
-
-    if (gbCode.empty()) {
-
-        gbCode = "34020000001320000001";
-
-    }
-
-
+    std::string gbCode = ResolveGbDeviceIdOrDefault(
+        SafeStr(param->GBCode, sizeof(param->GBCode)),
+        m_cfg);
 
     CopyBounded(presetInfo.DeviceID, sizeof(presetInfo.DeviceID), gbCode);
 

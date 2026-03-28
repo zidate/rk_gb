@@ -15,6 +15,7 @@
 #include "Media/AudioManager.h"
 #include "Media/AudioPrompt.h"
 #include "GB28181Defs.h"
+#include "GB28181ProtocolConstants.h"
 extern "C"
 {
 #include "PAL/Audio_coder.h"
@@ -65,11 +66,13 @@ static bool ParseAudioMediaLine(const std::string& sdp,
     std::string line;
     while (std::getline(ss, line)) {
         line = TrimLineCrlf(line);
-        if (line.compare(0, 8, "m=audio ") != 0) {
+        if (line.compare(0,
+                         sizeof(protocol::gb28181::kSdpMediaAudioPrefix) - 1,
+                         protocol::gb28181::kSdpMediaAudioPrefix) != 0) {
             continue;
         }
 
-        std::istringstream ls(line.substr(8));
+        std::istringstream ls(line.substr(sizeof(protocol::gb28181::kSdpMediaAudioPrefix) - 1));
         if (!(ls >> outPort >> outProto)) {
             return false;
         }
@@ -124,44 +127,19 @@ static std::string NormalizeCodecByPt(int pt, const std::map<int, std::string>& 
     std::string codec = (it != ptCodec.end()) ? it->second : "";
 
     if (codec.empty()) {
-        if (pt == 8) {
-            codec = "pcma";
-        } else if (pt == 0) {
-            codec = "pcmu";
+        if (pt == protocol::gb28181::kAudioPayloadTypePcma) {
+            codec = protocol::gb28181::kAudioMimePcma;
+        } else if (pt == protocol::gb28181::kAudioPayloadTypePcmu) {
+            codec = protocol::gb28181::kAudioMimePcmu;
         }
     }
 
-    if (codec == "pcma" || codec == "g711a") {
-        return "g711a";
-    }
-
-    if (codec == "pcmu" || codec == "g711u") {
-        return "g711u";
-    }
-
-    if (codec == "l16" || codec == "pcm" || codec == "pcm16" || codec == "pcm_s16le") {
-        return "pcm";
-    }
-
-    return "";
+    return protocol::gb28181::NormalizeGbAudioCodec(codec);
 }
 
 static std::string NormalizeCodecText(const std::string& codecIn)
 {
-    const std::string codec = ToLowerCopy(codecIn);
-    if (codec == "pcma" || codec == "g711a") {
-        return "g711a";
-    }
-
-    if (codec == "pcmu" || codec == "g711u") {
-        return "g711u";
-    }
-
-    if (codec == "l16" || codec == "pcm" || codec == "pcm16" || codec == "pcm_s16le") {
-        return "pcm";
-    }
-
-    return "";
+    return protocol::gb28181::NormalizeGbAudioCodec(codecIn);
 }
 
 static bool SelectSupportedCodec(const std::vector<int>& pts,
@@ -186,16 +164,7 @@ static bool SelectSupportedCodec(const std::vector<int>& pts,
 
 static std::string RtpMapNameByCodec(const std::string& codec)
 {
-    const std::string lower = ToLowerCopy(codec);
-    if (lower == "g711a" || lower == "pcma") {
-        return "PCMA";
-    }
-
-    if (lower == "g711u" || lower == "pcmu") {
-        return "PCMU";
-    }
-
-    return "L16";
+    return protocol::gb28181::ResolveGbAudioMimeName(codec);
 }
 
 static std::string ParseAudioSetupAttr(const std::string& sdp)
@@ -207,7 +176,9 @@ static std::string ParseAudioSetupAttr(const std::string& sdp)
     while (std::getline(ss, line)) {
         line = TrimLineCrlf(line);
         if (line.compare(0, 2, "m=") == 0) {
-            inAudioSection = (line.compare(0, 8, "m=audio ") == 0);
+            inAudioSection = (line.compare(0,
+                                           sizeof(protocol::gb28181::kSdpMediaAudioPrefix) - 1,
+                                           protocol::gb28181::kSdpMediaAudioPrefix) == 0);
             continue;
         }
 
@@ -215,8 +186,10 @@ static std::string ParseAudioSetupAttr(const std::string& sdp)
             continue;
         }
 
-        if (line.compare(0, 8, "a=setup:") == 0) {
-            return ToLowerCopy(line.substr(8));
+        if (line.compare(0,
+                         sizeof(protocol::gb28181::kSdpAttributeSetupPrefix) - 1,
+                         protocol::gb28181::kSdpAttributeSetupPrefix) == 0) {
+            return ToLowerCopy(line.substr(sizeof(protocol::gb28181::kSdpAttributeSetupPrefix) - 1));
         }
     }
 
@@ -1006,14 +979,7 @@ std::string GB28181BroadcastBridge::BuildLocalAnswerSdp(const std::string& local
 
     int pt = m_negotiated_payload_type;
     if (pt < 0 || pt > 127) {
-        const std::string codec = ToLowerCopy(m_param.codec);
-        if (codec == "g711a" || codec == "pcma") {
-            pt = 8;
-        } else if (codec == "g711u" || codec == "pcmu") {
-            pt = 0;
-        } else {
-            pt = 96;
-        }
+        pt = protocol::gb28181::ResolveGbAudioPayloadType(m_param.codec);
     }
 
     const std::string codecName = RtpMapNameByCodec(m_param.codec);
@@ -1025,12 +991,15 @@ std::string GB28181BroadcastBridge::BuildLocalAnswerSdp(const std::string& local
     out << "s=GB28181-Broadcast\r\n";
     out << "c=IN IP4 " << ip << "\r\n";
     out << "t=0 0\r\n";
-    out << "m=audio " << m_param.recv_port << " "
-        << (tcpTransport ? "TCP/RTP/AVP" : "RTP/AVP")
+    out << protocol::gb28181::kSdpMediaAudioPrefix << m_param.recv_port << " "
+        << (tcpTransport ? protocol::gb28181::kSdpTransportTcpRtpAvp
+                         : protocol::gb28181::kSdpTransportRtpAvp)
         << " " << pt << "\r\n";
     out << "a=recvonly\r\n";
     if (tcpTransport) {
-        out << "a=setup:" << ((m_transport_type == kRtpOverTcpActive) ? "active" : "passive") << "\r\n";
+        out << protocol::gb28181::kSdpAttributeSetupPrefix
+            << ((m_transport_type == kRtpOverTcpActive) ? "active" : "passive")
+            << "\r\n";
         out << "a=connection:new\r\n";
     }
     out << "a=rtpmap:" << pt << " " << codecName << "/8000\r\n";

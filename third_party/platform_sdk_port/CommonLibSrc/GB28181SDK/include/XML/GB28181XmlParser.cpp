@@ -33,6 +33,7 @@
 #include "teleboot_control.h"
 #include "device_upgrade_control.h"
 #include "device_upgrade_result_notify.h"
+#include "GB28181ProtocolConstants.h"
 
 #define    QUERY        "Query"
 #define    RESPONSE   "Response"
@@ -115,7 +116,7 @@ static void CopyMarkupText(char* dest, size_t destSize, const std::string& text)
 static std::string BuildOsdConfigXml(const CfgOsdConfig& osd)
 {
     CMarkupSTL markup;
-    markup.AddElem("OSDConfig");
+    markup.AddElem(protocol::gb28181::kXmlElementOsdConfig);
     if (!markup.IntoElem()) {
         return "";
     }
@@ -149,7 +150,7 @@ static std::string BuildOsdConfigXml(const CfgOsdConfig& osd)
 static std::string BuildVideoParamAttributeXml(const CfgVideoParamAttribute& attr)
 {
     CMarkupSTL markup;
-    markup.AddElem("VideoParamAttribute");
+    markup.AddElem(protocol::gb28181::kXmlElementVideoParamAttribute);
     if (!markup.IntoElem()) {
         return "";
     }
@@ -165,59 +166,21 @@ static std::string BuildVideoParamAttributeXml(const CfgVideoParamAttribute& att
     return markup.GetDoc();
 }
 
-static std::string ToLowerCopy(const std::string& text)
-{
-    std::string out = text;
-    for (size_t i = 0; i < out.size(); ++i) {
-        if (out[i] >= 'A' && out[i] <= 'Z') {
-            out[i] = static_cast<char>(out[i] - 'A' + 'a');
-        }
-    }
-    return out;
-}
-
 static std::string NormalizeFrameMirrorMode(const std::string& valueIn)
 {
-    const std::string value = ToLowerCopy(valueIn);
-    if (value.empty() || value == "0" || value == "close" || value == "none" ||
-        value == "off" || value == "restore" || value == "reset") {
-        return "close";
-    }
-    if (value == "1" || value == "mirror" || value == "horizontal" ||
-        value == "hflip" || value == "leftright" || value == "left_right") {
-        return "mirror";
-    }
-    if (value == "2" || value == "flip" || value == "vertical" ||
-        value == "vflip" || value == "updown" || value == "up_down") {
-        return "flip";
-    }
-    if (value == "3" || value == "centrosymmetric" || value == "center" ||
-        value == "both" || value == "all") {
-        return "centrosymmetric";
-    }
-    return "";
+    return protocol::gb28181::NormalizeGbImageFlipModeCanonical(valueIn);
 }
 
 static std::string BuildFrameMirrorValue(const char* flipMode)
 {
-    const std::string mode = NormalizeFrameMirrorMode(flipMode ? flipMode : "");
-    if (mode == "mirror") {
-        return "1";
-    }
-    if (mode == "flip") {
-        return "2";
-    }
-    if (mode == "centrosymmetric") {
-        return "3";
-    }
-    return "0";
+    return protocol::gb28181::ResolveGbFrameMirrorValue(flipMode ? flipMode : "");
 }
 
 static std::string BuildFrameMirrorXml(const CfgFrameMirror& config)
 {
     CMarkupSTL markup;
     const std::string value = BuildFrameMirrorValue(config.FrameMirror);
-    markup.AddElem("FrameMirror", value.c_str());
+    markup.AddElem(protocol::gb28181::kXmlElementFrameMirror, value.c_str());
     return markup.GetDoc();
 }
 
@@ -251,7 +214,7 @@ static bool ParseOsdConfigElement(const std::string& xml_str, OsdSetting* settin
     if (!markup.SetDoc(xml_str.c_str(), xml_str.size()) ||
         !markup.FindElem(CONTROL) ||
         !markup.IntoElem() ||
-        !markup.FindElem("OSDConfig") ||
+        !markup.FindElem(protocol::gb28181::kXmlElementOsdConfig) ||
         !markup.IntoElem()) {
         return false;
     }
@@ -313,7 +276,7 @@ static bool ParseVideoParamAttributeElements(const std::string& xml_str,
     }
 
     bool found = false;
-    while (markup.FindElem("VideoParamAttribute")) {
+    while (markup.FindElem(protocol::gb28181::kXmlElementVideoParamAttribute)) {
         found = true;
         if (!markup.IntoElem()) {
             break;
@@ -357,7 +320,7 @@ static bool ParseFrameMirrorElement(const std::string& xml_str, ImageSetting* se
     if (!markup.SetDoc(xml_str.c_str(), xml_str.size()) ||
         !markup.FindElem(CONTROL) ||
         !markup.IntoElem() ||
-        !markup.FindElem("FrameMirror")) {
+        !markup.FindElem(protocol::gb28181::kXmlElementFrameMirror)) {
         return false;
     }
 
@@ -975,11 +938,11 @@ int CGB28181XmlParser::GetProtocolType(const std::string& xml)
     {
 		if (MarkupStl.FindElem("CmdType"))
 		{
-			if ("DeviceConfig" == MarkupStl.GetData())
+			if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeDeviceConfig)
 			{
 				return kDevConfigControlProco;
 			}
-			if ("DeviceControl" == MarkupStl.GetData())
+			if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeDeviceControl)
 			{
 				return GetControlType(&MarkupStl);
 			}
@@ -989,38 +952,38 @@ int CGB28181XmlParser::GetProtocolType(const std::string& xml)
     {
         if (MarkupStl.FindElem("CmdType"))
         {
-            if ("DeviceStatus" == MarkupStl.GetData())
+            if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeDeviceStatus)
             {
                  return kDevStatusQueryProco;
             }
-            else if ("Catalog" == MarkupStl.GetData())
+            else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeCatalog)
             {
                   return kCatalogQueryProco;
             }
-			else if ("MobilePosition" == MarkupStl.GetData())
+			else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeMobilePosition)
 			{
 				return kMobilePositionQueryProco;
 			}
-            else if ("DeviceInfo" == MarkupStl.GetData())
+            else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeDeviceInfo)
             {
                 //设备信息查询请求
                   return kDevInfoQueryProco;
             }
-            else if ("RecordInfo" == MarkupStl.GetData())
+            else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeRecordInfo)
             {
                 //文件目录检索请求
                   return kRecordIndexQueryProco;
             }
-            else if ("Alarm" == MarkupStl.GetData())
+            else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeAlarm)
             {
                 //报警查询
                    return kAlarmQueryProco;
             }
-            else if ("ConfigDownload" == MarkupStl.GetData())
+            else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeConfigDownload)
             {
                   return kConfigDownloadQueryProco;
             }
-			else if ("PresetQuery" == MarkupStl.GetData())
+			else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypePresetQuery)
 			{
 				return kPresetQueryProco;
 			}
@@ -1030,27 +993,27 @@ int CGB28181XmlParser::GetProtocolType(const std::string& xml)
     {
         if (MarkupStl.FindElem("CmdType"))
         {
-            if ("Keepalive" == MarkupStl.GetData())
+            if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeKeepalive)
             {
                 //状态信息报送
                 return kKeepaliveNotifyProco;
             }
-            else if ("Alarm" == MarkupStl.GetData())
+            else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeAlarm)
             {
                 //报警通知
                 return kAlarmNotifyProco;
             }
-            else if ("Catalog" == MarkupStl.GetData())
+            else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeCatalog)
             {
                 //目录通知
                  return kCatalogNotifyProco;
             }
-			else if ("MediaStatus" == MarkupStl.GetData())
+			else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeMediaStatus)
 			{
 				//报警通知
 				return kMediaStatusNotifyProco;
 			}
-			else if ("Broadcast" == MarkupStl.GetData())
+			else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeBroadcast)
 			{
 				//报警通知
 				return kBroadcastNotifyProco;
@@ -1061,41 +1024,41 @@ int CGB28181XmlParser::GetProtocolType(const std::string& xml)
     {
         if (MarkupStl.FindElem("CmdType"))
         {
-            if ("DeviceControl" == MarkupStl.GetData())
+            if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeDeviceControl)
             {
                 //设备控制应答
                  return kControlProco;
             }
-            else if ("Alarm" == MarkupStl.GetData())
+            else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeAlarm)
             {
                 //报警通知应答
                  return kAlarmResponseProco;
             }
-            else if ("Catalog" == MarkupStl.GetData())
+            else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeCatalog)
             {
                  return kCatalogResponseProco;
             }
-            else if ("DeviceInfo" == MarkupStl.GetData())
+            else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeDeviceInfo)
             {
                 //设备信息查询应答
                  return kDevInfoResponseProco;
             }
-            else if ("DeviceStatus" == MarkupStl.GetData())
+            else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeDeviceStatus)
             {
                 //设备状态信息查询应答
                  return kDevStatusResponseProco;
             }
-            else if ("RecordInfo" == MarkupStl.GetData())
+            else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeRecordInfo)
             {
                 //文件目录检索应答
                 return kRecordIndexResponseProco;
             }
-            else if ("ConfigDownload" == MarkupStl.GetData())
+            else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypeConfigDownload)
             {
 
                 return  kConfingDownloadResponseProco;
             }
-			else if ("PresetQuery" == MarkupStl.GetData())
+			else if (MarkupStl.GetData() == protocol::gb28181::kCmdTypePresetQuery)
 			{
 				return kPresetResponseProco;
 			}
@@ -1137,7 +1100,7 @@ int CGB28181XmlParser::PackDeviceRecordQuery(const RecordParam*  param, std::str
 
     record.DeviceID =  param->DeviceID;
     record.SN = m_sn.Increment();
-    record.CmdType="RecordInfo";
+    record.CmdType = protocol::gb28181::kCmdTypeRecordInfo;
     record.StartTime = param->StartTime;
     record.EndTime = param->EndTime;
 	record.Type = "all";
@@ -1175,7 +1138,7 @@ int CGB28181XmlParser::PackDeviceInfoQuery(const char* id, std::string &result)
 {
       slothxml::base_proco_t proco;
       proco.DeviceID = id;
-      proco.CmdType="DeviceInfo";
+      proco.CmdType = protocol::gb28181::kCmdTypeDeviceInfo;
       proco.SN = m_sn.Increment();
       if (!slothxml::encode(proco, QUERY, result)) {
               result = "";
@@ -1228,7 +1191,7 @@ bool CGB28181XmlParser::UnPackQuery(const std::string &xml_str, int &sn, std::st
 void CGB28181XmlParser::PackDeviceInfoResponse(int sn ,const DeviceInfo* device_info, std::string &result)
 {
         slothxml::device_info_t  info;
-		info.CmdType = "DeviceInfo";
+		info.CmdType = protocol::gb28181::kCmdTypeDeviceInfo;
         info.SN = sn;
 		info.DeviceID = device_info->GBCode;
         info.Firmware = device_info->firmware;
@@ -1337,7 +1300,7 @@ bool CGB28181XmlParser::UnPackDeviceInfoResponse(const std::string &xml_str, int
 void CGB28181XmlParser::PackCatalogResponse(int sn , int start ,int end, const DeviceCatalogList* param,  std::string &result)
 {
         slothxml::catalog_response_t catalog;
-        catalog.CmdType ="Catalog";
+        catalog.CmdType = protocol::gb28181::kCmdTypeCatalog;
         catalog.DeviceID = param->GBCode;
         catalog.SN = sn;
         catalog.SumNum = param->sum;
@@ -1434,7 +1397,7 @@ bool CGB28181XmlParser::UnPackCatalogResponse(const std::string &xml_str, int& s
 void CGB28181XmlParser::PackCatalogNotify(int sn , int position,const DeviceCatalogList* info, std::string &result)
 {
 	slothxml::catalog_response_t catalog;
-	catalog.CmdType ="Catalog";
+	catalog.CmdType = protocol::gb28181::kCmdTypeCatalog;
 	catalog.DeviceID = info->GBCode;
 	catalog.SN = sn;
 	catalog.SumNum = info->sum;
@@ -1520,7 +1483,7 @@ int  CGB28181XmlParser::PackCatalogQuery(const CatalogQueryParam* param, std::st
 {
           slothxml::catalog_query_t catalog;
 
-          catalog.CmdType = "Catalog";
+          catalog.CmdType = protocol::gb28181::kCmdTypeCatalog;
           catalog.DeviceID = param->DeviceID;
           catalog.SN = m_sn.Increment();
 
@@ -1563,7 +1526,7 @@ void CGB28181XmlParser::PackKeepalive(const KeepaliveInfo*  list,  std::string& 
     slothxml::keepalive_t device_status;
 
     device_status.DeviceID = m_local_code;
-    device_status.CmdType = "Keepalive";
+    device_status.CmdType = protocol::gb28181::kCmdTypeKeepalive;
     device_status.Status =  list->status ? "OK" : "ERROR" ;
     device_status.SN = m_sn.Increment();
 
@@ -1663,36 +1626,11 @@ int CGB28181XmlParser::PackConfigDownloadQuery(const ConfigDownloadQuery* param,
     std::vector<std::string>  configtype;
     const unsigned int maxTypeNum = sizeof(param->Type) / sizeof(param->Type[0]);
     const unsigned int queryCount = (param->Num < maxTypeNum) ? param->Num : maxTypeNum;
-    //   BasicParam/VideoParamOpt/VideoParamAttribute/SVACEncodeConfig/SVACDecodeConfig/OSDConfig
     for (unsigned int i = 0; i < queryCount; ++i) {
-
-          if ( param->Type[i] == kBasicParam) {
-              configtype.push_back("BasicParam");
-          }
-
-          if ( param->Type[i] == kVideoParamOpt) {
-              configtype.push_back("VideoParamOpt");
-          }
-
-          if ( param->Type[i] == kVideoParamAttribute) {
-              configtype.push_back("VideoParamAttribute");
-          }
-
-          if ( param->Type[i] == kFrameMirrorConfig) {
-              configtype.push_back("FrameMirror");
-          }
-
-          if ( param->Type[i] == kSVACEncodeConfig) {
-              configtype.push_back("SVACEncodeConfig");
-          }
-
-          if ( param->Type[i] == kSVACDecodeConfig) {
-              configtype.push_back("SVACDecodeConfig");
-          }
-
-          if ( param->Type[i] == kOsdConfig) {
-              configtype.push_back("OSDConfig");
-          }
+        const char* typeName = protocol::gb28181::GetGbConfigTypeName(param->Type[i]);
+        if (typeName != NULL) {
+            configtype.push_back(typeName);
+        }
     }
     std::string buffer;
     BuildString(configtype, buffer, "/");
@@ -1724,38 +1662,8 @@ bool CGB28181XmlParser::UnPackConfigDownloadQuery(const std::string &xml_str, in
     memset(param->query_descri.config_param.Type, 0, sizeof(param->query_descri.config_param.Type));
 	for (unsigned int i = 0; i < queryCount; i++)
 	{
-		if (configtype[i] == "BasicParam")
-		{
-			param->query_descri.config_param.Type[i] = kBasicParam;
-		}
-		else if (configtype[i] == "VideoParamOpt")
-		{
-			param->query_descri.config_param.Type[i] = kVideoParamOpt;
-		}
-		else if (configtype[i] == "VideoParamAttribute")
-		{
-			param->query_descri.config_param.Type[i] = kVideoParamAttribute;
-		}
-		else if (configtype[i] == "FrameMirror")
-		{
-			param->query_descri.config_param.Type[i] = kFrameMirrorConfig;
-		}
-		else if (configtype[i] == "SVACEncodeConfig")
-		{
-			param->query_descri.config_param.Type[i] = kSVACEncodeConfig;
-		}
-		else if (configtype[i] == "SVACDecodeConfig")
-		{
-			param->query_descri.config_param.Type[i] = kSVACDecodeConfig;
-		}
-		else if (configtype[i] == "OSDConfig")
-		{
-			param->query_descri.config_param.Type[i] = kOsdConfig;
-		}
-		else
-		{
-			param->query_descri.config_param.Type[i] = kUnknow;
-		}
+		param->query_descri.config_param.Type[i] =
+            protocol::gb28181::ParseGbConfigTypeName(configtype[i]);
 	}
 
 
@@ -1770,7 +1678,7 @@ void CGB28181XmlParser::PackConfigDownloadResponse(int sn,const DeviceConfigDown
 	slothxml::configdownload_response_t config;
     std::string extraConfigXml;
 	config.DeviceID = param->GBCode;
-	config.CmdType = "ConfigDownload";
+	config.CmdType = protocol::gb28181::kCmdTypeConfigDownload;
 	config.SN = sn;
 	config.Result = "1";
 
@@ -1883,7 +1791,7 @@ int CGB28181XmlParser::PackDeviceStatusQuery(const char* device_id, std::string 
 {
     slothxml::base_proco_t proco;
     proco.DeviceID = device_id;
-    proco.CmdType="DeviceStatus";
+    proco.CmdType = protocol::gb28181::kCmdTypeDeviceStatus;
     proco.SN = m_sn.Increment();
     if (!slothxml::encode(proco, QUERY, result)) {
             result = "";
@@ -1895,7 +1803,7 @@ void CGB28181XmlParser::PackDevicePresetResponse(int sn , const PresetInfo* info
 {
     slothxml::preset_reponse_t preset;
     preset.DeviceID = info->DeviceID;
-    preset.CmdType="PresetQuery";
+    preset.CmdType = protocol::gb28181::kCmdTypePresetQuery;
     preset.SN = sn;
 
    int i = 0;
@@ -1942,7 +1850,7 @@ void CGB28181XmlParser::PackDeviceRecordIndexResponseEx(int sn,
 {
     slothxml::record_index_response_t record;
     record.DeviceID = device_id ? device_id : "";
-    record.CmdType="RecordInfo";
+    record.CmdType = protocol::gb28181::kCmdTypeRecordInfo;
     record.SN = sn;
     record.SumNum = total_num;
    unsigned int i = 0;
@@ -2088,7 +1996,7 @@ int CGB28181XmlParser::PackQueryDevicePresetInfo(const char* device_id, std::str
 {
     slothxml::base_proco_t proco;
     proco.DeviceID = device_id;
-    proco.CmdType="PresetQuery";
+    proco.CmdType = protocol::gb28181::kCmdTypePresetQuery;
     proco.SN = m_sn.Increment();
     if (!slothxml::encode(proco, QUERY, result)) {
             result = "";
@@ -2100,7 +2008,7 @@ int CGB28181XmlParser::PackQueryDevicePresetInfo(const char* device_id, std::str
 void CGB28181XmlParser::PackAlarmResetControl(const char* device_id, const AlarmResetInfo* info,  std::string &result)
 {
     slothxml::alarm_reset_control_t     control;
-    control.CmdType = "DeviceControl";
+    control.CmdType = protocol::gb28181::kCmdTypeDeviceControl;
     control.SN = m_sn.Increment();
     control.DeviceID = device_id;
     control.AlarmCmd =  "ResetAlarm";
@@ -2135,7 +2043,7 @@ bool CGB28181XmlParser::UnPackAlarmResetControl(const std::string &xml_str, int&
 void CGB28181XmlParser::PackGurdControl(const char* device_id,bool opt, std::string &result)
 {
     slothxml::guard_control_t     control;
-    control.CmdType = "DeviceControl";
+    control.CmdType = protocol::gb28181::kCmdTypeDeviceControl;
     control.SN = m_sn.Increment();
     control.DeviceID = device_id;
     control.GuardCmd =  opt ? "SetGuard"  :  "ResetGuard";
@@ -2165,7 +2073,7 @@ bool CGB28181XmlParser::UnPackGurdControl(const std::string &xml_str, int& sn , 
 void CGB28181XmlParser::PackRecordControl(const char* device_id, bool start, std::string &result)
 {
      slothxml::record_control_t control;
-     control.CmdType = "DeviceControl";
+     control.CmdType = protocol::gb28181::kCmdTypeDeviceControl;
      control.DeviceID = device_id;
      control.SN = m_sn.Increment();
      control.RecordCmd =  start ? "Record" : "StopRecord";
@@ -2195,7 +2103,7 @@ void CGB28181XmlParser::PackZoomControl(const char* device_id, const ZoomCmd* cm
 {
     slothxml::zoom_control_t     control;
 
-    control.CmdType ="DeviceControl";
+    control.CmdType = protocol::gb28181::kCmdTypeDeviceControl;
     control.DeviceID = device_id;
     control.SN = m_sn.Increment();
     if( cmd->in  ) {
@@ -2255,7 +2163,7 @@ bool CGB28181XmlParser::UnPackZoomControl(const std::string &xml_str, int& sn , 
 void CGB28181XmlParser::PackPTZControl(const char* device_id, const PtzCmd* cmd, std::string &result)
 {
     slothxml::ptz_control_t  ptz;
-    ptz.CmdType = "DeviceControl";
+    ptz.CmdType = protocol::gb28181::kCmdTypeDeviceControl;
     ptz.SN = m_sn.Increment();
     ptz.DeviceID = device_id;
     char temp[128] = {0};
@@ -2284,7 +2192,7 @@ bool CGB28181XmlParser::UnPackPTZControl(const std::string &xml_str, int& sn, De
 void CGB28181XmlParser::PackAlarmSubcribe(const AlarmSubcribeInfo* info,std::string &result)
 {
     slothxml::alarm_sub_t     subcribe;
-    subcribe.CmdType = "Alarm";
+    subcribe.CmdType = protocol::gb28181::kCmdTypeAlarm;
     subcribe.SN = m_sn.Increment();
     subcribe.DeviceID = info->DeivceID;
 
@@ -2320,7 +2228,7 @@ bool CGB28181XmlParser::UnPackAlarmSubcribe(const std::string &xml_str, int& sn,
 bool CGB28181XmlParser::PackMediaStatusNotify(const char* id, int NotifyType, std::string &result)
 {
      slothxml::media_status_notify_t notify;
-     notify.CmdType ="MediaStatus";
+     notify.CmdType = protocol::gb28181::kCmdTypeMediaStatus;
      notify.SN = m_sn.Increment();
      notify.DeviceID = id;
 	 notify.NotifyType = NotifyType;
@@ -2344,7 +2252,7 @@ bool CGB28181XmlParser::UnPackMediaStatusNotify(const std::string &xml_str, std:
 bool CGB28181XmlParser::PackDeviceUpgradeResultNotify(const char* device_id, const char* session_id, const char* firmware, bool result, const char* description, std::string &output)
 {
      slothxml::device_upgrade_result_notify_t notify;
-     notify.CmdType = "DeviceUpgradeResult";
+     notify.CmdType = protocol::gb28181::kCmdTypeDeviceUpgradeResult;
      notify.SN = m_sn.Increment();
      notify.DeviceID = (device_id != NULL) ? device_id : "";
      notify.Result = result ? "OK" : "ERROR";
@@ -2389,7 +2297,7 @@ bool CGB28181XmlParser::UnPackBroadcastNotify(const std::string &xml_str, int& s
 void CGB28181XmlParser::PackAlarmNotify(int sn ,const AlarmNotifyInfo* info, std::string &result)
 {
     slothxml::alarm_notify_t notify;
-    notify.CmdType = "Alarm";
+    notify.CmdType = protocol::gb28181::kCmdTypeAlarm;
     notify.SN = m_sn.Increment();
     notify.DeviceID = info->DeviceID;
     notify.AlarmTime = info->AlarmTime;
@@ -2472,7 +2380,7 @@ void CGB28181XmlParser::PackCatalogSubcribe(const CatalogSubcribeInfo* info, std
 {
 	slothxml::catalog_query_t catalog;
 
-	catalog.CmdType = "Catalog";
+	catalog.CmdType = protocol::gb28181::kCmdTypeCatalog;
 	catalog.DeviceID = info->DeivceID;
 	catalog.SN = m_sn.Increment();
 
@@ -2500,7 +2408,7 @@ bool CGB28181XmlParser::UnPackCatalogSubcribe(const std::string &xml_str, int& s
 void CGB28181XmlParser::PackMobilePositionNotify(int sn ,const MobilePositionInfo* info, std::string &result)
 {
         slothxml::mobile_position_notify_t notify;
-		notify.CmdType = "MobilePosition";
+		notify.CmdType = protocol::gb28181::kCmdTypeMobilePosition;
         notify.DeviceID = info->GBCode;
 		notify.SN = sn;
         notify.Altitude = info->Altitude;
@@ -2530,7 +2438,7 @@ bool CGB28181XmlParser::UnPackMobilePositionNotify(const std::string &xml_str, i
 void CGB28181XmlParser::PackMobilePositionSubcribe(const MobilePositionSubInfo* info, std::string &result)
 {
     slothxml::mobile_position_sub_t     subscribe;
-    subscribe.CmdType = "MobilePosition";
+    subscribe.CmdType = protocol::gb28181::kCmdTypeMobilePosition;
     subscribe.SN = m_sn.Increment();
     subscribe.DeviceID = info->DeivceID;
     subscribe.Interval = info->Interval;
@@ -2557,7 +2465,7 @@ bool CGB28181XmlParser::UnPackMobilePositionSubcribe(const std::string &xml_str,
 void CGB28181XmlParser::PackKeyFrameControl(const char* device_id, std::string &result)
 {
     slothxml::Iframe_control_t     control;
-    control.CmdType = "DeviceControl";
+    control.CmdType = protocol::gb28181::kCmdTypeDeviceControl;
     control.SN = m_sn;
     control.DeviceID = device_id;
     control.IFameCmd = "Send";
@@ -2580,7 +2488,7 @@ bool CGB28181XmlParser::UnPackKeyFrameControl(const std::string &xml_str, int& s
 void CGB28181XmlParser::PackHomePositionControl(const char* device_id, const HomePositionCmd* cmd, std::string &result)
 {
     slothxml::home_position_control_t control;
-   control.CmdType = "DeviceControl";
+   control.CmdType = protocol::gb28181::kCmdTypeDeviceControl;
    control.DeviceID = device_id;
    control.SN = m_sn.Increment();
    control.HomePosition.Enabled = cmd->enable;
