@@ -165,6 +165,62 @@ static std::string BuildVideoParamAttributeXml(const CfgVideoParamAttribute& att
     return markup.GetDoc();
 }
 
+static std::string ToLowerCopy(const std::string& text)
+{
+    std::string out = text;
+    for (size_t i = 0; i < out.size(); ++i) {
+        if (out[i] >= 'A' && out[i] <= 'Z') {
+            out[i] = static_cast<char>(out[i] - 'A' + 'a');
+        }
+    }
+    return out;
+}
+
+static std::string NormalizeFrameMirrorMode(const std::string& valueIn)
+{
+    const std::string value = ToLowerCopy(valueIn);
+    if (value.empty() || value == "0" || value == "close" || value == "none" ||
+        value == "off" || value == "restore" || value == "reset") {
+        return "close";
+    }
+    if (value == "1" || value == "mirror" || value == "horizontal" ||
+        value == "hflip" || value == "leftright" || value == "left_right") {
+        return "mirror";
+    }
+    if (value == "2" || value == "flip" || value == "vertical" ||
+        value == "vflip" || value == "updown" || value == "up_down") {
+        return "flip";
+    }
+    if (value == "3" || value == "centrosymmetric" || value == "center" ||
+        value == "both" || value == "all") {
+        return "centrosymmetric";
+    }
+    return "";
+}
+
+static std::string BuildFrameMirrorValue(const char* flipMode)
+{
+    const std::string mode = NormalizeFrameMirrorMode(flipMode ? flipMode : "");
+    if (mode == "mirror") {
+        return "1";
+    }
+    if (mode == "flip") {
+        return "2";
+    }
+    if (mode == "centrosymmetric") {
+        return "3";
+    }
+    return "0";
+}
+
+static std::string BuildFrameMirrorXml(const CfgFrameMirror& config)
+{
+    CMarkupSTL markup;
+    const std::string value = BuildFrameMirrorValue(config.FrameMirror);
+    markup.AddElem("FrameMirror", value.c_str());
+    return markup.GetDoc();
+}
+
 static bool InjectXmlBeforeClosingTag(std::string& xml, const std::string& payload, const char* closingTag)
 {
     if (payload.empty() || closingTag == NULL || closingTag[0] == '\0') {
@@ -289,6 +345,30 @@ static bool ParseVideoParamAttributeElements(const std::string& xml_str,
     }
 
     return found && !settings->empty();
+}
+
+static bool ParseFrameMirrorElement(const std::string& xml_str, ImageSetting* setting)
+{
+    if (setting == NULL) {
+        return false;
+    }
+
+    CMarkupSTL markup;
+    if (!markup.SetDoc(xml_str.c_str(), xml_str.size()) ||
+        !markup.FindElem(CONTROL) ||
+        !markup.IntoElem() ||
+        !markup.FindElem("FrameMirror")) {
+        return false;
+    }
+
+    const std::string mode = NormalizeFrameMirrorMode(markup.GetData());
+    if (mode.empty()) {
+        return false;
+    }
+
+    memset(setting, 0, sizeof(*setting));
+    CopyMarkupText(setting->FlipMode, sizeof(setting->FlipMode), mode);
+    return true;
 }
 
 } // namespace
@@ -1598,6 +1678,10 @@ int CGB28181XmlParser::PackConfigDownloadQuery(const ConfigDownloadQuery* param,
               configtype.push_back("VideoParamAttribute");
           }
 
+          if ( param->Type[i] == kFrameMirrorConfig) {
+              configtype.push_back("FrameMirror");
+          }
+
           if ( param->Type[i] == kSVACEncodeConfig) {
               configtype.push_back("SVACEncodeConfig");
           }
@@ -1651,6 +1735,10 @@ bool CGB28181XmlParser::UnPackConfigDownloadQuery(const std::string &xml_str, in
 		else if (configtype[i] == "VideoParamAttribute")
 		{
 			param->query_descri.config_param.Type[i] = kVideoParamAttribute;
+		}
+		else if (configtype[i] == "FrameMirror")
+		{
+			param->query_descri.config_param.Type[i] = kFrameMirrorConfig;
 		}
 		else if (configtype[i] == "SVACEncodeConfig")
 		{
@@ -1708,6 +1796,10 @@ void CGB28181XmlParser::PackConfigDownloadResponse(int sn,const DeviceConfigDown
 			case kVideoParamAttribute:
 				extraConfigXml += BuildVideoParamAttributeXml(
                     param->CfgParam[i].UnionCfgParam.CfgVideoAttr);
+				break;
+			case kFrameMirrorConfig:
+				extraConfigXml += BuildFrameMirrorXml(
+                    param->CfgParam[i].UnionCfgParam.FrameMirror);
 				break;
 			case kSVACEncodeConfig:
 				{
@@ -2601,7 +2693,9 @@ bool CGB28181XmlParser::UnPackConfigControl(const std::string &xml_str, int& sn 
 		}
 		configParamVector.push_back(basicConfigParam);
 	}
-	if (control.xml_has_VideoParamOpt())
+    ImageSetting frameMirrorSetting;
+    const bool hasFrameMirror = ParseFrameMirrorElement(xml_str, &frameMirrorSetting);
+	if (!hasFrameMirror && control.xml_has_VideoParamOpt())
 	{
 		if (!control.VideoParamOpt.ImageFlip.empty())
 		{
@@ -2614,6 +2708,14 @@ bool CGB28181XmlParser::UnPackConfigControl(const std::string &xml_str, int& sn 
 			configParamVector.push_back(imageConfigParam);
 		}
 	}
+    if (hasFrameMirror)
+    {
+        SettingParam imageConfigParam;
+        memset(&imageConfigParam, 0, sizeof(SettingParam));
+        imageConfigParam.SetType = kImageSetting;
+        imageConfigParam.unionSetParam.Image = frameMirrorSetting;
+        configParamVector.push_back(imageConfigParam);
+    }
 	if (control.xml_has_SVACEncodeConfig())
 	{
 	}

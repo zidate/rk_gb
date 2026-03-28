@@ -39,6 +39,7 @@
 #include "Manager/ConfigManager.h"
 #include "Manager/EventManager.h"
 #include "Media/VideoEncodeControl.h"
+#include "Media/VideoImageControl.h"
 #include "Media/VideoOsdControl.h"
 #include "ExchangeAL/CameraExchange.h"
 #include "ExchangeAL/ExchangeKind.h"
@@ -50,8 +51,6 @@ extern "C"
 {
 #include "PAL/Capture.h"
 #include "PAL/Audio_coder.h"
-int rk_isp_get_image_flip(int cam_id, const char **value);
-int rk_isp_set_image_flip(int cam_id, const char *value);
 }
 
 
@@ -369,23 +368,41 @@ static std::string NormalizeResolutionValue(const std::string& value, char separ
 static std::string NormalizeGbImageFlipMode(const std::string& modeIn)
 {
     const std::string mode = ToLowerCopy(modeIn);
-    if (mode.empty() || mode == "none" || mode == "close" || mode == "off" || mode == "restore" || mode == "reset") {
+    if (mode.empty() || mode == "0" || mode == "none" || mode == "close" || mode == "off" ||
+        mode == "restore" || mode == "reset") {
         return "close";
     }
 
-    if (mode == "flip" || mode == "vertical" || mode == "vflip" || mode == "updown" || mode == "up_down") {
-        return "flip";
-    }
-
-    if (mode == "mirror" || mode == "horizontal" || mode == "hflip" || mode == "leftright" || mode == "left_right") {
+    if (mode == "1" || mode == "mirror" || mode == "horizontal" || mode == "hflip" ||
+        mode == "leftright" || mode == "left_right") {
         return "mirror";
     }
 
-    if (mode == "centrosymmetric" || mode == "center" || mode == "both" || mode == "all") {
+    if (mode == "2" || mode == "flip" || mode == "vertical" || mode == "vflip" ||
+        mode == "updown" || mode == "up_down") {
+        return "flip";
+    }
+
+    if (mode == "3" || mode == "centrosymmetric" || mode == "center" || mode == "both" || mode == "all") {
         return "centrosymmetric";
     }
 
     return modeIn;
+}
+
+static std::string ResolveGbFrameMirrorValue(const std::string& modeIn)
+{
+    const std::string mode = NormalizeGbImageFlipMode(modeIn);
+    if (mode == "mirror") {
+        return "1";
+    }
+    if (mode == "flip") {
+        return "2";
+    }
+    if (mode == "centrosymmetric") {
+        return "3";
+    }
+    return "0";
 }
 
 static bool QueryMainStreamResolution(int& width, int& height)
@@ -1807,20 +1824,6 @@ static std::string BuildGbVideoResolutionSummary(const media::VideoEncodeState* 
 
 }
 
-static bool ReadRkImageFlipMode(std::string& value)
-{
-    CConfigTable table;
-    CameraParamAll config;
-    memset(&config, 0, sizeof(config));
-    if (!g_configManager.getConfig(getConfigName(CFG_CAMERA_PARAM), table)) {
-        return false;
-    }
-
-    TExchangeAL<CameraParamAll>::getConfigV2(table, config, 1);
-    value = (config.vCameraParamAll[0].rotateAttr == RA_NONE) ? "close" : "centrosymmetric";
-    return true;
-}
-
 static std::string NormalizeGbOsdTextTemplate(const std::string& textIn);
 
 static std::string NormalizeGbOsdTextTemplate(const std::string& textIn)
@@ -1981,37 +1984,6 @@ static void BuildGbOsdQueryConfig(const protocol::GbOsdParam& desired,
         CopyBounded(out->Item[0].Text, sizeof(out->Item[0].Text), textTemplate);
         out->Item[0].X = textX;
         out->Item[0].Y = textY;
-    }
-}
-
-static void ApplyRkImageFlipConfig(const std::string& desiredMode)
-{
-    const std::string normalizedMode = NormalizeGbImageFlipMode(desiredMode);
-    if (normalizedMode.empty()) {
-        return;
-    }
-
-    const int desiredRotate = (normalizedMode == "close") ? RA_NONE : RA_180;
-    CConfigTable table;
-    CameraParamAll config;
-    memset(&config, 0, sizeof(config));
-    if (!g_configManager.getConfig(getConfigName(CFG_CAMERA_PARAM), table)) {
-        printf("[ProtocolManager] module=config event=media_apply trace=manager error=-1 target=image_flip value=%s current=unknown\n",
-               normalizedMode.c_str());
-        return;
-    }
-
-    TExchangeAL<CameraParamAll>::getConfigV2(table, config, 1);
-    const int currentRotate = config.vCameraParamAll[0].rotateAttr;
-    if (currentRotate != desiredRotate) {
-        config.vCameraParamAll[0].rotateAttr = desiredRotate;
-        TExchangeAL<CameraParamAll>::setConfigV2(config, table, 1);
-        const int ret = g_configManager.setConfig(getConfigName(CFG_CAMERA_PARAM), table, 0, IConfigManager::applyOK);
-        printf("[ProtocolManager] module=config event=media_apply trace=manager error=%d target=image_flip value=%s current=%d desired=%d\n",
-               ret,
-               normalizedMode.c_str(),
-               currentRotate,
-               desiredRotate);
     }
 }
 
@@ -3667,7 +3639,12 @@ int ProtocolManager::Start()
                m_cfg.gb_listen.target_port);
     }
 
-    ApplyRkImageFlipConfig(m_cfg.gb_image.flip_mode);
+    {
+        const int imageRet = media::ApplyVideoImageFlipMode(m_cfg.gb_image.flip_mode);
+        printf("[ProtocolManager] module=config event=media_apply trace=manager error=%d target=image_flip value=%s stage=start\n",
+               imageRet,
+               NormalizeGbImageFlipMode(m_cfg.gb_image.flip_mode).c_str());
+    }
 
 
     if (m_cfg.gb_register.enabled != 0) {
@@ -4068,7 +4045,10 @@ int ProtocolManager::ReloadExternalConfig()
         }
 
         if (applyImageFlipConfig) {
-            ApplyRkImageFlipConfig(m_cfg.gb_image.flip_mode);
+            const int imageRet = media::ApplyVideoImageFlipMode(m_cfg.gb_image.flip_mode);
+            printf("[ProtocolManager] module=config event=media_apply trace=manager error=%d target=image_flip value=%s stage=reload\n",
+                   imageRet,
+                   NormalizeGbImageFlipMode(m_cfg.gb_image.flip_mode).c_str());
         }
 
         if (reloadGbLifecycle) {
@@ -7654,9 +7634,11 @@ int ProtocolManager::HandleGbConfigControl(const DevControlCmd* cmd)
 
                 }
 
-                printf("[ProtocolManager] gb config apply image_flip=%s gb=%s\n",
+                printf("[ProtocolManager] gb config apply image_flip=%s frame_mirror=%s gb=%s\n",
 
                        nextMode.c_str(),
+
+                       ResolveGbFrameMirrorValue(nextMode).c_str(),
 
                        cmd->GBCode);
 
@@ -7685,9 +7667,11 @@ int ProtocolManager::HandleGbConfigControl(const DevControlCmd* cmd)
 
 
     if (applyImageFlip) {
-
-        ApplyRkImageFlipConfig(imageFlipMode);
-
+        const int imageRet = media::ApplyVideoImageFlipMode(imageFlipMode);
+        printf("[ProtocolManager] gb config image_flip dispatch ret=%d value=%s gb=%s\n",
+               imageRet,
+               NormalizeGbImageFlipMode(imageFlipMode).c_str(),
+               cmd->GBCode);
     }
 
     if (applyOsdConfig) {
@@ -7721,7 +7705,7 @@ int ProtocolManager::HandleGbConfigControl(const DevControlCmd* cmd)
 
 
 
-    printf("[ProtocolManager] gb config apply device_name=%s expires=%d heartbeat=%d retry=%d osd(time=%d,event=%d,alert=%d) image_flip=%s gb=%s\n",
+    printf("[ProtocolManager] gb config apply device_name=%s expires=%d heartbeat=%d retry=%d osd(time=%d,event=%d,alert=%d) image_flip=%s frame_mirror=%s gb=%s\n",
 
            ResolveGbDeviceName(m_cfg, m_gb_device_name).c_str(),
 
@@ -7738,6 +7722,8 @@ int ProtocolManager::HandleGbConfigControl(const DevControlCmd* cmd)
            m_cfg.gb_osd.alert_enabled,
 
            NormalizeGbImageFlipMode(m_cfg.gb_image.flip_mode).c_str(),
+
+           ResolveGbFrameMirrorValue(m_cfg.gb_image.flip_mode).c_str(),
 
            cmd->GBCode);
 
@@ -9141,6 +9127,8 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
 
     media::VideoEncodeState runtimeVideoState;
     const bool hasRuntimeVideoState = media::QueryVideoEncodeState(&runtimeVideoState);
+    std::string runtimeImageFlip;
+    const bool hasRuntimeImageFlip = media::QueryVideoImageFlipMode(&runtimeImageFlip);
 
     std::string mainCodec = NormalizeRkVideoCodec(m_cfg.gb_video.main_codec);
 
@@ -9267,13 +9255,8 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
                     BuildGbVideoResolutionSummary(hasRuntimeVideoState ? &runtimeVideoState : NULL));
 
         std::string imageFlip = NormalizeGbImageFlipMode(m_cfg.gb_image.flip_mode);
-
-        std::string runtimeImageFlip;
-
-        if (ReadRkImageFlipMode(runtimeImageFlip)) {
-
+        if (hasRuntimeImageFlip) {
             imageFlip = NormalizeGbImageFlipMode(runtimeImageFlip);
-
         }
 
         CopyBounded(item.UnionCfgParam.CfgVideoOpt.ImageFlip,
@@ -9281,6 +9264,29 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
                     sizeof(item.UnionCfgParam.CfgVideoOpt.ImageFlip),
 
                     imageFlip);
+
+        configList.push_back(item);
+
+    }
+
+    if (IsConfigTypeRequested(param, kFrameMirrorConfig)) {
+
+        ConfigParam item;
+
+        memset(&item, 0, sizeof(item));
+
+        item.CfgType = kFrameMirrorConfig;
+
+        std::string imageFlip = NormalizeGbImageFlipMode(m_cfg.gb_image.flip_mode);
+        if (hasRuntimeImageFlip) {
+            imageFlip = NormalizeGbImageFlipMode(runtimeImageFlip);
+        }
+
+        CopyBounded(item.UnionCfgParam.FrameMirror.FrameMirror,
+
+                    sizeof(item.UnionCfgParam.FrameMirror.FrameMirror),
+
+                    ResolveGbFrameMirrorValue(imageFlip));
 
         configList.push_back(item);
 
@@ -9432,7 +9438,11 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
 
 
 
-    printf("[ProtocolManager] gb query config response num=%u main_codec=%s main_resolution=%s main_fps=%s main_bitrate_type=%s main_bitrate=%d main_gop=%d sub_codec=%s sub_resolution=%s sub_fps=%s sub_bitrate_type=%s sub_bitrate=%d sub_gop=%d osd(time=%d,event=%d,alert=%d,enabled=%d) gb=%s\n",
+    const std::string queryImageFlip = hasRuntimeImageFlip ?
+        NormalizeGbImageFlipMode(runtimeImageFlip) :
+        NormalizeGbImageFlipMode(m_cfg.gb_image.flip_mode);
+
+    printf("[ProtocolManager] gb query config response num=%u main_codec=%s main_resolution=%s main_fps=%s main_bitrate_type=%s main_bitrate=%d main_gop=%d sub_codec=%s sub_resolution=%s sub_fps=%s sub_bitrate_type=%s sub_bitrate=%d sub_gop=%d image_flip=%s frame_mirror=%s osd(time=%d,event=%d,alert=%d,enabled=%d) gb=%s\n",
 
            deviceConfig.Num,
 
@@ -9459,6 +9469,10 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
            subBitrate,
 
            subGop,
+
+           queryImageFlip.c_str(),
+
+           ResolveGbFrameMirrorValue(queryImageFlip).c_str(),
 
            m_cfg.gb_osd.time_enabled,
 

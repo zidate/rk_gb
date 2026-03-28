@@ -231,7 +231,7 @@
 #### 终端白皮书扩展接口约束
 - 注册重定向: 白皮书 `A.16` 要求设备先向重定向服务器发起 `REGISTER`，收到 `302 Moved` 后再向正式平台注册；请求头 / 设备信息中需要带 `StringCode`、`Mac`、`CustomProtocolVersion` 等扩展信息。
 - 语音广播媒体协商: 白皮书 `A.1` 和 `A.14/A.15` 要求支持 `TCP 主动拉流`；当前实现通过 `StartBroadcastStreamRequest`、`BuildGbBroadcastMediaInfo`、`ApplyGbBroadcastTransportHint`、`BuildGbBroadcastAnswerSdp` 协商 `UDP / TCP active / TCP passive`。
-- 基础参数查询 / 配置: 当前 `DeviceConfig` / `ConfigDownload` 主链已支持 `DeviceName`、`Expiration`、`HeartBeatInterval`、`HeartBeatCount`、`ImageFlip`、OSD 开关；白皮书扩展的 `LocalPort`、`Domain`、`SipIp`、`SipPort`、`SipId`、`VoiceFlowMode`、`Password`、`ChannelList` 尚未在当前 App 层结构中完整暴露。
+- 基础参数查询 / 配置: 当前 `DeviceConfig` / `ConfigDownload` 主链已支持 `DeviceName`、`Expiration`、`HeartBeatInterval`、`HeartBeatCount`、`FrameMirror`、OSD 开关，并兼容旧 `VideoParamOpt/ImageFlip`；白皮书扩展的 `LocalPort`、`Domain`、`SipIp`、`SipPort`、`SipId`、`VoiceFlowMode`、`Password`、`ChannelList` 尚未在当前 App 层结构中完整暴露。
 - 设备信息查询应答: 当前 `ResponseDeviceInfo` 已回基础字段、`StringCode/Mac/Line/CustomProtocolVersion`，并按嵌套 XML 节点回 `DeviceCapabilityList/ProtocolFunctionList` 的最小真实能力集；联调时需重点核对白皮书 `A.19/附录 G` 的缺陷编码语义。
 
 ---

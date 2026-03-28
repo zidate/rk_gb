@@ -554,7 +554,8 @@ enum ConfigType
     kSVACEncodeConfig,  //SVAC编码配置
     kSVACDecodeConfig,  //SVAC解码配置
     kOsdConfig,         //前端OSD配置
-    kVideoParamAttribute //GB/T 28181-2022 视频参数属性
+    kVideoParamAttribute, //GB/T 28181-2022 视频参数属性
+    kFrameMirrorConfig   //画面反转配置
 };
 
 #define MAX_CONFIG_TYPE_NUM 8
@@ -623,6 +624,11 @@ struct CfgVideoParamOpt
     char  DownloadSpeedOpt;		//视频下载速度可选范围,各可选参数以"/"分隔
     char  Resolution[52];				//摄像机支持分辨率范围,各可选参数以"/"分隔
     char  ImageFlip[32];               //???????????
+};
+
+struct CfgFrameMirror
+{
+    char FrameMirror[32];              //0=还原 1=左右 2=上下 3=中心
 };
 
 struct CfgVideoParamAttribute
@@ -811,6 +817,7 @@ union  UnionConfigParam
         CfgSVACEncode     CfgEncode;				//SVAC编码配置
         CfgOsdConfig      CfgOsd;                //前端OSD配置
         CfgVideoParamAttribute CfgVideoAttr;     //GB/T 28181-2022 视频参数属性
+        CfgFrameMirror    FrameMirror;           //画面反转配置
 };
 
 
