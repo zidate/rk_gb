@@ -99,6 +99,7 @@ link_directories(
 #media 模块
 set(Media_SRC
 	Media/AVManager.cpp
+	Media/GAT1400CaptureControl.cpp
 	Media/VideoOsdControl.cpp
 	Media/VideoEncodeControl.cpp
 	Media/VideoImageControl.cpp

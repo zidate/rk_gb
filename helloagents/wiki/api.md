@@ -206,6 +206,53 @@
 | `LOWER_1400_ADD_REGIST_OBSERVER` / `LOWER_1400_DEL_REGIST_OBSERVER` | 业务层监听注册状态变化 |
 | `LOWER_1400_SET_1400INHTTPCMD(url, method, format, content)` | 按 `HTTP_MSG_TYPE_H + HTTP_URI_TYPE_H` 透传自定义 1400 HTTP 命令，内部仍复用现有发送链路；若目标为 `/VIAS/*` 或未开启的 `POST /VIID/APEs` 兼容扩展，会直接返回本地错误 |
 
+### GAT1400 抓拍桥接接口
+
+**描述:** 编码侧 / 算法侧 / 其他业务模块通过 `App/Media/GAT1400CaptureControl.*` 投递抓拍事件；运行中的 `GAT1400ClientService` 会作为观察者自动 drain 队列，并按“先结构化对象，再图片 / 视频 / 文件”的顺序调用现有 `Post*` 上传。
+
+| 接口 | 说明 |
+|------|------|
+| `media::GAT1400CaptureControl::Instance()` | 获取进程内唯一抓拍桥接控制器 |
+| `SubmitFaceCapture(face, images, videos, files, traceId)` | 提交一条人脸抓拍事件，携带可选关联图片 / 视频 / 文件 |
+| `SubmitMotorCapture(motorVehicle, images, videos, files, traceId)` | 提交一条机动车抓拍事件，携带可选关联图片 / 视频 / 文件 |
+| `Submit(event)` | 直接提交完整 `GAT1400CaptureEvent`，供后续扩展更多抓拍类型 |
+| `AddObserver()` / `RemoveObserver()` | 给 1400 服务或其他消费方注册“有新抓拍入队”通知 |
+| `PopPending()` / `PendingCount()` | 供消费者按队列方式主动拉取待处理抓拍事件 |
+
+**当前约束:**
+- 当前默认只收口“人脸抓拍 / 机动车抓拍 + 图片 / 视频 / 文件”这两类需求。
+- 抓拍桥接层当前只做进程内内存排队，不写 flash；设备或进程重启后，未上传的抓拍事件不会自动恢复。
+- 若结构化对象里的 `SourceID/DeviceID` 为空，1400 服务会优先从关联的图片 / 视频元数据里补齐最小来源关系。
+
+**接入步骤:**
+1. 调用方先准备好 `GAT_1400_Face` 或 `GAT_1400_Motor`。
+2. 如果有图片 / 视频 / 文件，同时准备好对应的 `GAT_1400_ImageSet/GAT_1400_VideoSliceSet/GAT_1400_FileSet`，并把 Base64 数据放到 `Data` 字段。
+3. 人脸抓拍调用 `SubmitFaceCapture()`；机动车抓拍调用 `SubmitMotorCapture()`；更复杂场景自己组 `GAT1400CaptureEvent` 后调用 `Submit()`。
+4. 返回 `0` 只表示已成功入队，不代表平台已经收包成功；真正上传结果需要看后续 `GAT1400` 日志和原有补传队列状态。
+
+**最小示例:**
+```cpp
+GAT_1400_Motor motor;
+strncpy(motor.MotorVehicleID, "motor-001", sizeof(motor.MotorVehicleID) - 1);
+strncpy(motor.DeviceID, "34020000001320000001", sizeof(motor.DeviceID) - 1);
+
+GAT_1400_ImageSet imageSet;
+strncpy(imageSet.ImageInfo.ImageID, "img-001", sizeof(imageSet.ImageInfo.ImageID) - 1);
+strncpy(imageSet.ImageInfo.DeviceID, "34020000001320000001", sizeof(imageSet.ImageInfo.DeviceID) - 1);
+strncpy(imageSet.ImageInfo.FileFormat, "Jpeg", sizeof(imageSet.ImageInfo.FileFormat) - 1);
+imageSet.Data = imageBase64;
+
+std::list<GAT_1400_ImageSet> imageList;
+imageList.push_back(imageSet);
+
+const int ret = media::GAT1400CaptureControl::Instance().SubmitMotorCapture(
+    motor,
+    imageList,
+    std::list<GAT_1400_VideoSliceSet>(),
+    std::list<GAT_1400_FileSet>(),
+    "capture-trace-001");
+```
+
 ### GB28181 设备能力接口
 
 #### 实时流请求

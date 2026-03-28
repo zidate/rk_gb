@@ -10,6 +10,7 @@
 #include <thread>
 #include <vector>
 
+#include "Media/GAT1400CaptureControl.h"
 #include "ProtocolExternalConfig.h"
 #define ConnectParam GAT1400ConnectParam
 #include "CMS1400Struct.h"
@@ -19,7 +20,7 @@
 namespace protocol
 {
 
-class GAT1400ClientService
+class GAT1400ClientService : public media::GAT1400CaptureObserver
 {
 public:
     struct HttpResponse
@@ -93,6 +94,8 @@ public:
                                  const std::string* overrideUrl = NULL);
 
 private:
+    virtual void OnGAT1400CaptureQueued();
+
     int StartServerLocked();
     void StopServerLocked();
     void ServerLoop();
@@ -138,6 +141,8 @@ private:
     void ClearPendingUploadsLocked();
     int ReplayPendingUploads();
     int ReplayPendingUploadsIfDue();
+    int DrainPendingCaptureEvents();
+    int PostCaptureEvent(const media::GAT1400CaptureEvent& event);
 
     int SnapshotConfig(ProtocolExternalConfig& cfg, GbRegisterParam& gbRegister, std::string& deviceId) const;
     void UpdateRegistState(regist_state state);
@@ -166,6 +171,7 @@ private:
     std::list<PendingUploadItem> m_pending_uploads;
     unsigned long long m_pending_seq;
     time_t m_last_replay_time;
+    std::mutex m_capture_upload_mutex;
 
     mutable std::mutex m_observer_mutex;
     std::vector<CLower1400SubscribeObserver*> m_subscribe_observers;

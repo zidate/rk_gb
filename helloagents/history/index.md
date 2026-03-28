@@ -9,6 +9,7 @@
 | 时间戳 | 功能名称 | 类型 | 状态 | 方案包路径 |
 |--------|----------|------|------|------------|
 | 202603281240 | gb_frame_mirror_media_boundary | 修复 | ✅已完成 | [2026-03/202603281240_gb_frame_mirror_media_boundary](2026-03/202603281240_gb_frame_mirror_media_boundary/) |
+| 202603281234 | gat1400_capture_media_boundary | 开发 | ✅已完成 | [2026-03/202603281234_gat1400_capture_media_boundary](2026-03/202603281234_gat1400_capture_media_boundary/) |
 | 202603281209 | gb_protocol_constants_cleanup | 轻量迭代 | ✅已完成 | [2026-03/202603281209_gb_protocol_constants_cleanup](2026-03/202603281209_gb_protocol_constants_cleanup/) |
 | 202603281114 | gb_video_param_attribute_2022_align | 开发 | ✅已完成 | [2026-03/202603281114_gb_video_param_attribute_2022_align](2026-03/202603281114_gb_video_param_attribute_2022_align/) |
 | 202603281047 | gb_video_encode_media_boundary | 开发 | ✅已完成 | [2026-03/202603281047_gb_video_encode_media_boundary](2026-03/202603281047_gb_video_encode_media_boundary/) |
@@ -61,6 +62,7 @@
 ### 2026-03
 
 - [202603281240_gb_frame_mirror_media_boundary](2026-03/202603281240_gb_frame_mirror_media_boundary/) - 将 GB28181 画面反转协议对齐到平台实测 `FrameMirror`，并把设备侧 `get/set` 下沉到 `App/Media/VideoImageControl.*`
+- [202603281234_gat1400_capture_media_boundary](2026-03/202603281234_gat1400_capture_media_boundary/) - 新增 1400 抓拍桥接控制层，承接人脸 / 机动车抓拍及关联图片 / 视频 / 文件的入队通知，并由 `GAT1400ClientService` 自动消费上传
 - [202603281209_gb_protocol_constants_cleanup](2026-03/202603281209_gb_protocol_constants_cleanup/) - 收口 GB28181 共用协议常量、默认值和字符串映射，减少 `ProtocolManager`、XML 解析层和广播桥中的散落硬编码
 - [202603281114_gb_video_param_attribute_2022_align](2026-03/202603281114_gb_video_param_attribute_2022_align/) - 按 `GB/T 28181-2022` 将 GB 编码参数 XML 对齐到 `VideoParamAttribute`，补齐查询回包、设备配置解析和码率控制模式映射
 - [202603281047_gb_video_encode_media_boundary](2026-03/202603281047_gb_video_encode_media_boundary/) - 将 GB28181 的编码参数访问链路下沉到 `App/Media/VideoEncodeControl.*`，统一承接主辅码流 `codec/fps/bitrate/gop/resolution` 的查询与后续设置入口

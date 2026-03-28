@@ -283,6 +283,33 @@
 | `enqueue_time` | `time_t` | 入队时间，用于保序回放 |
 | `persist_path` | `std::string` | 持久化文件路径 |
 
+### `media::GAT1400CaptureEvent`
+
+**描述:** 编码侧 / 算法侧向 1400 模块投递抓拍结果的运行时事件模型。
+
+| 字段名 | 类型 | 说明 |
+|--------|------|------|
+| `trace_id` | `std::string` | 业务侧自定义追踪标识，便于日志串联 |
+| `object_type` | `enum` | 当前支持 `FACE` / `MOTOR_VEHICLE` |
+| `face` | `GAT_1400_Face` | 当 `object_type=FACE` 时生效的人脸对象 |
+| `motor_vehicle` | `GAT_1400_Motor` | 当 `object_type=MOTOR_VEHICLE` 时生效的机动车对象 |
+| `image_list` | `std::list<GAT_1400_ImageSet>` | 关联图像元数据和图像 `Data` |
+| `video_slice_list` | `std::list<GAT_1400_VideoSliceSet>` | 关联视频片段元数据和视频 `Data` |
+| `file_list` | `std::list<GAT_1400_FileSet>` | 关联其他文件元数据和文件 `Data` |
+
+### `media::GAT1400CaptureControl`
+
+**描述:** 1400 抓拍桥接控制器，负责抓拍事件的线程安全排队和“有数据到达”观察者通知。
+
+| 字段 / 能力 | 类型 | 说明 |
+|-------------|------|------|
+| `m_pending_events` | `std::deque<GAT1400CaptureEvent>` | 进程内待消费抓拍队列，默认上限 `128`，超限时丢弃最旧事件 |
+| `m_observers` | `std::vector<GAT1400CaptureObserver*>` | 抓拍到达通知观察者列表 |
+| `SubmitFaceCapture/SubmitMotorCapture/Submit` | 方法 | 编码侧 / 算法侧提交抓拍事件的统一入口 |
+| `PopPending/PendingCount` | 方法 | 1400 服务侧主动拉取待消费事件 |
+
+**说明:** 该队列当前只保存在内存中，不走 `gat_upload.queue_dir`，也不落本地 `ini/flash`。
+
 ### SDK 运行时桥接模型
 
 | 对象 | 说明 |
@@ -324,4 +351,5 @@
 - 实时流关联: `GbLiveSession -> GB28181RtpPsSender`
 - 回放关联: `GbReplaySession -> Storage_Module_*`
 - 订阅关联: `m_subscriptions -> observer 回调 -> 上层业务`
+- 抓拍关联: `编码/算法侧 -> media::GAT1400CaptureControl -> GAT1400ClientService::DrainPendingCaptureEvents() -> PostFaces/PostMotorVehicles/PostImages/PostVideoSlices/PostFiles`
 - 1400 基线: `GAT1400.pdf -> helloagents/wiki/modules/gat1400.md -> 本文件 / api.md`

@@ -100,6 +100,7 @@ link_directories(
 #media ??
 set(Media_SRC
 	Media/AVManager.cpp
+	Media/GAT1400CaptureControl.cpp
 	Media/VideoOsdControl.cpp
 	Media/VideoEncodeControl.cpp
 	Media/VideoImageControl.cpp

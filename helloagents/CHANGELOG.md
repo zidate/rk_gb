@@ -23,6 +23,7 @@
 - 新增 `tools/issue_bot/runner_preflight.sh` 与 `tools/issue_bot/runner_env.example`，支持 self-hosted runner 上线前环境预检。
 - 新增 `tools/issue_bot/regression_suite.sh`，支持本地一键回归 triage / preflight / smoke repair 主链路。
 - 增加 issue bot 本机定时巡检脚本、Codex 修复器包装脚本与 cron 安装脚本，默认基于 `silver` 分支在隔离仓库中执行 triage / repair。
+- 新增 `App/Media/GAT1400CaptureControl.*` 抓拍桥接层，供编码侧 / 算法侧以“人脸 / 机动车 + 图片 / 视频 / 文件”事件方式向 1400 模块投递待上传数据，并补齐调用方接入使用说明。
 
 ### 变更
 - 收口 GB28181 协议层散落硬编码：新增 `App/Protocol/gb28181/GB28181ProtocolConstants.h` 统一默认设备 ID、注册/保活缺省值、分辨率摘要、音频 payload/mime、`ConfigType/CmdType` 字符串与 `FrameMirror` 映射，`ProtocolManager`、`GB28181XmlParser`、`GB28181BroadcastBridge` 现复用同一套定义。
@@ -47,6 +48,7 @@
 - 补齐 GAT1400 P0 传输与恢复能力：新增 `scheme/base_path/request_timeout_ms` 地址模型、`retry_backoff_policy` 注册退避参数，以及 `queue_dir/max_pending_count/replay_interval_sec` 失败补传队列配置。
 - 将 `POST /VIID/APEs` 收口为显式兼容扩展开关 `gat_upload_enable_apes_post_compat`，默认关闭，并补齐配置读写、校验和热加载。
 - 重构 `GAT1400ClientService` 对上请求拼装逻辑，支持统一地址前缀、配置化超时、完整 URL 覆盖和注册成功后的失败请求回放。
+- 将 1400 抓拍上传职责从协议服务直连扩成“媒体侧入队 + 1400 自动消费”的边界：`GAT1400ClientService` 现注册为 `GAT1400CaptureControl` 观察者，启动后会自动 drain 内存队列，并按“结构化对象 -> 图片/视频/文件”顺序复用现有 `Post*` 上传链路。
 - 补强 `helloagents/wiki/api.md` 与 `helloagents/wiki/data.md` 的 GAT1400 章节，使其可直接作为 1400 协议开发和审核依据。
 - 补强 `helloagents/wiki/modules/gb28181.md`、`helloagents/wiki/api.md`、`helloagents/wiki/data.md`、`helloagents/wiki/overview.md`、`helloagents/project.md`，补入终端白皮书定制要求、测试映射和当前实现缺口。
 - 继续补强 `helloagents/wiki/modules/terminal_requirements.md` 与 `helloagents/wiki/modules/gb28181.md`，细化 `A.11/A.16/A.19/附录G` 的字段级审核清单、白皮书内部不一致项和联调优先级。

@@ -93,6 +93,83 @@ std::string FormatCurrentTime()
     return std::string(buffer);
 }
 
+bool IsEmptyCString(const char* value)
+{
+    return value == NULL || value[0] == '\0';
+}
+
+bool ResolveCaptureSourceId(const media::GAT1400CaptureEvent& event, std::string& sourceId)
+{
+    if (!event.image_list.empty() && !IsEmptyCString(event.image_list.front().ImageInfo.ImageID)) {
+        sourceId = event.image_list.front().ImageInfo.ImageID;
+        return true;
+    }
+    if (!event.video_slice_list.empty() && !IsEmptyCString(event.video_slice_list.front().VideoSliceInfo.VideoID)) {
+        sourceId = event.video_slice_list.front().VideoSliceInfo.VideoID;
+        return true;
+    }
+    if (!event.file_list.empty() && !IsEmptyCString(event.file_list.front().FileInfo.FileID)) {
+        sourceId = event.file_list.front().FileInfo.FileID;
+        return true;
+    }
+    return false;
+}
+
+bool ResolveCaptureDeviceId(const media::GAT1400CaptureEvent& event, std::string& deviceId)
+{
+    if (!event.image_list.empty() && !IsEmptyCString(event.image_list.front().ImageInfo.DeviceID)) {
+        deviceId = event.image_list.front().ImageInfo.DeviceID;
+        return true;
+    }
+    if (!event.video_slice_list.empty() && !IsEmptyCString(event.video_slice_list.front().VideoSliceInfo.DeviceID)) {
+        deviceId = event.video_slice_list.front().VideoSliceInfo.DeviceID;
+        return true;
+    }
+    return false;
+}
+
+void BindFaceCaptureIfNeeded(const GAT_1400_Face& face, GAT_1400_ImageSet& imageSet)
+{
+    if (imageSet.FaceList.empty()) {
+        imageSet.FaceList.push_back(face);
+    }
+}
+
+void BindFaceCaptureIfNeeded(const GAT_1400_Face& face, GAT_1400_VideoSliceSet& videoSliceSet)
+{
+    if (videoSliceSet.FaceList.empty()) {
+        videoSliceSet.FaceList.push_back(face);
+    }
+}
+
+void BindFaceCaptureIfNeeded(const GAT_1400_Face& face, GAT_1400_FileSet& fileSet)
+{
+    if (fileSet.FaceList.empty()) {
+        fileSet.FaceList.push_back(face);
+    }
+}
+
+void BindMotorCaptureIfNeeded(const GAT_1400_Motor& motorVehicle, GAT_1400_ImageSet& imageSet)
+{
+    if (imageSet.MotorVehicleList.empty()) {
+        imageSet.MotorVehicleList.push_back(motorVehicle);
+    }
+}
+
+void BindMotorCaptureIfNeeded(const GAT_1400_Motor& motorVehicle, GAT_1400_VideoSliceSet& videoSliceSet)
+{
+    if (videoSliceSet.MotorVehicleList.empty()) {
+        videoSliceSet.MotorVehicleList.push_back(motorVehicle);
+    }
+}
+
+void BindMotorCaptureIfNeeded(const GAT_1400_Motor& motorVehicle, GAT_1400_FileSet& fileSet)
+{
+    if (fileSet.MotorVehicleList.empty()) {
+        fileSet.MotorVehicleList.push_back(motorVehicle);
+    }
+}
+
 bool ParseCompactTime(const char* text, time_t& out)
 {
     if (text == NULL || strlen(text) != 14) {
@@ -914,10 +991,12 @@ GAT1400ClientService::GAT1400ClientService()
       m_pending_seq(0),
       m_last_replay_time(0)
 {
+    media::GAT1400CaptureControl::Instance().AddObserver(this);
 }
 
 GAT1400ClientService::~GAT1400ClientService()
 {
+    media::GAT1400CaptureControl::Instance().RemoveObserver(this);
     Stop();
 }
 
@@ -1844,6 +1923,129 @@ int GAT1400ClientService::PostJsonWithResponseList(const char* action,
     return finalRet;
 }
 
+void GAT1400ClientService::OnGAT1400CaptureQueued()
+{
+    (void)DrainPendingCaptureEvents();
+}
+
+int GAT1400ClientService::PostCaptureEvent(const media::GAT1400CaptureEvent& event)
+{
+    std::lock_guard<std::mutex> lock(m_capture_upload_mutex);
+
+    std::string sourceId;
+    std::string deviceId;
+    (void)ResolveCaptureSourceId(event, sourceId);
+    (void)ResolveCaptureDeviceId(event, deviceId);
+
+    GAT_1400_Face face = event.face;
+    if (event.object_type == media::GAT1400_CAPTURE_OBJECT_FACE) {
+        if (IsEmptyCString(face.SourceID) && !sourceId.empty()) {
+            CopyToArray(face.SourceID, sizeof(face.SourceID), sourceId);
+        }
+        if (IsEmptyCString(face.DeviceID) && !deviceId.empty()) {
+            CopyToArray(face.DeviceID, sizeof(face.DeviceID), deviceId);
+        }
+
+        std::list<GAT_1400_Face> faceList;
+        faceList.push_back(face);
+        const int ret = PostFaces(faceList);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    GAT_1400_Motor motorVehicle = event.motor_vehicle;
+    if (event.object_type == media::GAT1400_CAPTURE_OBJECT_MOTOR_VEHICLE) {
+        if (IsEmptyCString(motorVehicle.SourceID) && !sourceId.empty()) {
+            CopyToArray(motorVehicle.SourceID, sizeof(motorVehicle.SourceID), sourceId);
+        }
+        if (IsEmptyCString(motorVehicle.DeviceID) && !deviceId.empty()) {
+            CopyToArray(motorVehicle.DeviceID, sizeof(motorVehicle.DeviceID), deviceId);
+        }
+
+        std::list<GAT_1400_Motor> motorList;
+        motorList.push_back(motorVehicle);
+        const int ret = PostMotorVehicles(motorList);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    if (!event.image_list.empty()) {
+        std::list<GAT_1400_ImageSet> imageList = event.image_list;
+        for (std::list<GAT_1400_ImageSet>::iterator it = imageList.begin(); it != imageList.end(); ++it) {
+            if (event.object_type == media::GAT1400_CAPTURE_OBJECT_FACE) {
+                BindFaceCaptureIfNeeded(face, *it);
+            } else if (event.object_type == media::GAT1400_CAPTURE_OBJECT_MOTOR_VEHICLE) {
+                BindMotorCaptureIfNeeded(motorVehicle, *it);
+            }
+        }
+        const int ret = PostImages(imageList);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    if (!event.video_slice_list.empty()) {
+        std::list<GAT_1400_VideoSliceSet> videoSliceList = event.video_slice_list;
+        for (std::list<GAT_1400_VideoSliceSet>::iterator it = videoSliceList.begin(); it != videoSliceList.end(); ++it) {
+            if (event.object_type == media::GAT1400_CAPTURE_OBJECT_FACE) {
+                BindFaceCaptureIfNeeded(face, *it);
+            } else if (event.object_type == media::GAT1400_CAPTURE_OBJECT_MOTOR_VEHICLE) {
+                BindMotorCaptureIfNeeded(motorVehicle, *it);
+            }
+        }
+        const int ret = PostVideoSlices(videoSliceList);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    if (!event.file_list.empty()) {
+        std::list<GAT_1400_FileSet> fileList = event.file_list;
+        for (std::list<GAT_1400_FileSet>::iterator it = fileList.begin(); it != fileList.end(); ++it) {
+            if (event.object_type == media::GAT1400_CAPTURE_OBJECT_FACE) {
+                BindFaceCaptureIfNeeded(face, *it);
+            } else if (event.object_type == media::GAT1400_CAPTURE_OBJECT_MOTOR_VEHICLE) {
+                BindMotorCaptureIfNeeded(motorVehicle, *it);
+            }
+        }
+        const int ret = PostFiles(fileList);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+
+    return 0;
+}
+
+int GAT1400ClientService::DrainPendingCaptureEvents()
+{
+    if (!IsStarted()) {
+        return -1;
+    }
+
+    int processedCount = 0;
+    int lastRet = 0;
+    media::GAT1400CaptureEvent event;
+    while (media::GAT1400CaptureControl::Instance().PopPending(&event)) {
+        ++processedCount;
+        const int ret = PostCaptureEvent(event);
+        if (ret != 0) {
+            lastRet = ret;
+        }
+    }
+
+    if (processedCount > 0) {
+        printf("[GAT1400] module=gat1400 event=capture_drain trace=bridge error=%d count=%d pending=%zu\n",
+               lastRet,
+               processedCount,
+               media::GAT1400CaptureControl::Instance().PendingCount());
+    }
+
+    return lastRet;
+}
+
 int GAT1400ClientService::PostJsonWithResponseStatus(const char* action,
                                                      const char* path,
                                                      const std::string& body,
@@ -2306,6 +2508,8 @@ int GAT1400ClientService::Start(const ProtocolExternalConfig& cfg, const GbRegis
                regRet,
                deviceId.c_str());
     }
+
+    (void)DrainPendingCaptureEvents();
 
     m_heartbeat_running.store(true);
     m_heartbeat_thread = std::thread(&GAT1400ClientService::HeartbeatLoop, this);
