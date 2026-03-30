@@ -50,26 +50,60 @@ static uint32_t NowSeconds()
     return static_cast<uint32_t>(time(NULL));
 }
 
+static uint64_t NowMonotonicMilliseconds()
+{
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        struct timeval tv;
+        gettimeofday(&tv, NULL);
+        return static_cast<uint64_t>(tv.tv_sec) * 1000ULL + static_cast<uint64_t>(tv.tv_usec / 1000);
+    }
+    return static_cast<uint64_t>(ts.tv_sec) * 1000ULL + static_cast<uint64_t>(ts.tv_nsec / 1000000ULL);
+}
+
+static bool IsRetryableSendError(int err)
+{
+    return err == EAGAIN || err == EWOULDBLOCK;
+}
+
 static int WaitForSocketWritable(int sockfd, int timeoutMs)
 {
     if (sockfd < 0 || timeoutMs <= 0) {
+        errno = EINVAL;
         return -1;
     }
 
-    fd_set wfds;
-    FD_ZERO(&wfds);
-    FD_SET(sockfd, &wfds);
+    const uint64_t deadlineMs = NowMonotonicMilliseconds() + static_cast<uint64_t>(timeoutMs);
 
-    struct timeval tv;
-    tv.tv_sec = timeoutMs / 1000;
-    tv.tv_usec = (timeoutMs % 1000) * 1000;
+    while (true) {
+        const uint64_t nowMs = NowMonotonicMilliseconds();
+        if (nowMs >= deadlineMs) {
+            errno = ETIMEDOUT;
+            return -1;
+        }
 
-    const int ret = select(sockfd + 1, NULL, &wfds, NULL, &tv);
-    if (ret <= 0) {
+        fd_set wfds;
+        FD_ZERO(&wfds);
+        FD_SET(sockfd, &wfds);
+
+        const int remainMs = static_cast<int>(deadlineMs - nowMs);
+        struct timeval tv;
+        tv.tv_sec = remainMs / 1000;
+        tv.tv_usec = (remainMs % 1000) * 1000;
+
+        const int ret = select(sockfd + 1, NULL, &wfds, NULL, &tv);
+        if (ret > 0) {
+            return FD_ISSET(sockfd, &wfds) ? 0 : -1;
+        }
+        if (ret == 0) {
+            errno = ETIMEDOUT;
+            return -1;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
         return -1;
     }
-
-    return FD_ISSET(sockfd, &wfds) ? 0 : -1;
 }
 
 static int ConnectTcpWithTimeout(int sockfd, const struct sockaddr_in* remoteAddr, int timeoutMs)
@@ -118,20 +152,47 @@ static int ConnectTcpWithTimeout(int sockfd, const struct sockaddr_in* remoteAdd
 static int SendAll(int sockfd, const void* data, size_t bytes)
 {
     if (sockfd < 0 || data == NULL || bytes == 0) {
+        errno = EINVAL;
         return -1;
     }
 
+    const int totalSendTimeoutMs = 3000;
+    const uint64_t deadlineMs = NowMonotonicMilliseconds() + static_cast<uint64_t>(totalSendTimeoutMs);
     const uint8_t* cursor = (const uint8_t*)data;
     size_t sent = 0;
     while (sent < bytes) {
         const int n = send(sockfd, cursor + sent, bytes - sent, 0);
-        if (n <= 0) {
-            if (errno == EINTR) {
+        if (n > 0) {
+            sent += (size_t)n;
+            continue;
+        }
+
+        if (n == 0) {
+            errno = ECONNRESET;
+            return -2;
+        }
+
+        const int savedErrno = errno;
+        if (savedErrno == EINTR) {
+            continue;
+        }
+
+        if (IsRetryableSendError(savedErrno)) {
+            const uint64_t nowMs = NowMonotonicMilliseconds();
+            if (nowMs >= deadlineMs) {
+                errno = ETIMEDOUT;
+                return -2;
+            }
+
+            const int remainMs = static_cast<int>(deadlineMs - nowMs);
+            if (WaitForSocketWritable(sockfd, remainMs) == 0) {
                 continue;
             }
             return -2;
         }
-        sent += (size_t)n;
+
+        errno = savedErrno;
+        return -2;
     }
 
     return 0;
