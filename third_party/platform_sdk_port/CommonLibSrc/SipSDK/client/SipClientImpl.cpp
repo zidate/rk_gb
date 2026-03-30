@@ -33,7 +33,11 @@ int   CSipClientImpl::Start(SipTransportType type , const NetAddress* local, con
     m_client_info->LocalIp  = local->ip;
     m_client_info->LocalPort =  local->port;
     m_client_info->local_name = local_name;
-    return m_event_manager->StartSipListen(type,local,local_name);
+    const int ret = m_event_manager->StartSipListen(type,local,local_name);
+    if (ret == kSipSuccess && m_event_manager->GetLocalPort() > 0) {
+        m_client_info->LocalPort = m_event_manager->GetLocalPort();
+    }
+    return ret;
 }
 
 void CSipClientImpl::Stop()
@@ -81,6 +85,9 @@ int   CSipClientImpl::Register(const SipRegistParam* message, const SipConnectPa
     m_client_info->Model = (message->model != NULL) ? message->model : "";
     m_client_info->CustomProtocolVersion =
         (message->custom_protocol_version != NULL) ? message->custom_protocol_version : "";
+    if (m_event_manager->GetLocalPort() > 0) {
+        m_client_info->LocalPort = m_event_manager->GetLocalPort();
+    }
     m_client_info->SetFromeAndTo();
 
     TVT_LOG_INFO("sip client register prepare"

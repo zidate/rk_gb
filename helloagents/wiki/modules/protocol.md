@@ -30,6 +30,8 @@
 - 新增 `RestartGbRegisterService()` 作为单独的 GB 服务重载入口；它会从 flash 重新读取注册配置，并根据 `ProtocolManager` 当前是否已启动、GB 生命周期是否正在运行以及 `enabled` 新值决定只刷新缓存、停服或重启注册。
 - 新增 `GetGatRegisterConfig()` / `SetGatRegisterConfig()` / `RestartGatRegisterService()`；语义与 GB 接口保持一致，分别负责“只读 flash”“只写 flash”和“显式把 `gat1400.ini` 重载到运行态”。
 - `ProtocolManager::Start()` 在真正拉起 RTP/广播/监听/注册链路前，会先执行一次 `ReloadExternalConfig()`，确保 `Init()` 之后、`Start()` 之前通过 `SetGbRegisterConfig()` 落盘的新值会被带入运行态。
+- `StartGbClientLifecycle()` 当前固定以本地端口 `0` 启动 GB28181 SIP 客户端，由内核分配随机本地监听端口；`gb_register.server_port` 只保留远端平台 SIP 端口语义，不再复用为本地绑定端口。
+- `SipEventManager` 在随机端口场景下会先用临时 socket `bind(0)` 获取一个可用端口，再用该端口走现有 `eXosip_listen_addr()` 建立正式监听，并把实际端口回写到 `ClientInfo.LocalPort`，保证 `REGISTER` / `MESSAGE` / `INVITE` 的 `From/Contact` 与真实监听端口一致。
 - `StartGbClientLifecycle()` 现在把“SDK 已启动但首次 `Register()` 失败”的场景视为可恢复错误：生命周期不会直接退出，而是打印 `note=defer_retry` 日志并继续保留后台线程。
 - `GbHeartbeatLoop()` 在未注册态下会按 `gb_keepalive.interval_sec` 节奏重试注册；只有 `server_ip/server_port/device_id` 这类静态配置校验失败时，GB 生命周期才会立即返回错误。
 - 当前 `gb28181.ini` 只保留 6 个国标注册字段；`image_flip_mode`、`gb_talk`、`gb_reboot`、`gb_upgrade`、`gb_broadcast`、`gb_listen` 等其余 GB 协议项都不再写入本地 ini，而是固定使用代码默认值。

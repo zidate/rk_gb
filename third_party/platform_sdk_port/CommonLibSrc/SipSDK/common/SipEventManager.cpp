@@ -97,6 +97,41 @@ static bool ResolveOutboundLocalSipIp(const char* remote_ip, int remote_port, st
     return true;
 }
 
+static bool ResolveAutoSipListenPort(SipTransportType type, uint16_t& local_port)
+{
+    local_port = 0;
+
+    const int sockType = (type == kSipOverTCP) ? SOCK_STREAM : SOCK_DGRAM;
+    const int sockfd = socket(AF_INET, sockType, 0);
+    if (sockfd < 0) {
+        return false;
+    }
+
+    const int reuse = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (void*)&reuse, sizeof(reuse));
+
+    sockaddr_in localAddr;
+    memset(&localAddr, 0, sizeof(localAddr));
+    localAddr.sin_family = AF_INET;
+    localAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    localAddr.sin_port = htons(0);
+
+    if (bind(sockfd, (sockaddr*)&localAddr, sizeof(localAddr)) != 0) {
+        close(sockfd);
+        return false;
+    }
+
+    socklen_t localAddrLen = sizeof(localAddr);
+    if (getsockname(sockfd, (sockaddr*)&localAddr, &localAddrLen) != 0) {
+        close(sockfd);
+        return false;
+    }
+
+    local_port = static_cast<uint16_t>(ntohs(localAddr.sin_port));
+    close(sockfd);
+    return local_port > 0;
+}
+
 static void SetHeaderIfNotEmpty(osip_message_t* msg, const char* name, const std::string& value)
 {
     if (msg == NULL || name == NULL || value.empty()) {
@@ -305,6 +340,7 @@ CSipEventManager::CSipEventManager()
        m_listen_flag.SetValue(0);
        m_register_guard_count.SetValue(0);
        m_sip_context  = NULL;
+       m_local_port = 0;
        m_listen_thread_id = NULL;
        m_sip_log_handler = NULL;
        CSipUtil::Init();
@@ -324,8 +360,12 @@ void CSipEventManager::Stop()
     m_register_guard_count.SetValue(0);
     if (m_listen_flag && m_sip_context ) {
         eXosip_quit(  m_sip_context  );
+        m_sip_context = NULL;
 		m_listen_flag.SetValue(0);
     }
+    m_local_ip.clear();
+    m_local_port = 0;
+    m_local_name.clear();
 
     if(m_listen_thread_id) {
         DESTROY_THREAD(m_listen_thread_id);
@@ -346,7 +386,7 @@ void CSipEventManager::Stop()
 
 int CSipEventManager::StartSipListen(  SipTransportType type , const NetAddress* local, const char* local_name )
 {
-	
+
     if( m_listen_flag  ==  1){
         return kSipSuccess;
     }
@@ -365,9 +405,18 @@ int CSipEventManager::StartSipListen(  SipTransportType type , const NetAddress*
     }
     int proco =  ( type == kSipOverTCP ) ? IPPROTO_TCP : IPPROTO_UDP ;
     eXosip_set_user_agent(m_sip_context,"DGIOT");
-     result = eXosip_listen_addr(m_sip_context, proco, NULL , local->port , AF_INET, 0);
+    uint16_t actualLocalPort = static_cast<uint16_t>(local->port);
+    if (local->port == 0) {
+        if (!ResolveAutoSipListenPort(type, actualLocalPort)) {
+            eXosip_quit(m_sip_context);
+            m_sip_context = NULL;
+            return kSipListenFail;
+        }
+    }
+    result = eXosip_listen_addr(m_sip_context, proco, NULL , actualLocalPort , AF_INET, 0);
     if ( result != 0) {
         eXosip_quit(m_sip_context);
+        m_sip_context = NULL;
         return kSipListenFail;
     }
 
@@ -399,8 +448,13 @@ int CSipEventManager::StartSipListen(  SipTransportType type , const NetAddress*
         else {
 	    m_local_ip = local->ip;
         }
-	    m_local_port = local->port;
+	    m_local_port = actualLocalPort;
 	    m_local_name = local_name;
+        TVT_LOG_INFO("sip listen ready"
+                     << " transport=" << (type == kSipOverTCP ? "tcp" : "udp")
+                     << " request_port=" << local->port
+                     << " local_port=" << m_local_port
+                     << " local_ip=" << m_local_ip);
 	    m_listen_flag.SetValue(1);
     return kSipSuccess;
 
@@ -963,6 +1017,11 @@ int CSipEventManager::Register(ClientInfo* client_info , int timeout , SipData**
        const bool guardAutomaticAction = (result != NULL);
        if (guardAutomaticAction) {
            m_register_guard_count.Increment();
+       }
+
+       if (m_local_port > 0 && client_info->LocalPort != m_local_port) {
+           client_info->LocalPort = m_local_port;
+           client_info->SetFromeAndTo();
        }
 
        if (NeedResolveLocalSipIp(client_info->LocalIp.c_str())) {

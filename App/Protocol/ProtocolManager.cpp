@@ -4474,13 +4474,7 @@ int ProtocolManager::StartGbClientLifecycle()
 
 
 
-        uint16_t localSipPort = 5060;
-
-        if (m_cfg.gb_register.server_port > 0 && m_cfg.gb_register.server_port <= 65535) {
-
-            localSipPort = (uint16_t)m_cfg.gb_register.server_port;
-
-        }
+        const uint16_t localSipPort = 0;
 
 
 
@@ -4496,13 +4490,11 @@ int ProtocolManager::StartGbClientLifecycle()
 
         if (!IsGbSdkSuccess(startRet)) {
 
-            printf("[ProtocolManager] gb start failed ret=%d local=%s bind=0.0.0.0:%u\n",
+            printf("[ProtocolManager] gb start failed ret=%d local=%s bind=0.0.0.0:auto\n",
 
                    startRet,
 
-                   localGbCode.c_str(),
-
-                   (unsigned int)localSipPort);
+                   localGbCode.c_str());
 
             return -102;
 
@@ -4514,13 +4506,11 @@ int ProtocolManager::StartGbClientLifecycle()
 
         m_gb_client_registered = false;
 
-        printf("[ProtocolManager] gb start ok local=%s transport=%s bind=0.0.0.0:%u\n",
+        printf("[ProtocolManager] gb start ok local=%s transport=%s bind=0.0.0.0:auto\n",
 
                localGbCode.c_str(),
 
-               sipTransport == kSipProcoOverTCP ? "tcp" : "udp",
-
-               (unsigned int)localSipPort);
+               sipTransport == kSipProcoOverTCP ? "tcp" : "udp");
 
     }
 
