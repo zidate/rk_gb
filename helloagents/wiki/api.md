@@ -189,10 +189,11 @@
 
 ### GAT1400 抓拍桥接接口
 
-**描述:** 编码侧 / 算法侧 / 其他业务模块通过 `App/Media/GAT1400CaptureControl.*` 投递抓拍事件；运行中的 `GAT1400ClientService` 会在注册成功和保活成功后显式 drain 队列，并按“先结构化对象，再图片 / 视频 / 文件”的顺序调用现有 `Post*` 上传。
+**描述:** 编码侧 / 算法侧 / 其他业务模块优先通过 `ProtocolManager::NotifyGatAlarm()` 通知 1400 模块；内部仍复用 `App/Media/GAT1400CaptureControl.*` 作为抓拍队列。若 1400 已注册，服务会直接尝试上传；否则先入队，后续在注册成功或保活成功后 drain。
 
 | 接口 | 说明 |
 |------|------|
+| `protocol::ProtocolManager::Instance().NotifyGatAlarm(event)` | 业务侧正式入口；提交一条抓拍事件给 1400 模块，内部自动决定“直接上传”或“先入队” |
 | `media::GAT1400CaptureControl::Instance()` | 获取进程内唯一抓拍桥接控制器 |
 | `SubmitFaceCapture(face, images, videos, files, traceId)` | 提交一条人脸抓拍事件，携带可选关联图片 / 视频 / 文件 |
 | `SubmitMotorCapture(motorVehicle, images, videos, files, traceId)` | 提交一条机动车抓拍事件，携带可选关联图片 / 视频 / 文件 |
@@ -207,8 +208,8 @@
 **接入步骤:**
 1. 调用方先准备好 `GAT_1400_Face` 或 `GAT_1400_Motor`。
 2. 如果有图片 / 视频 / 文件，同时准备好对应的 `GAT_1400_ImageSet/GAT_1400_VideoSliceSet/GAT_1400_FileSet`，并把 Base64 数据放到 `Data` 字段。
-3. 人脸抓拍调用 `SubmitFaceCapture()`；机动车抓拍调用 `SubmitMotorCapture()`；更复杂场景自己组 `GAT1400CaptureEvent` 后调用 `Submit()`。
-4. 返回 `0` 只表示已成功入队，不代表平台已经收包成功；真正上传结果需要看后续 `GAT1400` 日志和原有补传队列状态。
+3. 推荐把这些内容组到 `GAT1400CaptureEvent` 后调用 `ProtocolManager::NotifyGatAlarm()`；只有在协议模块内部或特殊场景下，才直接用 `SubmitFaceCapture()/SubmitMotorCapture()/Submit()`。
+4. 返回 `0` 表示 1400 模块已接收这条业务通知；若当前链路已就绪，会直接尝试上传；若未就绪或直接上传失败，会保留到内部队列等待后续补偿。
 
 **最小示例:**
 ```cpp
@@ -222,15 +223,13 @@ strncpy(imageSet.ImageInfo.DeviceID, "34020000001320000001", sizeof(imageSet.Ima
 strncpy(imageSet.ImageInfo.FileFormat, "Jpeg", sizeof(imageSet.ImageInfo.FileFormat) - 1);
 imageSet.Data = imageBase64;
 
-std::list<GAT_1400_ImageSet> imageList;
-imageList.push_back(imageSet);
+media::GAT1400CaptureEvent event;
+event.trace_id = "capture-trace-001";
+event.object_type = media::GAT1400_CAPTURE_OBJECT_MOTOR_VEHICLE;
+event.motor_vehicle = motor;
+event.image_list.push_back(imageSet);
 
-const int ret = media::GAT1400CaptureControl::Instance().SubmitMotorCapture(
-    motor,
-    imageList,
-    std::list<GAT_1400_VideoSliceSet>(),
-    std::list<GAT_1400_FileSet>(),
-    "capture-trace-001");
+const int ret = protocol::ProtocolManager::Instance().NotifyGatAlarm(&event);
 ```
 
 ### GB28181 设备能力接口

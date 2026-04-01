@@ -2071,6 +2071,41 @@ int GAT1400ClientService::PostCaptureEvent(const media::GAT1400CaptureEvent& eve
     return 0;
 }
 
+int GAT1400ClientService::NotifyCaptureEvent(const media::GAT1400CaptureEvent& event)
+{
+    bool readyToUpload = false;
+    {
+        std::lock_guard<std::mutex> lock(m_state_mutex);
+        readyToUpload = m_started && m_registered;
+    }
+
+    int directRet = 0;
+    if (readyToUpload) {
+        directRet = PostCaptureEvent(event);
+        if (directRet == 0) {
+            printf("[GAT1400] module=gat1400 event=capture_notify trace=bridge error=0 mode=direct object=%d images=%zu videos=%zu files=%zu pending=%zu\n",
+                   static_cast<int>(event.object_type),
+                   event.image_list.size(),
+                   event.video_slice_list.size(),
+                   event.file_list.size(),
+                   media::GAT1400CaptureControl::Instance().PendingCount());
+            return 0;
+        }
+    }
+
+    const int submitRet = media::GAT1400CaptureControl::Instance().Submit(event);
+    printf("[GAT1400] module=gat1400 event=capture_notify trace=bridge error=%d mode=%s object=%d images=%zu videos=%zu files=%zu pending=%zu direct=%d\n",
+           submitRet,
+           readyToUpload ? "queue_fallback" : "queue_only",
+           static_cast<int>(event.object_type),
+           event.image_list.size(),
+           event.video_slice_list.size(),
+           event.file_list.size(),
+           media::GAT1400CaptureControl::Instance().PendingCount(),
+           directRet);
+    return submitRet;
+}
+
 int GAT1400ClientService::SendKeepaliveDemoUploadOnce(const std::string& deviceId)
 {
     bool expected = false;

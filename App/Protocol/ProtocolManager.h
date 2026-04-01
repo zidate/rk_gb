@@ -40,6 +40,10 @@
 
 
 class GB28181ClientSDK;
+namespace media
+{
+struct GAT1400CaptureEvent;
+}
 
 namespace protocol
 {
@@ -154,6 +158,7 @@ public:
     int NotifyGbCatalog(const char* gbCode);
 
     int NotifyGbAlarm(AlarmNotifyInfo* info);
+    int NotifyGatAlarm(const media::GAT1400CaptureEvent* event);
 
     int NotifyGbMobilePosition(const MobilePositionInfo* info);
 
@@ -728,7 +733,6 @@ private:
 
 
 #endif
-
 
 
 

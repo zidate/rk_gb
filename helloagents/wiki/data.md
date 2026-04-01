@@ -333,7 +333,7 @@
 
 ### `media::GAT1400CaptureControl`
 
-**描述:** 1400 抓拍桥接控制器，负责抓拍事件的线程安全排队，供 1400 服务在注册成功和保活成功后显式消费。
+**描述:** 1400 抓拍桥接控制器，负责抓拍事件的线程安全排队。业务侧推荐通过 `ProtocolManager::NotifyGatAlarm()` 进入这条链路；本控制器主要承担内部排队与补偿。
 
 | 字段 / 能力 | 类型 | 说明 |
 |-------------|------|------|
@@ -384,5 +384,5 @@
 - 实时流关联: `GbLiveSession -> GB28181RtpPsSender`
 - 回放关联: `GbReplaySession -> Storage_Module_*`
 - 订阅关联: `m_subscriptions -> observer 回调 -> 上层业务`
-- 抓拍关联: `编码/算法侧 -> media::GAT1400CaptureControl -> GAT1400ClientService::DrainPendingCaptureEvents() -> PostFaces/PostMotorVehicles/PostImages/PostVideoSlices/PostFiles`
+- 抓拍关联: `编码/算法侧 -> ProtocolManager::NotifyGatAlarm() -> GAT1400ClientService::NotifyCaptureEvent() -> (直接上传或 media::GAT1400CaptureControl 入队) -> DrainPendingCaptureEvents() -> PostFaces/PostMotorVehicles/PostImages/PostVideoSlices/PostFiles`
 - 1400 基线: `GAT1400.pdf -> helloagents/wiki/modules/gat1400.md -> 本文件 / api.md`

@@ -43,9 +43,10 @@ public:
     static GAT1400CaptureControl& Instance();
 
     // Usage:
-    // 1. 编码/算法侧产出抓拍结果后，组好 Face/Motor 与关联 ImageSet/VideoSliceSet/FileSet。
-    // 2. 人脸走 SubmitFaceCapture()，机动车走 SubmitMotorCapture()，更复杂场景可直接 Submit()。
-    // 3. 当前只负责进程内排队，不保证断电恢复；真正对平台上传由 GAT1400ClientService 在合适时机显式消费完成。
+    // 1. 业务侧优先通过 ProtocolManager::NotifyGatAlarm() 通知 1400 模块。
+    // 2. 若内部模块直接使用本控制器，需先组好 Face/Motor 与关联 ImageSet/VideoSliceSet/FileSet。
+    // 3. 人脸走 SubmitFaceCapture()，机动车走 SubmitMotorCapture()，更复杂场景可直接 Submit()。
+    // 4. 当前只负责进程内排队，不保证断电恢复；真正对平台上传由 GAT1400ClientService 在合适时机显式消费完成。
     int Submit(const GAT1400CaptureEvent& event);
     int SubmitFaceCapture(const GAT_1400_Face& face,
                           const std::list<GAT_1400_ImageSet>& imageList,

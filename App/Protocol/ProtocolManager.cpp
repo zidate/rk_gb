@@ -9303,6 +9303,26 @@ int ProtocolManager::NotifyGbAlarm(AlarmNotifyInfo* info)
 
 }
 
+int ProtocolManager::NotifyGatAlarm(const media::GAT1400CaptureEvent* event)
+{
+    if (event == NULL) {
+        return -93;
+    }
+    if (m_gat_client.get() == NULL) {
+        return -94;
+    }
+
+    const int ret = m_gat_client->NotifyCaptureEvent(*event);
+    printf("[ProtocolManager] module=gat1400 event=alarm_notify trace=manager error=%d object=%d images=%zu videos=%zu files=%zu trace_id=%s\n",
+           ret,
+           static_cast<int>(event->object_type),
+           event->image_list.size(),
+           event->video_slice_list.size(),
+           event->file_list.size(),
+           event->trace_id.empty() ? "-" : event->trace_id.c_str());
+    return ret;
+}
+
 
 
 int ProtocolManager::NotifyGbMobilePosition(const MobilePositionInfo* info)

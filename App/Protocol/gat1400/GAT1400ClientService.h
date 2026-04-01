@@ -86,6 +86,7 @@ public:
     int PostSubscribeNotifications(const std::list<GAT_1400_Subscribe_Notification>& notificationList,
                                    const std::string& url);
     int PostApes(const std::list<GAT_1400_Ape>& apeList);
+    int NotifyCaptureEvent(const media::GAT1400CaptureEvent& event);
 
     std::list<GAT_1400_Subscribe> GetSubscriptions() const;
     int PostJsonWithResponseList(const char* action,
