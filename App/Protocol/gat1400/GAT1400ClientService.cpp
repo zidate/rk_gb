@@ -43,10 +43,7 @@ static const char* kResponseKindStatus = "status";
 static const int kClientErrorUnsupportedUri = -6;
 static const int kClientErrorApePostCompatDisabled = -7;
 static const char* kKeepaliveDemoImagePath = "/mnt/sdcard/test.jpeg";
-static const char* kKeepaliveDemoVideoPath = "/mnt/sdcard/DCIM/2026/03/24/20260324174542-20260324174845.mp4";
 static const int kKeepaliveDemoMaxNotifyCount = 5;
-static const char* kKeepaliveDemoVideoBeginTime = "20260324174542";
-static const char* kKeepaliveDemoVideoEndTime = "20260324174845";
 
 struct RequestTarget
 {
@@ -2159,22 +2156,10 @@ int GAT1400ClientService::SendKeepaliveDemoCaptureEvent(const std::string& devic
         return -1;
     }
 
-    std::string videoRaw;
-    std::string videoData;
-    if (!ReadFileBase64(kKeepaliveDemoVideoPath, videoRaw, videoData)) {
-        m_keepalive_demo_notify_count.fetch_sub(1);
-        printf("[GAT1400] module=gat1400 event=keepalive_demo trace=client error=-1 note=video_load_failed count=%d max=%d video=%s\n",
-               notifyIndex,
-               kKeepaliveDemoMaxNotifyCount,
-               kKeepaliveDemoVideoPath);
-        return -1;
-    }
-
     const std::string shotTime = FormatCurrentTimeWithMilliseconds();
     const std::string sequenceTag = shotTime + std::string("_") + std::to_string(notifyIndex);
     const std::string imageId = std::string("IMGDEMO") + sequenceTag;
     const std::string faceId = std::string("FACEDEMO") + sequenceTag;
-    const std::string videoId = std::string("VIDDEMO") + sequenceTag;
 
     GAT_1400_Face face;
     memset(&face, 0, sizeof(face));
@@ -2191,7 +2176,6 @@ int GAT1400ClientService::SendKeepaliveDemoCaptureEvent(const std::string& devic
     CopyToArray(imageSet.ImageInfo.ImageID, sizeof(imageSet.ImageInfo.ImageID), imageId);
     imageSet.ImageInfo.InfoKind = 1;
     imageSet.ImageInfo.ImageSource = 1;
-    CopyToArray(imageSet.ImageInfo.SourceVideoID, sizeof(imageSet.ImageInfo.SourceVideoID), videoId);
     imageSet.ImageInfo.EventSort = FACE_DETECT_EVENT;
     CopyToArray(imageSet.ImageInfo.DeviceID, sizeof(imageSet.ImageInfo.DeviceID), deviceId);
     CopyToArray(imageSet.ImageInfo.FileFormat, sizeof(imageSet.ImageInfo.FileFormat), "jpg");
@@ -2209,51 +2193,22 @@ int GAT1400ClientService::SendKeepaliveDemoCaptureEvent(const std::string& devic
     imageSet.ImageInfo.FileSize = static_cast<int>(imageRaw.size());
     imageSet.Data = imageData;
 
-    GAT_1400_VideoSliceSet videoSliceSet;
-    CopyToArray(videoSliceSet.VideoSliceInfo.VideoID, sizeof(videoSliceSet.VideoSliceInfo.VideoID), videoId);
-    videoSliceSet.VideoSliceInfo.InfoKind = 1;
-    videoSliceSet.VideoSliceInfo.VideoSource = "1";
-    CopyToArray(videoSliceSet.VideoSliceInfo.IsAbstranceVideo, sizeof(videoSliceSet.VideoSliceInfo.IsAbstranceVideo), "0");
-    CopyToArray(videoSliceSet.VideoSliceInfo.OriginVideoID, sizeof(videoSliceSet.VideoSliceInfo.OriginVideoID), videoId);
-    videoSliceSet.VideoSliceInfo.EventSort = FACE_DETECT_EVENT;
-    CopyToArray(videoSliceSet.VideoSliceInfo.DeviceID, sizeof(videoSliceSet.VideoSliceInfo.DeviceID), deviceId);
-    CopyToArray(videoSliceSet.VideoSliceInfo.FileFormat, sizeof(videoSliceSet.VideoSliceInfo.FileFormat), "mp4");
-    CopyToArray(videoSliceSet.VideoSliceInfo.CodedFormat, sizeof(videoSliceSet.VideoSliceInfo.CodedFormat), "H.264");
-    videoSliceSet.VideoSliceInfo.AudioFlag = 0;
-    CopyToArray(videoSliceSet.VideoSliceInfo.Title, sizeof(videoSliceSet.VideoSliceInfo.Title), "test");
-    CopyToArray(videoSliceSet.VideoSliceInfo.ContentDescription,
-                sizeof(videoSliceSet.VideoSliceInfo.ContentDescription),
-                "keepalive demo video");
-    CopyToArray(videoSliceSet.VideoSliceInfo.ShotPlaceFullAdress,
-                sizeof(videoSliceSet.VideoSliceInfo.ShotPlaceFullAdress),
-                "keepalive demo");
-    videoSliceSet.VideoSliceInfo.SecurityLevel = 5;
-    videoSliceSet.VideoSliceInfo.VideoLen = 183.0;
-    CopyToArray(videoSliceSet.VideoSliceInfo.BeginTime, sizeof(videoSliceSet.VideoSliceInfo.BeginTime), kKeepaliveDemoVideoBeginTime);
-    CopyToArray(videoSliceSet.VideoSliceInfo.EndTime, sizeof(videoSliceSet.VideoSliceInfo.EndTime), kKeepaliveDemoVideoEndTime);
-    videoSliceSet.VideoSliceInfo.Width = 1920;
-    videoSliceSet.VideoSliceInfo.Height = 1080;
-    videoSliceSet.VideoSliceInfo.FileSize = static_cast<int>(videoRaw.size());
-    videoSliceSet.Data = videoData;
-
     media::GAT1400CaptureEvent event;
     event.trace_id = std::string("keepalive_demo_") + sequenceTag;
     event.object_type = media::GAT1400_CAPTURE_OBJECT_FACE;
     event.face = face;
     event.image_list.push_back(imageSet);
-    event.video_slice_list.push_back(videoSliceSet);
 
     const int ret = NotifyCaptureEvent(event);
     if (ret != 0) {
         m_keepalive_demo_notify_count.fetch_sub(1);
     }
 
-    printf("[GAT1400] module=gat1400 event=keepalive_demo trace=client error=%d count=%d max=%d image=%s video=%s\n",
+    printf("[GAT1400] module=gat1400 event=keepalive_demo trace=client error=%d count=%d max=%d image=%s\n",
            ret,
            notifyIndex,
            kKeepaliveDemoMaxNotifyCount,
-           kKeepaliveDemoImagePath,
-           kKeepaliveDemoVideoPath);
+           kKeepaliveDemoImagePath);
     return ret;
 }
 
