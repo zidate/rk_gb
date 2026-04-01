@@ -26,6 +26,7 @@
 - 新增 `App/Media/GAT1400CaptureControl.*` 抓拍桥接层，供编码侧 / 算法侧以“人脸 / 机动车 + 图片 / 视频 / 文件”事件方式向 1400 模块投递待上传数据，并补齐调用方接入使用说明。
 
 ### 变更
+- 收口 GAT1400 抓拍桥接触发模型：`GAT1400ClientService` 不再继承 `GAT1400CaptureObserver`，`GAT1400CaptureControl` 只保留进程内队列；抓拍事件改为在注册成功和保活成功后由 1400 服务显式 `DrainPendingCaptureEvents()` 消费上传。
 - 收敛 GAT1400 keepalive demo 实现：在不改动现有 `/Data` Base64 上传语义的前提下，demo 改为首次保活成功后直接构造一条人脸和一张图片，复用现有 `PostFaces/PostImages` 做最小联调调用。
 - 调整 GAT1400 媒体本体上传语义：`PostImages/PostVideoSlices/PostFiles` 现会先剥离元数据 JSON 中的 `Data` 字段，再单独 `POST /VIID/*/{ID}/Data` 上传 Base64 本体；`PostBinaryData` 的请求头同步改为 `application/octet-stream`。同时新增首次保活成功后的单次本地联调 demo，人脸事件会关联上传 `/mnt/sdcard/test.jpeg`，失败不重试到后续保活。
 - 收口 GB28181 / GAT1400 对外部模块配置的运行态缓存：`ProtocolManager` 不再把 `gb_osd/gb_video/gb_image` 当作 OSD、编码参数、画面反转的运行态来源，改为统一从 `VideoOsdControl` / `VideoEncodeControl` / `VideoImageControl` 查询；`GAT1400ClientService` 也不再长期缓存 `m_gb_register / m_device_id`，而是按需解析当前 1400 设备 ID。

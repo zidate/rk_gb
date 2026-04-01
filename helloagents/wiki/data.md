@@ -333,12 +333,11 @@
 
 ### `media::GAT1400CaptureControl`
 
-**描述:** 1400 抓拍桥接控制器，负责抓拍事件的线程安全排队和“有数据到达”观察者通知。
+**描述:** 1400 抓拍桥接控制器，负责抓拍事件的线程安全排队，供 1400 服务在注册成功和保活成功后显式消费。
 
 | 字段 / 能力 | 类型 | 说明 |
 |-------------|------|------|
 | `m_pending_events` | `std::deque<GAT1400CaptureEvent>` | 进程内待消费抓拍队列，默认上限 `128`，超限时丢弃最旧事件 |
-| `m_observers` | `std::vector<GAT1400CaptureObserver*>` | 抓拍到达通知观察者列表 |
 | `SubmitFaceCapture/SubmitMotorCapture/Submit` | 方法 | 编码侧 / 算法侧提交抓拍事件的统一入口 |
 | `PopPending/PendingCount` | 方法 | 1400 服务侧主动拉取待消费事件 |
 

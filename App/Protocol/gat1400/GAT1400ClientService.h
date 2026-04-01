@@ -20,7 +20,7 @@
 namespace protocol
 {
 
-class GAT1400ClientService : public media::GAT1400CaptureObserver
+class GAT1400ClientService
 {
 public:
     struct HttpResponse
@@ -94,8 +94,6 @@ public:
                                  const std::string* overrideUrl = NULL);
 
 private:
-    virtual void OnGAT1400CaptureQueued();
-
     int StartServerLocked();
     void StopServerLocked();
     void ServerLoop();

@@ -1056,12 +1056,10 @@ GAT1400ClientService::GAT1400ClientService()
       m_last_replay_time(0),
       m_keepalive_demo_upload_attempted(false)
 {
-    media::GAT1400CaptureControl::Instance().AddObserver(this);
 }
 
 GAT1400ClientService::~GAT1400ClientService()
 {
-    media::GAT1400CaptureControl::Instance().RemoveObserver(this);
     Stop();
 }
 
@@ -1982,11 +1980,6 @@ int GAT1400ClientService::PostJsonWithResponseList(const char* action,
     return finalRet;
 }
 
-void GAT1400ClientService::OnGAT1400CaptureQueued()
-{
-    (void)DrainPendingCaptureEvents();
-}
-
 int GAT1400ClientService::PostCaptureEvent(const media::GAT1400CaptureEvent& event)
 {
     std::lock_guard<std::mutex> lock(m_capture_upload_mutex);
@@ -2357,6 +2350,7 @@ int GAT1400ClientService::RegisterNow()
            deviceId.c_str(),
            cfg.gat_register.listen_port);
     ReplayPendingUploads();
+    (void)DrainPendingCaptureEvents();
     return 0;
 }
 
@@ -2422,6 +2416,7 @@ int GAT1400ClientService::SendKeepaliveNow()
     if (GAT1400Json::UnPackResponseStatus(response.body, responseStatus) != 0 || responseStatus.StatusCode != OK) {
         return -2;
     }
+    (void)DrainPendingCaptureEvents();
     (void)SendKeepaliveDemoUploadOnce(deviceId);
     return 0;
 }
@@ -2644,8 +2639,6 @@ int GAT1400ClientService::Start(const ProtocolExternalConfig& cfg, const GbRegis
                regRet,
                deviceId.c_str());
     }
-
-    (void)DrainPendingCaptureEvents();
 
     m_heartbeat_running.store(true);
     m_heartbeat_thread = std::thread(&GAT1400ClientService::HeartbeatLoop, this);

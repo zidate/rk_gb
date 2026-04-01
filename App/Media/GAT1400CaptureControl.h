@@ -6,7 +6,6 @@
 #include <list>
 #include <mutex>
 #include <string>
-#include <vector>
 
 #define ConnectParam GAT1400ConnectParam
 #include "CMS1400Struct.h"
@@ -38,13 +37,6 @@ struct GAT1400CaptureEvent
     }
 };
 
-class GAT1400CaptureObserver
-{
-public:
-    virtual ~GAT1400CaptureObserver() {}
-    virtual void OnGAT1400CaptureQueued() = 0;
-};
-
 class GAT1400CaptureControl
 {
 public:
@@ -53,7 +45,7 @@ public:
     // Usage:
     // 1. 编码/算法侧产出抓拍结果后，组好 Face/Motor 与关联 ImageSet/VideoSliceSet/FileSet。
     // 2. 人脸走 SubmitFaceCapture()，机动车走 SubmitMotorCapture()，更复杂场景可直接 Submit()。
-    // 3. 当前只负责进程内排队与通知，不保证断电恢复；真正对平台上传由 GAT1400ClientService 消费完成。
+    // 3. 当前只负责进程内排队，不保证断电恢复；真正对平台上传由 GAT1400ClientService 在合适时机显式消费完成。
     int Submit(const GAT1400CaptureEvent& event);
     int SubmitFaceCapture(const GAT_1400_Face& face,
                           const std::list<GAT_1400_ImageSet>& imageList,
@@ -69,9 +61,6 @@ public:
     bool PopPending(GAT1400CaptureEvent* event);
     size_t PendingCount() const;
 
-    void AddObserver(GAT1400CaptureObserver* observer);
-    void RemoveObserver(GAT1400CaptureObserver* observer);
-
 private:
     GAT1400CaptureControl();
     GAT1400CaptureControl(const GAT1400CaptureControl&);
@@ -80,7 +69,6 @@ private:
 private:
     mutable std::mutex m_mutex;
     std::deque<GAT1400CaptureEvent> m_pending_events;
-    std::vector<GAT1400CaptureObserver*> m_observers;
 };
 
 } // namespace media

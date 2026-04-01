@@ -189,7 +189,7 @@
 
 ### GAT1400 抓拍桥接接口
 
-**描述:** 编码侧 / 算法侧 / 其他业务模块通过 `App/Media/GAT1400CaptureControl.*` 投递抓拍事件；运行中的 `GAT1400ClientService` 会作为观察者自动 drain 队列，并按“先结构化对象，再图片 / 视频 / 文件”的顺序调用现有 `Post*` 上传。
+**描述:** 编码侧 / 算法侧 / 其他业务模块通过 `App/Media/GAT1400CaptureControl.*` 投递抓拍事件；运行中的 `GAT1400ClientService` 会在注册成功和保活成功后显式 drain 队列，并按“先结构化对象，再图片 / 视频 / 文件”的顺序调用现有 `Post*` 上传。
 
 | 接口 | 说明 |
 |------|------|
@@ -197,7 +197,6 @@
 | `SubmitFaceCapture(face, images, videos, files, traceId)` | 提交一条人脸抓拍事件，携带可选关联图片 / 视频 / 文件 |
 | `SubmitMotorCapture(motorVehicle, images, videos, files, traceId)` | 提交一条机动车抓拍事件，携带可选关联图片 / 视频 / 文件 |
 | `Submit(event)` | 直接提交完整 `GAT1400CaptureEvent`，供后续扩展更多抓拍类型 |
-| `AddObserver()` / `RemoveObserver()` | 给 1400 服务或其他消费方注册“有新抓拍入队”通知 |
 | `PopPending()` / `PendingCount()` | 供消费者按队列方式主动拉取待处理抓拍事件 |
 
 **当前约束:**

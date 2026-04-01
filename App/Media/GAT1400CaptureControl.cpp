@@ -1,6 +1,5 @@
 #include "GAT1400CaptureControl.h"
 
-#include <algorithm>
 #include <stdio.h>
 
 namespace
@@ -49,7 +48,6 @@ int GAT1400CaptureControl::Submit(const GAT1400CaptureEvent& event)
         return -1;
     }
 
-    std::vector<GAT1400CaptureObserver*> observers;
     size_t pendingCount = 0;
     bool droppedOldest = false;
     {
@@ -60,7 +58,6 @@ int GAT1400CaptureControl::Submit(const GAT1400CaptureEvent& event)
         }
         m_pending_events.push_back(event);
         pendingCount = m_pending_events.size();
-        observers = m_observers;
     }
 
     printf("[GAT1400CaptureControl] queue event ret=0 object=%s trace=%s images=%zu videos=%zu files=%zu pending=%zu dropped=%d\n",
@@ -71,12 +68,6 @@ int GAT1400CaptureControl::Submit(const GAT1400CaptureEvent& event)
            event.file_list.size(),
            pendingCount,
            droppedOldest ? 1 : 0);
-
-    for (size_t i = 0; i < observers.size(); ++i) {
-        if (observers[i] != NULL) {
-            observers[i]->OnGAT1400CaptureQueued();
-        }
-    }
 
     return 0;
 }
@@ -133,28 +124,6 @@ size_t GAT1400CaptureControl::PendingCount() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_pending_events.size();
-}
-
-void GAT1400CaptureControl::AddObserver(GAT1400CaptureObserver* observer)
-{
-    if (observer == NULL) {
-        return;
-    }
-
-    std::lock_guard<std::mutex> lock(m_mutex);
-    if (std::find(m_observers.begin(), m_observers.end(), observer) == m_observers.end()) {
-        m_observers.push_back(observer);
-    }
-}
-
-void GAT1400CaptureControl::RemoveObserver(GAT1400CaptureObserver* observer)
-{
-    if (observer == NULL) {
-        return;
-    }
-
-    std::lock_guard<std::mutex> lock(m_mutex);
-    m_observers.erase(std::remove(m_observers.begin(), m_observers.end(), observer), m_observers.end());
 }
 
 } // namespace media
