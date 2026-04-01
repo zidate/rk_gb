@@ -142,7 +142,7 @@ private:
     int ReplayPendingUploadsIfDue();
     int DrainPendingCaptureEvents();
     int PostCaptureEvent(const media::GAT1400CaptureEvent& event);
-    int SendKeepaliveDemoUploadOnce(const std::string& deviceId);
+    int SendKeepaliveDemoCaptureEvent(const std::string& deviceId);
 
     int SnapshotConfig(ProtocolExternalConfig& cfg, std::string& deviceId) const;
     void UpdateRegistState(regist_state state);
@@ -170,7 +170,7 @@ private:
     unsigned long long m_pending_seq;
     time_t m_last_replay_time;
     std::mutex m_capture_upload_mutex;
-    std::atomic<bool> m_keepalive_demo_upload_attempted;
+    std::atomic<int> m_keepalive_demo_notify_count;
 
     mutable std::mutex m_observer_mutex;
     std::vector<CLower1400SubscribeObserver*> m_subscribe_observers;

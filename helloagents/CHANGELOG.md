@@ -26,6 +26,7 @@
 - 新增 `App/Media/GAT1400CaptureControl.*` 抓拍桥接层，供编码侧 / 算法侧以“人脸 / 机动车 + 图片 / 视频 / 文件”事件方式向 1400 模块投递待上传数据，并补齐调用方接入使用说明。
 
 ### 变更
+- 按 issue 41 2026-04-01 最新评论调整 GAT1400 keepalive demo：删除旧的 `SendKeepaliveDemoUploadOnce()` 直传实现，改为在保活成功后构造 `GAT1400CaptureEvent` 并调用 `NotifyCaptureEvent()`；demo 事件现固定为 `FACE_DETECT_EVENT`，默认关联 `/mnt/sdcard/test.jpeg` 和 `/mnt/sdcard/DCIM/2026/03/24/20260324174542-20260324174845.mp4`，每次服务启动后最多触发 `5` 次。
 - 调整 `GAT1400CaptureControl` 代码归属：`GAT1400CaptureControl.h/.cpp` 从 `App/Media/` 迁移到 `App/Protocol/gat1400/`，并同步更新 `GAT1400ClientService` include 与主工程 / `sdk_port` 构建脚本中的源文件归属。
 - 新增 `ProtocolManager::NotifyGatAlarm()` 作为 1400 抓拍业务通知入口，业务侧现在可直接把 `GAT1400CaptureEvent` 交给协议模块；当前若 1400 已注册则直接尝试上传，否则进入内存队列，待后续注册/保活成功后继续处理。
 - 收口 GAT1400 抓拍桥接触发模型：`GAT1400ClientService` 不再继承 `GAT1400CaptureObserver`，`GAT1400CaptureControl` 只保留进程内队列；抓拍事件改为在注册成功和保活成功后由 1400 服务显式 `DrainPendingCaptureEvents()` 消费上传。

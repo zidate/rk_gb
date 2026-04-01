@@ -43,6 +43,10 @@ static const char* kResponseKindStatus = "status";
 static const int kClientErrorUnsupportedUri = -6;
 static const int kClientErrorApePostCompatDisabled = -7;
 static const char* kKeepaliveDemoImagePath = "/mnt/sdcard/test.jpeg";
+static const char* kKeepaliveDemoVideoPath = "/mnt/sdcard/DCIM/2026/03/24/20260324174542-20260324174845.mp4";
+static const int kKeepaliveDemoMaxNotifyCount = 5;
+static const char* kKeepaliveDemoVideoBeginTime = "20260324174542";
+static const char* kKeepaliveDemoVideoEndTime = "20260324174845";
 
 struct RequestTarget
 {
@@ -127,6 +131,18 @@ std::string FormatCurrentTime()
     struct tm tmNow;
     localtime_r(&now, &tmNow);
     strftime(buffer, sizeof(buffer), "%Y%m%d%H%M%S", &tmNow);
+    return std::string(buffer);
+}
+
+std::string FormatCurrentTimeWithMilliseconds()
+{
+    char buffer[32] = {0};
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    struct tm tmNow;
+    localtime_r(&tv.tv_sec, &tmNow);
+    const size_t prefixLen = strftime(buffer, sizeof(buffer), "%Y%m%d%H%M%S", &tmNow);
+    snprintf(buffer + prefixLen, sizeof(buffer) - prefixLen, "%03ld", tv.tv_usec / 1000);
     return std::string(buffer);
 }
 
@@ -510,6 +526,18 @@ bool ReadFileText(const std::string& path, std::string& out)
     const bool ok = (ferror(fp) == 0);
     fclose(fp);
     return ok;
+}
+
+bool ReadFileBase64(const char* path, std::string& raw, std::string& encoded)
+{
+    raw.clear();
+    encoded.clear();
+    if (path == NULL || !ReadFileText(path, raw) || raw.empty()) {
+        return false;
+    }
+    return CBase64Coder::Encode(reinterpret_cast<const unsigned char*>(raw.data()),
+                                static_cast<unsigned long>(raw.size()),
+                                encoded);
 }
 
 std::list<GAT_1400_VideoSliceSet> BuildVideoSliceMetadataBatch(const std::list<GAT_1400_VideoSliceSet>& batch)
@@ -1054,7 +1082,7 @@ GAT1400ClientService::GAT1400ClientService()
       m_heartbeat_running(false),
       m_pending_seq(0),
       m_last_replay_time(0),
-      m_keepalive_demo_upload_attempted(false)
+      m_keepalive_demo_notify_count(0)
 {
 }
 
@@ -2106,51 +2134,52 @@ int GAT1400ClientService::NotifyCaptureEvent(const media::GAT1400CaptureEvent& e
     return submitRet;
 }
 
-int GAT1400ClientService::SendKeepaliveDemoUploadOnce(const std::string& deviceId)
+int GAT1400ClientService::SendKeepaliveDemoCaptureEvent(const std::string& deviceId)
 {
-    bool expected = false;
-    if (!m_keepalive_demo_upload_attempted.compare_exchange_strong(expected, true)) {
+    int currentCount = m_keepalive_demo_notify_count.load();
+    int notifyIndex = 0;
+    while (currentCount < kKeepaliveDemoMaxNotifyCount) {
+        if (m_keepalive_demo_notify_count.compare_exchange_weak(currentCount, currentCount + 1)) {
+            notifyIndex = currentCount + 1;
+            break;
+        }
+    }
+    if (notifyIndex == 0) {
         return 0;
     }
 
     std::string imageRaw;
-    if (!ReadFileText(kKeepaliveDemoImagePath, imageRaw)) {
-        printf("[GAT1400] module=gat1400 event=keepalive_demo trace=client error=-1 note=read_failed image=%s\n",
-               kKeepaliveDemoImagePath);
-        return -1;
-    }
-    if (imageRaw.empty()) {
-        printf("[GAT1400] module=gat1400 event=keepalive_demo trace=client error=-1 note=empty_file image=%s\n",
-               kKeepaliveDemoImagePath);
-        return -1;
-    }
-
     std::string imageData;
-    if (!CBase64Coder::Encode(reinterpret_cast<const unsigned char*>(imageRaw.data()),
-                              static_cast<unsigned long>(imageRaw.size()),
-                              imageData)) {
-        printf("[GAT1400] module=gat1400 event=keepalive_demo trace=client error=-1 note=base64_encode_failed image=%s\n",
+    if (!ReadFileBase64(kKeepaliveDemoImagePath, imageRaw, imageData)) {
+        m_keepalive_demo_notify_count.fetch_sub(1);
+        printf("[GAT1400] module=gat1400 event=keepalive_demo trace=client error=-1 note=image_load_failed count=%d max=%d image=%s\n",
+               notifyIndex,
+               kKeepaliveDemoMaxNotifyCount,
                kKeepaliveDemoImagePath);
         return -1;
     }
 
-    char token[32] = {0};
-    struct timeval tv;
-    gettimeofday(&tv, NULL);
-    struct tm tmNow;
-    localtime_r(&tv.tv_sec, &tmNow);
-    size_t prefixLen = strftime(token, sizeof(token), "%Y%m%d%H%M%S", &tmNow);
-    snprintf(token + prefixLen, sizeof(token) - prefixLen, "%03ld", tv.tv_usec / 1000);
+    std::string videoRaw;
+    std::string videoData;
+    if (!ReadFileBase64(kKeepaliveDemoVideoPath, videoRaw, videoData)) {
+        m_keepalive_demo_notify_count.fetch_sub(1);
+        printf("[GAT1400] module=gat1400 event=keepalive_demo trace=client error=-1 note=video_load_failed count=%d max=%d video=%s\n",
+               notifyIndex,
+               kKeepaliveDemoMaxNotifyCount,
+               kKeepaliveDemoVideoPath);
+        return -1;
+    }
 
-    const std::string shotTime(token);
-    const std::string imageId = std::string("IMGDEMO") + shotTime;
-    const std::string faceId = std::string("FACEDEMO") + shotTime;
+    const std::string shotTime = FormatCurrentTimeWithMilliseconds();
+    const std::string sequenceTag = shotTime + std::string("_") + std::to_string(notifyIndex);
+    const std::string imageId = std::string("IMGDEMO") + sequenceTag;
+    const std::string faceId = std::string("FACEDEMO") + sequenceTag;
+    const std::string videoId = std::string("VIDDEMO") + sequenceTag;
 
     GAT_1400_Face face;
     memset(&face, 0, sizeof(face));
     CopyToArray(face.FaceID, sizeof(face.FaceID), faceId);
     face.InfoKind = 1;
-    CopyToArray(face.SourceID, sizeof(face.SourceID), imageId);
     CopyToArray(face.DeviceID, sizeof(face.DeviceID), deviceId);
     face.LeftTopX = 100;
     face.LeftTopY = 100;
@@ -2162,7 +2191,8 @@ int GAT1400ClientService::SendKeepaliveDemoUploadOnce(const std::string& deviceI
     CopyToArray(imageSet.ImageInfo.ImageID, sizeof(imageSet.ImageInfo.ImageID), imageId);
     imageSet.ImageInfo.InfoKind = 1;
     imageSet.ImageInfo.ImageSource = 1;
-    imageSet.ImageInfo.EventSort = 15;
+    CopyToArray(imageSet.ImageInfo.SourceVideoID, sizeof(imageSet.ImageInfo.SourceVideoID), videoId);
+    imageSet.ImageInfo.EventSort = FACE_DETECT_EVENT;
     CopyToArray(imageSet.ImageInfo.DeviceID, sizeof(imageSet.ImageInfo.DeviceID), deviceId);
     CopyToArray(imageSet.ImageInfo.FileFormat, sizeof(imageSet.ImageInfo.FileFormat), "jpg");
     CopyToArray(imageSet.ImageInfo.ShotTime, sizeof(imageSet.ImageInfo.ShotTime), shotTime);
@@ -2177,21 +2207,53 @@ int GAT1400ClientService::SendKeepaliveDemoUploadOnce(const std::string& deviceI
     imageSet.ImageInfo.Width = 1920;
     imageSet.ImageInfo.Height = 1080;
     imageSet.ImageInfo.FileSize = static_cast<int>(imageRaw.size());
-    imageSet.FaceList.push_back(face);
     imageSet.Data = imageData;
 
-    std::list<GAT_1400_Face> faceList;
-    faceList.push_back(face);
-    int ret = PostFaces(faceList);
-    if (ret == 0) {
-        std::list<GAT_1400_ImageSet> imageList;
-        imageList.push_back(imageSet);
-        ret = PostImages(imageList);
+    GAT_1400_VideoSliceSet videoSliceSet;
+    CopyToArray(videoSliceSet.VideoSliceInfo.VideoID, sizeof(videoSliceSet.VideoSliceInfo.VideoID), videoId);
+    videoSliceSet.VideoSliceInfo.InfoKind = 1;
+    videoSliceSet.VideoSliceInfo.VideoSource = "1";
+    CopyToArray(videoSliceSet.VideoSliceInfo.IsAbstranceVideo, sizeof(videoSliceSet.VideoSliceInfo.IsAbstranceVideo), "0");
+    CopyToArray(videoSliceSet.VideoSliceInfo.OriginVideoID, sizeof(videoSliceSet.VideoSliceInfo.OriginVideoID), videoId);
+    videoSliceSet.VideoSliceInfo.EventSort = FACE_DETECT_EVENT;
+    CopyToArray(videoSliceSet.VideoSliceInfo.DeviceID, sizeof(videoSliceSet.VideoSliceInfo.DeviceID), deviceId);
+    CopyToArray(videoSliceSet.VideoSliceInfo.FileFormat, sizeof(videoSliceSet.VideoSliceInfo.FileFormat), "mp4");
+    CopyToArray(videoSliceSet.VideoSliceInfo.CodedFormat, sizeof(videoSliceSet.VideoSliceInfo.CodedFormat), "H.264");
+    videoSliceSet.VideoSliceInfo.AudioFlag = 0;
+    CopyToArray(videoSliceSet.VideoSliceInfo.Title, sizeof(videoSliceSet.VideoSliceInfo.Title), "test");
+    CopyToArray(videoSliceSet.VideoSliceInfo.ContentDescription,
+                sizeof(videoSliceSet.VideoSliceInfo.ContentDescription),
+                "keepalive demo video");
+    CopyToArray(videoSliceSet.VideoSliceInfo.ShotPlaceFullAdress,
+                sizeof(videoSliceSet.VideoSliceInfo.ShotPlaceFullAdress),
+                "keepalive demo");
+    videoSliceSet.VideoSliceInfo.SecurityLevel = 5;
+    videoSliceSet.VideoSliceInfo.VideoLen = 183.0;
+    CopyToArray(videoSliceSet.VideoSliceInfo.BeginTime, sizeof(videoSliceSet.VideoSliceInfo.BeginTime), kKeepaliveDemoVideoBeginTime);
+    CopyToArray(videoSliceSet.VideoSliceInfo.EndTime, sizeof(videoSliceSet.VideoSliceInfo.EndTime), kKeepaliveDemoVideoEndTime);
+    videoSliceSet.VideoSliceInfo.Width = 1920;
+    videoSliceSet.VideoSliceInfo.Height = 1080;
+    videoSliceSet.VideoSliceInfo.FileSize = static_cast<int>(videoRaw.size());
+    videoSliceSet.Data = videoData;
+
+    media::GAT1400CaptureEvent event;
+    event.trace_id = std::string("keepalive_demo_") + sequenceTag;
+    event.object_type = media::GAT1400_CAPTURE_OBJECT_FACE;
+    event.face = face;
+    event.image_list.push_back(imageSet);
+    event.video_slice_list.push_back(videoSliceSet);
+
+    const int ret = NotifyCaptureEvent(event);
+    if (ret != 0) {
+        m_keepalive_demo_notify_count.fetch_sub(1);
     }
 
-    printf("[GAT1400] module=gat1400 event=keepalive_demo trace=client error=%d image=%s\n",
+    printf("[GAT1400] module=gat1400 event=keepalive_demo trace=client error=%d count=%d max=%d image=%s video=%s\n",
            ret,
-           kKeepaliveDemoImagePath);
+           notifyIndex,
+           kKeepaliveDemoMaxNotifyCount,
+           kKeepaliveDemoImagePath,
+           kKeepaliveDemoVideoPath);
     return ret;
 }
 
@@ -2452,7 +2514,7 @@ int GAT1400ClientService::SendKeepaliveNow()
         return -2;
     }
     (void)DrainPendingCaptureEvents();
-    (void)SendKeepaliveDemoUploadOnce(deviceId);
+    (void)SendKeepaliveDemoCaptureEvent(deviceId);
     return 0;
 }
 
@@ -2645,7 +2707,7 @@ int GAT1400ClientService::Start(const ProtocolExternalConfig& cfg, const GbRegis
         m_started = true;
         m_registered = false;
         m_regist_state = EM_REGIST_OFF;
-        m_keepalive_demo_upload_attempted.store(false);
+        m_keepalive_demo_notify_count.store(0);
         if (StartServerLocked() != 0) {
             m_started = false;
             return -2;
@@ -2690,7 +2752,7 @@ void GAT1400ClientService::Stop()
         deviceId = ResolveGatRuntimeDeviceId(m_cfg);
         m_started = false;
         m_heartbeat_running.store(false);
-        m_keepalive_demo_upload_attempted.store(false);
+        m_keepalive_demo_notify_count.store(0);
     }
 
     if (m_heartbeat_thread.joinable()) {

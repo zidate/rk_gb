@@ -8,6 +8,7 @@
 
 | 时间戳 | 功能名称 | 类型 | 状态 | 方案包路径 |
 |--------|----------|------|------|------------|
+| 202604011703 | gat1400_keepalive_demo_notify_capture | 轻量迭代 | ✅已完成 | [2026-04/202604011703_gat1400_keepalive_demo_notify_capture](2026-04/202604011703_gat1400_keepalive_demo_notify_capture/) |
 | 202604011603 | gat1400_capture_control_relocate | 轻量迭代 | ✅已完成 | [2026-04/202604011603_gat1400_capture_control_relocate](2026-04/202604011603_gat1400_capture_control_relocate/) |
 | 202604011408 | gat_notify_alarm_entry | 开发 | ✅已完成 | [2026-04/202604011408_gat_notify_alarm_entry](2026-04/202604011408_gat_notify_alarm_entry/) |
 | 202604011157 | gat1400_capture_observer_removal | 轻量迭代 | ✅已完成 | [2026-04/202604011157_gat1400_capture_observer_removal](2026-04/202604011157_gat1400_capture_observer_removal/) |
@@ -81,6 +82,7 @@
 
 ### 2026-04
 
+- [202604011703_gat1400_keepalive_demo_notify_capture](2026-04/202604011703_gat1400_keepalive_demo_notify_capture/) - 按 issue 41 最新评论重做 GAT1400 保活 demo：去掉旧的直传函数，改为在保活成功后通过 `NotifyCaptureEvent()` 上送人脸检测事件，默认关联本地图片和视频，并限制总共触发 `5` 次
 - [202604011603_gat1400_capture_control_relocate](2026-04/202604011603_gat1400_capture_control_relocate/) - 将 `GAT1400CaptureControl` 从 `App/Media/` 迁移到 `App/Protocol/gat1400/`，同步收口 include、构建脚本和当前知识库路径说明
 - [202604011408_gat_notify_alarm_entry](2026-04/202604011408_gat_notify_alarm_entry/) - 新增 `ProtocolManager::NotifyGatAlarm()` 作为 1400 业务通知入口，算法/编码侧可直接上送 `GAT1400CaptureEvent`，由协议模块自动决定立即上传还是先入队补偿
 - [202604011157_gat1400_capture_observer_removal](2026-04/202604011157_gat1400_capture_observer_removal/) - 去掉 `GAT1400ClientService` 对抓拍 observer 的继承和回调注册，抓拍桥接改为纯内存队列，并在注册成功/保活成功后显式 drain
