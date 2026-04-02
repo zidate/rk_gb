@@ -26,6 +26,7 @@
 - 新增 `App/Media/GAT1400CaptureControl.*` 抓拍桥接层，供编码侧 / 算法侧以“人脸 / 机动车 + 图片 / 视频 / 文件”事件方式向 1400 模块投递待上传数据，并补齐调用方接入使用说明。
 
 ### 变更
+- 按 issue 41 2026-04-02 最新评论继续调整 GAT1400 keepalive demo：拆成人脸、机动车两个独立 demo 函数，分别读取 `/mnt/sdcard/test.jpeg` + `/mnt/sdcard/face.jpeg`、`/mnt/sdcard/test2.jpeg` + `/mnt/sdcard/motor.jpeg`，并将两类全景图统一按 `1920x1080` 上报。
 - 根据平台联调口径重做 GAT1400 keepalive demo：保活成功后不再走 `POST /VIID/DispositionNotifications`，改为直接上报 `POST /VIID/Faces` 与 `POST /VIID/MotorVehicles`；当前读取 `/mnt/sdcard/test.jpeg`，将同一份 Base64 mock 成人脸场景图/抓拍图以及机动车大图/车牌图/特写图，并限制每次服务启动后最多触发 `1` 次。同时补齐 `GAT1400Json` 的 `FaceObject.ShotTime`、自动采集时间字段透传、`MotorVehicleObject.Speed/Direction/VehicleLength/PassTime` 和两位数 `SubImage.Type` 序列化，使发往平台的 JSON 更贴近联调样例。
 - 调整 GAT1400 keepalive demo 的平台联调路径：保活成功后不再走 `NotifyCaptureEvent()/PostFaces/PostImages`，改为直接 `POST /VIID/DispositionNotifications`；当前使用 `PersonObject + SubImage(Data)` 组最小告警通知，默认读取 `/mnt/sdcard/test.jpeg`，并继续限制整次服务启动后最多触发 `5` 次。
 - 修正上一提交的 GAT1400 keepalive demo：当前仍保留 `NotifyCaptureEvent()` 触发方式与 `FACE_DETECT_EVENT`，但不再发送视频，只保留本地图片 `/mnt/sdcard/test.jpeg` 的 demo 上送。
@@ -78,6 +79,7 @@
 - 为 triage 增加失败状态和空结果状态落盘，统一本地回归与线上排障时的状态语义。
 
 ### 修复
+- 修复 GAT1400 keepalive demo 在图片缺失或某一路上报失败时会在后续心跳中持续重试、导致平台看到重复人脸/车辆事件的问题；当前改为每次服务启动后每类 demo 仅尝试一次，不再回退重试计数。
 - 修复 GB28181 TCP RTP/PS 发送在短时回压下因 `EAGAIN/EWOULDBLOCK` 立即停流的问题：`GB28181RtpPsSender` 现会在 `3s` 总窗口内等待 socket 可写后重试，超过窗口或遇到非重试型错误才返回失败。
 - 修复 GB28181 SIP 客户端本地监听端口错误复用 `gb_register.server_port` 的问题：启动时改为随机本地端口，并在 `SipEventManager` / `SipClientImpl` 回写实际监听端口，确保 `REGISTER` 等出站请求的 `From/Contact` 与真实监听端口一致。
 - 修复 GB28181 实时预览与录像回放/下载共用同一 RTP/PS sender 导致的互斥问题，改为 live/replay 独立 sender、独立 SSRC/local port，并将停流收口到按 handle 精确命中，支持 `1` 路实时预览与 `1` 路回放/下载同时运行。

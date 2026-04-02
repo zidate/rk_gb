@@ -8,6 +8,7 @@
 
 | 时间戳 | 功能名称 | 类型 | 状态 | 方案包路径 |
 |--------|----------|------|------|------------|
+| 202604021432 | gat1400_keepalive_demo_single_shot_split | 轻量迭代 | ✅已完成 | [2026-04/202604021432_gat1400_keepalive_demo_single_shot_split](2026-04/202604021432_gat1400_keepalive_demo_single_shot_split/) |
 | 202604021026 | gat1400_keepalive_demo_face_motor_resources | 轻量迭代 | ✅已完成 | [2026-04/202604021026_gat1400_keepalive_demo_face_motor_resources](2026-04/202604021026_gat1400_keepalive_demo_face_motor_resources/) |
 | 202604011800 | gat1400_keepalive_demo_disposition_notification | 轻量迭代 | ✅已完成 | [2026-04/202604011800_gat1400_keepalive_demo_disposition_notification](2026-04/202604011800_gat1400_keepalive_demo_disposition_notification/) |
 | 202604011719 | gat1400_keepalive_demo_image_only | 轻量迭代 | ✅已完成 | [2026-04/202604011719_gat1400_keepalive_demo_image_only](2026-04/202604011719_gat1400_keepalive_demo_image_only/) |
@@ -85,6 +86,7 @@
 
 ### 2026-04
 
+- [202604021432_gat1400_keepalive_demo_single_shot_split](2026-04/202604021432_gat1400_keepalive_demo_single_shot_split/) - 按 issue 41 最新评论将 keepalive demo 拆成人脸/机动车两个单次函数，改用四张独立图片并去掉失败后的心跳重试，避免平台持续看到重复上报
 - [202604021026_gat1400_keepalive_demo_face_motor_resources](2026-04/202604021026_gat1400_keepalive_demo_face_motor_resources/) - 按平台样例将 keepalive demo 改为直接上报 `Faces` 与 `MotorVehicles`，并补齐联调所需的 Face/MotorVehicle JSON 字段与两位数 `SubImage.Type` 序列化
 - [202604011800_gat1400_keepalive_demo_disposition_notification](2026-04/202604011800_gat1400_keepalive_demo_disposition_notification/) - 将 GAT1400 keepalive demo 的平台通信改为 `POST /VIID/DispositionNotifications`，当前使用 `PersonObject + SubImage(Data)` 组最小告警通知并保留本地图片 `/mnt/sdcard/test.jpeg`
 - [202604011719_gat1400_keepalive_demo_image_only](2026-04/202604011719_gat1400_keepalive_demo_image_only/) - 修正上一版 GAT1400 keepalive demo，仅保留通过 `NotifyCaptureEvent()` 发送的人脸 + 图片，不再发送视频
