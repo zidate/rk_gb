@@ -557,6 +557,40 @@ bool ReadFileBase64Data(const char* path, std::string& encoded)
     return ReadFileBase64(path, raw, encoded);
 }
 
+bool ParseResponseStatusListCompat(const std::string& body,
+                                   std::list<GAT1400_RESPONSESTATUS_ST>& responseList)
+{
+    responseList.clear();
+    if (GAT1400Json::UnPackResponseStatusList(body, responseList) == 0) {
+        return true;
+    }
+
+    GAT1400_RESPONSESTATUS_ST responseStatus;
+    if (GAT1400Json::UnPackResponseStatus(body, responseStatus) != 0) {
+        return false;
+    }
+
+    responseList.push_back(responseStatus);
+    return true;
+}
+
+bool HasKeepaliveDemoMarker(const std::string& text)
+{
+    return text.find("FACEDEMO_") != std::string::npos ||
+           text.find("MOTORDEMO_") != std::string::npos ||
+           text.find("IMGSCENEFACEDEMO_") != std::string::npos ||
+           text.find("IMGCROPFACEDEMO_") != std::string::npos ||
+           text.find("IMGSCENEMOTORDEMO_") != std::string::npos ||
+           text.find("IMGVIEWMOTORDEMO_") != std::string::npos;
+}
+
+bool IsKeepaliveDemoPendingUpload(const GAT1400ClientService::PendingUploadItem& item)
+{
+    return HasKeepaliveDemoMarker(item.object_id) ||
+           HasKeepaliveDemoMarker(item.path) ||
+           HasKeepaliveDemoMarker(item.body);
+}
+
 std::list<GAT_1400_VideoSliceSet> BuildVideoSliceMetadataBatch(const std::list<GAT_1400_VideoSliceSet>& batch)
 {
     std::list<GAT_1400_VideoSliceSet> metadataBatch(batch);
@@ -700,7 +734,7 @@ int ParseResponseStatusListBody(const std::string& body, int& outError)
 {
     outError = 0;
     std::list<GAT1400_RESPONSESTATUS_ST> responseList;
-    if (GAT1400Json::UnPackResponseStatusList(body, responseList) != 0) {
+    if (!ParseResponseStatusListCompat(body, responseList)) {
         return -1;
     }
 
@@ -1724,6 +1758,10 @@ int GAT1400ClientService::EnqueuePendingUpload(const char* action,
         item.enqueue_time = time(NULL);
         item.persist_path = JoinFilePath(cfg.gat_upload.queue_dir, item.id);
 
+        if (IsKeepaliveDemoPendingUpload(item)) {
+            return 0;
+        }
+
         if (!WriteFileText(item.persist_path, SerializePendingUpload(item))) {
             return -3;
         }
@@ -1773,6 +1811,10 @@ void GAT1400ClientService::LoadPendingUploadsLocked(const ProtocolExternalConfig
         PendingUploadItem item;
         const std::string filePath = JoinFilePath(cfg.gat_upload.queue_dir, fileName);
         if (!ReadPendingUploadFile(filePath, item)) {
+            RemoveFileIfExists(filePath);
+            continue;
+        }
+        if (IsKeepaliveDemoPendingUpload(item)) {
             RemoveFileIfExists(filePath);
             continue;
         }
@@ -1837,6 +1879,20 @@ int GAT1400ClientService::ReplayPendingUploads()
     int droppedCount = 0;
     for (std::list<PendingUploadItem>::const_iterator itemIt = replayItems.begin(); itemIt != replayItems.end(); ++itemIt) {
         const PendingUploadItem& pending = *itemIt;
+        if (IsKeepaliveDemoPendingUpload(pending)) {
+            std::lock_guard<std::mutex> lock(m_pending_mutex);
+            std::list<PendingUploadItem>::iterator current = std::find_if(
+                m_pending_uploads.begin(),
+                m_pending_uploads.end(),
+                [&](const PendingUploadItem& item) { return item.id == pending.id; });
+            if (current != m_pending_uploads.end()) {
+                RemoveFileIfExists(current->persist_path);
+                m_pending_uploads.erase(current);
+                ++droppedCount;
+            }
+            continue;
+        }
+
         bool success = false;
         int finalRet = 0;
         int attemptsUsed = 0;
@@ -1978,7 +2034,7 @@ int GAT1400ClientService::PostJsonWithResponseList(const char* action,
                                           overrideUrl);
         if (reqRet == 0) {
             std::list<GAT1400_RESPONSESTATUS_ST> responseList;
-            if (GAT1400Json::UnPackResponseStatusList(response.body, responseList) == 0) {
+            if (ParseResponseStatusListCompat(response.body, responseList)) {
                 bool allOk = true;
                 int firstError = 0;
                 for (std::list<GAT1400_RESPONSESTATUS_ST>::const_iterator it = responseList.begin(); it != responseList.end(); ++it) {
