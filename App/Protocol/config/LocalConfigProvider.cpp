@@ -208,11 +208,11 @@ protocol::GbRegisterParam BuildDefaultGbRegisterParam()
     param.username = "35010000002000000001";
     param.password = "2CE09989747C";
     param.string_code = "C04403261010000000101";
-    param.mac_address = "2C-E0-99-89-74-7C";
+    param.mac_address = "2CE09989747C";
     param.line_id = "1";
     param.redirect_domain = "35010000002000000001";
     param.redirect_server_id = "35010000002000000001";
-    param.custom_protocol_version = "2.0";
+    param.custom_protocol_version = "1.0";
     param.manufacturer = "IPC";
     param.model = "RC0240";
     return param;
@@ -383,9 +383,6 @@ bool ReadIniInt(CInifile& ini,
 void NormalizeGbRegisterConfig(protocol::GbRegisterParam& param)
 {
     param.register_mode = protocol::NormalizeGbRegisterMode(param.register_mode);
-    param.mac_address = protocol::NormalizeGbRegisterMacAddress(param.mac_address);
-    param.custom_protocol_version =
-        protocol::NormalizeGbCustomProtocolVersion(param.custom_protocol_version);
 }
 
 bool LoadGbRegisterConfigFromFile(const char* path, protocol::GbRegisterParam& out)

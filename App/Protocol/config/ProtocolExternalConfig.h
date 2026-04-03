@@ -38,7 +38,7 @@ struct GbRegisterParam
           device_name("IPC"),
           expires_sec(3600),
           line_id("1"),
-          custom_protocol_version("2.0"),
+          custom_protocol_version("1.0"),
           manufacturer("IPC"),
           model("RC0240") {}
 };
@@ -66,54 +66,6 @@ inline std::string NormalizeGbRegisterMode(const std::string& value)
     for (size_t i = begin; i < end; ++i) {
         normalized.push_back(static_cast<char>(
             std::tolower(static_cast<unsigned char>(value[i]))));
-    }
-    return normalized;
-}
-
-inline std::string NormalizeGbRegisterMacAddress(const std::string& value)
-{
-    std::string hexOnly;
-    hexOnly.reserve(value.size());
-    for (size_t i = 0; i < value.size(); ++i) {
-        const unsigned char ch = static_cast<unsigned char>(value[i]);
-        if (std::isxdigit(ch) != 0) {
-            hexOnly.push_back(static_cast<char>(std::toupper(ch)));
-        }
-    }
-
-    if (hexOnly.size() != 12) {
-        return value;
-    }
-
-    std::string normalized;
-    normalized.reserve(17);
-    for (size_t i = 0; i < hexOnly.size(); i += 2) {
-        if (!normalized.empty()) {
-            normalized.push_back('-');
-        }
-        normalized.push_back(hexOnly[i]);
-        normalized.push_back(hexOnly[i + 1]);
-    }
-    return normalized;
-}
-
-inline std::string NormalizeGbCustomProtocolVersion(const std::string& value)
-{
-    size_t begin = 0;
-    while (begin < value.size() &&
-           std::isspace(static_cast<unsigned char>(value[begin])) != 0) {
-        ++begin;
-    }
-
-    size_t end = value.size();
-    while (end > begin &&
-           std::isspace(static_cast<unsigned char>(value[end - 1])) != 0) {
-        --end;
-    }
-
-    const std::string normalized = value.substr(begin, end - begin);
-    if (normalized.empty() || normalized == "1.0") {
-        return "2.0";
     }
     return normalized;
 }
