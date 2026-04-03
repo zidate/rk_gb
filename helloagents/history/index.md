@@ -8,6 +8,7 @@
 
 | 时间戳 | 功能名称 | 类型 | 状态 | 方案包路径 |
 |--------|----------|------|------|------------|
+| 202604031701 | gb_catalog_required_fields | 轻量迭代 | ✅已完成 | [2026-04/202604031701_gb_catalog_required_fields](2026-04/202604031701_gb_catalog_required_fields/) |
 | 202604021432 | gat1400_keepalive_demo_single_shot_split | 轻量迭代 | ✅已完成 | [2026-04/202604021432_gat1400_keepalive_demo_single_shot_split](2026-04/202604021432_gat1400_keepalive_demo_single_shot_split/) |
 | 202604021026 | gat1400_keepalive_demo_face_motor_resources | 轻量迭代 | ✅已完成 | [2026-04/202604021026_gat1400_keepalive_demo_face_motor_resources](2026-04/202604021026_gat1400_keepalive_demo_face_motor_resources/) |
 | 202604011800 | gat1400_keepalive_demo_disposition_notification | 轻量迭代 | ✅已完成 | [2026-04/202604011800_gat1400_keepalive_demo_disposition_notification](2026-04/202604011800_gat1400_keepalive_demo_disposition_notification/) |
@@ -86,6 +87,7 @@
 
 ### 2026-04
 
+- [202604031701_gb_catalog_required_fields](2026-04/202604031701_gb_catalog_required_fields/) - 根据 `224.pcap` 修复 GB28181 `Catalog` 查询响应和目录订阅通知字段缺失，统一补齐 `Name/Owner/CivilCode/Address/IPAddress/RegisterWay/Status/Event` 等目录项基础信息，并修正 XML 打包层把这些字段真正编码出去
 - [202604021432_gat1400_keepalive_demo_single_shot_split](2026-04/202604021432_gat1400_keepalive_demo_single_shot_split/) - 按 issue 41 最新评论将 keepalive demo 拆成人脸/机动车两个单次函数，改用四张独立图片并去掉失败后的心跳重试，避免平台持续看到重复上报
 - [202604021026_gat1400_keepalive_demo_face_motor_resources](2026-04/202604021026_gat1400_keepalive_demo_face_motor_resources/) - 按平台样例将 keepalive demo 改为直接上报 `Faces` 与 `MotorVehicles`，并补齐联调所需的 Face/MotorVehicle JSON 字段与两位数 `SubImage.Type` 序列化
 - [202604011800_gat1400_keepalive_demo_disposition_notification](2026-04/202604011800_gat1400_keepalive_demo_disposition_notification/) - 将 GAT1400 keepalive demo 的平台通信改为 `POST /VIID/DispositionNotifications`，当前使用 `PersonObject + SubImage(Data)` 组最小告警通知并保留本地图片 `/mnt/sdcard/test.jpeg`

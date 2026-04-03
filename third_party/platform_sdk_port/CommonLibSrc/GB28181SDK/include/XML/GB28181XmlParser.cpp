@@ -85,6 +85,33 @@ static bool ParseUnsignedValue(const std::string& text, unsigned int* value)
     return true;
 }
 
+static bool ParseBoolValue(const std::string& text, bool* value)
+{
+    if (value == NULL || text.empty()) {
+        return false;
+    }
+
+    if (text == "1" || text == "true" || text == "TRUE" ||
+        text == "True" || text == "ON" || text == "on") {
+        *value = true;
+        return true;
+    }
+
+    if (text == "0" || text == "false" || text == "FALSE" ||
+        text == "False" || text == "OFF" || text == "off") {
+        *value = false;
+        return true;
+    }
+
+    unsigned int parsed = 0;
+    if (!ParseUnsignedValue(text, &parsed)) {
+        return false;
+    }
+
+    *value = (parsed != 0);
+    return true;
+}
+
 static bool ReadMarkupUnsigned(CMarkupSTL& xml,
                                const char* name,
                                unsigned int* value,
@@ -1308,9 +1335,8 @@ void CGB28181XmlParser::PackCatalogResponse(int sn , int start ,int end, const D
 		if (catalog.SumNum != 0) {
 
 			int position = start;
-
-			slothxml::device_list_t   device;
 			for (; position <= end; position++) {
+				slothxml::device_list_t device;
 				device.Address = param->catalog[position].Address;
 				device.Block = param->catalog[position].Block;
 				device.Certifiable = param->catalog[position].Certifiable;
@@ -1320,13 +1346,19 @@ void CGB28181XmlParser::PackCatalogResponse(int sn , int start ,int end, const D
 				device.EndTime = param->catalog[position].EndTime;
 				device.ErrCode = param->catalog[position].ErrCode;
 				device.IPAddress = param->catalog[position].IPAddress;
+				device.Ower = param->catalog[position].Owner;
+				device.Parental = param->catalog[position].Parental ? "1" : "0";
 				device.ParentID = param->catalog[position].ParentID;
 				device.StreamNumberList = param->catalog[position].StreamNumberList;
-				//device.Latitude=  param->catalog[position];
-				//device.Longitude=  param->catalog[position].;
+				device.SafetyWay = param->catalog[position].SafetyWay;
+				device.RegisterWay = param->catalog[position].RegisterWay;
+				device.Secrecy = param->catalog[position].Secrecy ? 1 : 0;
+				device.Port = param->catalog[position].port;
+				device.Password = param->catalog[position].Password;
 				device.Manufacturer = param->catalog[position].Manufacturer;
 				device.Model = param->catalog[position].Model;
 				device.Name = param->catalog[position].Name;
+				device.Event = param->catalog[position].Event;
 				if (param->catalog[position].Status == 1) {
 					device.Status = "ON";
 				}
@@ -1378,6 +1410,7 @@ bool CGB28181XmlParser::UnPackCatalogResponse(const std::string &xml_str, int& s
         GBUtil::memcpy_safe(param->catalog[i].CertNum, COMM_LEN,  device.CertNum);
         GBUtil::memcpy_safe(param->catalog[i].CivilCode, GB_ID_LEN-1,  device.CivilCode);
         GBUtil::memcpy_safe(param->catalog[i].DeviceID, GB_ID_LEN-1,  device.DeviceID);
+        GBUtil::memcpy_safe(param->catalog[i].Owner, COMM_LEN, device.Ower);
         GBUtil::memcpy_safe(param->catalog[i].ParentID, GB_ID_LEN-1,  device.ParentID);
         GBUtil::memcpy_safe(param->catalog[i].StreamNumberList, 32,  device.StreamNumberList);
         GBUtil::memcpy_safe(param->catalog[i].EndTime, TIME_LEN,  device.EndTime);
@@ -1385,9 +1418,13 @@ bool CGB28181XmlParser::UnPackCatalogResponse(const std::string &xml_str, int& s
         GBUtil::memcpy_safe(param->catalog[i].Manufacturer, COMM_LEN,  device.Manufacturer);
         GBUtil::memcpy_safe(param->catalog[i].Model, COMM_LEN,  device.Model);
         GBUtil::memcpy_safe(param->catalog[i].Name, COMM_LEN,  device.Name);
-
-        //device.Latitude=  param->catalog[position];
-        //device.Longitude=  param->catalog[position].;
+        GBUtil::memcpy_safe(param->catalog[i].Password, COMM_LEN, device.Password);
+        GBUtil::memcpy_safe(param->catalog[i].Event, EVENT_LEN, device.Event);
+        ParseBoolValue(device.Parental, &param->catalog[i].Parental);
+        param->catalog[i].RegisterWay = device.RegisterWay;
+        param->catalog[i].SafetyWay = device.SafetyWay;
+        param->catalog[i].Secrecy = (device.Secrecy != 0);
+        param->catalog[i].port = device.Port;
     }
 
 
@@ -1415,8 +1452,15 @@ void CGB28181XmlParser::PackCatalogNotify(int sn , int position,const DeviceCata
 		device.EndTime=  info->catalog[i].EndTime;
 		device.ErrCode=  info->catalog[i].ErrCode;
 		device.IPAddress=  info->catalog[i].IPAddress;
+		device.Ower = info->catalog[i].Owner;
+		device.Parental = info->catalog[i].Parental ? "1" : "0";
 		device.ParentID = info->catalog[i].ParentID;
 		device.StreamNumberList = info->catalog[i].StreamNumberList;
+		device.SafetyWay = info->catalog[i].SafetyWay;
+		device.RegisterWay = info->catalog[i].RegisterWay;
+		device.Secrecy = info->catalog[i].Secrecy ? 1 : 0;
+		device.Port = info->catalog[i].port;
+		device.Password = info->catalog[i].Password;
 		device.Manufacturer=  info->catalog[i].Manufacturer;
 		device.Model=  info->catalog[i].Model;
 		device.Name=  info->catalog[i].Name;
@@ -1464,6 +1508,7 @@ bool CGB28181XmlParser::UnPackCatalogNotify(const std::string &xml_str, int& sn,
 		GBUtil::memcpy_safe(info->catalog[i].CertNum, COMM_LEN,  device.CertNum);
 		GBUtil::memcpy_safe(info->catalog[i].CivilCode, GB_ID_LEN-1,  device.CivilCode);
 		GBUtil::memcpy_safe(info->catalog[i].DeviceID, GB_ID_LEN-1,  device.DeviceID);
+		GBUtil::memcpy_safe(info->catalog[i].Owner, COMM_LEN, device.Ower);
 		GBUtil::memcpy_safe(info->catalog[i].ParentID, GB_ID_LEN-1,  device.ParentID);
 		GBUtil::memcpy_safe(info->catalog[i].StreamNumberList, 32,  device.StreamNumberList);
 		GBUtil::memcpy_safe(info->catalog[i].EndTime, TIME_LEN,  device.EndTime);
@@ -1471,7 +1516,13 @@ bool CGB28181XmlParser::UnPackCatalogNotify(const std::string &xml_str, int& sn,
 		GBUtil::memcpy_safe(info->catalog[i].Manufacturer, COMM_LEN,  device.Manufacturer);
 		GBUtil::memcpy_safe(info->catalog[i].Model, COMM_LEN,  device.Model);
 		GBUtil::memcpy_safe(info->catalog[i].Name, COMM_LEN,  device.Name);
-		GBUtil::memcpy_safe(info->catalog[i].Event, COMM_LEN,  device.Event);
+		GBUtil::memcpy_safe(info->catalog[i].Password, COMM_LEN, device.Password);
+		GBUtil::memcpy_safe(info->catalog[i].Event, EVENT_LEN, device.Event);
+		ParseBoolValue(device.Parental, &info->catalog[i].Parental);
+		info->catalog[i].RegisterWay = device.RegisterWay;
+		info->catalog[i].SafetyWay = device.SafetyWay;
+		info->catalog[i].Secrecy = (device.Secrecy != 0);
+		info->catalog[i].port = device.Port;
 
 	}
 	

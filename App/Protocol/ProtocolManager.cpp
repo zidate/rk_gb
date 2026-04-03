@@ -2367,6 +2367,85 @@ static std::string ResolveGbModelName(const protocol::ProtocolExternalConfig& cf
     return "RC0240";
 }
 
+static bool TryExtractGbCivilCode(const std::string& source, std::string& civilCode)
+{
+    if (source.size() < 6) {
+        return false;
+    }
+
+    const std::string candidate = source.substr(0, 6);
+    if (!std::all_of(candidate.begin(), candidate.end(), ::isdigit)) {
+        return false;
+    }
+
+    civilCode = candidate;
+    return true;
+}
+
+static std::string ResolveGbCatalogCivilCode(const std::string& deviceId,
+                                             const protocol::ProtocolExternalConfig& cfg)
+{
+    std::string civilCode;
+    if (TryExtractGbCivilCode(deviceId, civilCode)) {
+        return civilCode;
+    }
+    if (TryExtractGbCivilCode(cfg.gb_register.device_id, civilCode)) {
+        return civilCode;
+    }
+    return "";
+}
+
+static std::string ResolveGbCatalogAddress(const std::string& localIp,
+                                           const std::string& deviceName,
+                                           const std::string& deviceId)
+{
+    if (!localIp.empty()) {
+        return localIp;
+    }
+    if (!deviceName.empty()) {
+        return deviceName;
+    }
+    return deviceId;
+}
+
+static void PopulateGbCatalogInfo(CatalogInfo& catalogInfo,
+                                  const protocol::ProtocolExternalConfig& cfg,
+                                  const std::string& deviceId,
+                                  const std::string& runtimeName)
+{
+    const std::string deviceName = ResolveGbDeviceName(cfg, runtimeName);
+    const std::string manufacturer = ResolveGbManufacturerName(cfg);
+    const std::string model = ResolveGbModelName(cfg);
+    const std::string civilCode = ResolveGbCatalogCivilCode(deviceId, cfg);
+    std::string localIp;
+    ResolveGbResponseLocalIp(cfg.gb_register.server_ip, cfg.gb_register.server_port, localIp);
+
+    memset(&catalogInfo, 0, sizeof(catalogInfo));
+
+    CopyBounded(catalogInfo.Event, sizeof(catalogInfo.Event), EVENT_ON);
+    CopyBounded(catalogInfo.DeviceID, sizeof(catalogInfo.DeviceID), deviceId);
+    CopyBounded(catalogInfo.Name, sizeof(catalogInfo.Name), deviceName);
+    CopyBounded(catalogInfo.Manufacturer, sizeof(catalogInfo.Manufacturer), manufacturer);
+    CopyBounded(catalogInfo.Model, sizeof(catalogInfo.Model), model);
+    CopyBounded(catalogInfo.Owner, sizeof(catalogInfo.Owner), manufacturer);
+    CopyBounded(catalogInfo.CivilCode, sizeof(catalogInfo.CivilCode), civilCode);
+    CopyBounded(catalogInfo.Address,
+                sizeof(catalogInfo.Address),
+                ResolveGbCatalogAddress(localIp, deviceName, deviceId));
+    CopyBounded(catalogInfo.StreamNumberList,
+                sizeof(catalogInfo.StreamNumberList),
+                BuildGbStreamNumberList());
+    CopyBounded(catalogInfo.IPAddress, sizeof(catalogInfo.IPAddress), localIp);
+    catalogInfo.Parental = false;
+    catalogInfo.Status = true;
+    catalogInfo.RegisterWay = 1;
+    catalogInfo.Secrecy = false;
+    catalogInfo.SafetyWay = 0;
+    catalogInfo.Certifiable = 0;
+    catalogInfo.ErrCode = 0;
+    catalogInfo.port = 0;
+}
+
 static std::string ResolveGbDeviceTypeName()
 {
     return "IPC";
@@ -9411,10 +9490,8 @@ int ProtocolManager::NotifyGbCatalogInternal(const char* gbCode)
     SubscribeHandle handle = NULL;
 
     const int catalogCount = 1;
-
-    const char* manufacturer = "IPC";
-
-    const char* model = "RC0240";
+    const std::string manufacturer = ResolveGbManufacturerName(m_cfg);
+    const std::string model = ResolveGbModelName(m_cfg);
 
 #if PROTOCOL_HAS_GB28181_CLIENT_SDK
 
@@ -9440,8 +9517,6 @@ int ProtocolManager::NotifyGbCatalogInternal(const char* gbCode)
 
     memset(&catalogList, 0, sizeof(catalogList));
 
-    memset(&catalogInfo, 0, sizeof(catalogInfo));
-
 
 
     std::string deviceId = ResolveGbDeviceIdOrDefault(
@@ -9457,24 +9532,7 @@ int ProtocolManager::NotifyGbCatalogInternal(const char* gbCode)
     catalogList.catalog = &catalogInfo;
 
 
-
-    CopyBounded(catalogInfo.Event, sizeof(catalogInfo.Event), EVENT_ON);
-
-    CopyBounded(catalogInfo.DeviceID, sizeof(catalogInfo.DeviceID), deviceId);
-
-    CopyBounded(catalogInfo.Name, sizeof(catalogInfo.Name), deviceId);
-
-    CopyBounded(catalogInfo.StreamNumberList, sizeof(catalogInfo.StreamNumberList), BuildGbStreamNumberList());
-
-    CopyBounded(catalogInfo.Manufacturer, sizeof(catalogInfo.Manufacturer), manufacturer);
-
-    CopyBounded(catalogInfo.Model, sizeof(catalogInfo.Model), model);
-
-    catalogInfo.Parental = false;
-
-    catalogInfo.Status = true;
-
-    catalogInfo.port = 0;
+    PopulateGbCatalogInfo(catalogInfo, m_cfg, deviceId, m_gb_device_name);
 
 
 
@@ -9508,9 +9566,9 @@ int ProtocolManager::NotifyGbCatalogInternal(const char* gbCode)
 
            catalogCount,
 
-           manufacturer,
+           manufacturer.c_str(),
 
-           model);
+           model.c_str());
 
     return 0;
 
@@ -9850,8 +9908,6 @@ int ProtocolManager::ResponseGbQueryCatalog(ResponseHandle handle, const QueryPa
 
     memset(&catalogList, 0, sizeof(catalogList));
 
-    memset(&catalogInfo, 0, sizeof(catalogInfo));
-
 
 
     std::string gbCode = ResolveGbDeviceIdOrDefault(
@@ -9865,22 +9921,7 @@ int ProtocolManager::ResponseGbQueryCatalog(ResponseHandle handle, const QueryPa
     catalogList.catalog = &catalogInfo;
 
 
-
-    CopyBounded(catalogInfo.Event, sizeof(catalogInfo.Event), EVENT_ON);
-
-    CopyBounded(catalogInfo.DeviceID, sizeof(catalogInfo.DeviceID), gbCode);
-
-    CopyBounded(catalogInfo.Name, sizeof(catalogInfo.Name), gbCode);
-
-    CopyBounded(catalogInfo.StreamNumberList, sizeof(catalogInfo.StreamNumberList), BuildGbStreamNumberList());
-
-    CopyBounded(catalogInfo.Manufacturer, sizeof(catalogInfo.Manufacturer), "IPC");
-
-    CopyBounded(catalogInfo.Model, sizeof(catalogInfo.Model), "RC0240");
-
-    catalogInfo.Parental = false;
-
-    catalogInfo.port = 0;
+    PopulateGbCatalogInfo(catalogInfo, m_cfg, gbCode, m_gb_device_name);
 
 
 
