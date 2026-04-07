@@ -651,15 +651,12 @@ int GB28181BroadcastBridge::RunRecvLoop()
                 }
 
                 if (n == 0 || (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK)) {
-                    printf("[GB28181][Broadcast] tcp active disconnected errno=%d remote=%s:%d\n",
+                    printf("[GB28181][Broadcast] tcp active disconnected errno=%d remote=%s:%d, wait next invite\n",
                            errno,
                            m_remote_ip.c_str(),
                            m_remote_port);
                     CloseAcceptedSocket();
-                    if (SetupRecvSocket() != 0) {
-                        usleep(200000);
-                    }
-                    continue;
+                    break;
                 }
 
                 continue;
@@ -669,11 +666,9 @@ int GB28181BroadcastBridge::RunRecvLoop()
             while (m_tcp_recv_buffer.size() >= 2) {
                 const size_t frameSize = ((size_t)m_tcp_recv_buffer[0] << 8) | (size_t)m_tcp_recv_buffer[1];
                 if (frameSize == 0 || frameSize > kMaxTcpFrame) {
-                    printf("[GB28181][Broadcast] invalid tcp active frame size=%lu\n", (unsigned long)frameSize);
+                    printf("[GB28181][Broadcast] invalid tcp active frame size=%lu, wait next invite\n",
+                           (unsigned long)frameSize);
                     CloseAcceptedSocket();
-                    if (SetupRecvSocket() != 0) {
-                        usleep(200000);
-                    }
                     break;
                 }
 
