@@ -6869,8 +6869,8 @@ int ProtocolManager::HandleGbBroadcastNotifyResponse(const char* gbCode, const B
     memset(&requestMap, 0, sizeof(requestMap));
     memset(&request, 0, sizeof(request));
 
-    const std::string mediaDeviceId = sourceId.empty() ? resolvedGbCode : sourceId;
-    const std::string inviteTargetId = mediaDeviceId;
+    const std::string mediaDeviceId = resolvedGbCode.empty() ? deviceId : resolvedGbCode;
+    const std::string inviteTargetId = sourceId.empty() ? mediaDeviceId : sourceId;
 
     int ret = BuildGbBroadcastMediaInfo(localIp, mediaDeviceId, request, requestMap);
     if (ret != 0) {

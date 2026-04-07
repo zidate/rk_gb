@@ -4554,7 +4554,9 @@ int   CGBClientImpl::StreamRequestEx(const MediaInfo* input,
 
 
 
-    if(kSipSuccess !=m_sip_client->Ack(&(result->Dialog), &message, 0,  NULL)) {
+    SipMessage ack_message;
+    memset(&ack_message, 0, sizeof(ack_message));
+    if(kSipSuccess !=m_sip_client->Ack(&(result->Dialog), &ack_message, 0,  NULL)) {
 
 
         code = kGbAckFail;
