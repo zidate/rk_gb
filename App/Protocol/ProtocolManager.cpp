@@ -6955,8 +6955,9 @@ int ProtocolManager::HandleGbBroadcastNotifyResponse(const char* gbCode, const B
 
     }
 
+    const NetTransType answerTransport = ResolveGbAnswerTransportType(answer.RtpType, "udp");
 
-    ret = ApplyGbBroadcastTransportHint(remoteIp, remotePort, payloadType, codec, answer.RtpType);
+    ret = ApplyGbBroadcastTransportHint(remoteIp, remotePort, payloadType, codec, answerTransport);
     if (ret != 0) {
 
         printf("[ProtocolManager] gb broadcast active invite apply answer failed ret=%d gb=%s remote=%s:%d handle=%p\n",
@@ -6992,7 +6993,7 @@ int ProtocolManager::HandleGbBroadcastNotifyResponse(const char* gbCode, const B
         m_gb_broadcast_session.local_ip = request.IP;
         m_gb_broadcast_session.local_port = (int)request.Port;
         m_gb_broadcast_session.payload_type = payloadType;
-        m_gb_broadcast_session.transport_type = (int)answer.RtpType;
+        m_gb_broadcast_session.transport_type = (int)answerTransport;
         m_gb_broadcast_session.codec = codec;
         m_gb_broadcast_session.notify_ts_ms = notifyTsMs;
         m_gb_broadcast_session.invite_ts_ms = GetNowMs();
@@ -7008,7 +7009,7 @@ int ProtocolManager::HandleGbBroadcastNotifyResponse(const char* gbCode, const B
            request.Port,
            codec.c_str(),
            payloadType,
-           GbNetTransportName(answer.RtpType));
+           GbNetTransportName(answerTransport));
 
     if (answer.RtpDescri.mapDescri != NULL) {
         free(answer.RtpDescri.mapDescri);
