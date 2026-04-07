@@ -8,6 +8,7 @@
 
 | 时间戳 | 功能名称 | 类型 | 状态 | 方案包路径 |
 |--------|----------|------|------|------------|
+| 202604071641 | gb_talk_audio_output_session_boundary | 轻量迭代 | ✅已完成 | [2026-04/202604071641_gb_talk_audio_output_session_boundary](2026-04/202604071641_gb_talk_audio_output_session_boundary/) |
 | 202604071542 | gb_broadcast_rx_dump_and_decode_align | 轻量迭代 | ✅已完成 | [2026-04/202604071542_gb_broadcast_rx_dump_and_decode_align](2026-04/202604071542_gb_broadcast_rx_dump_and_decode_align/) |
 | 202604031701 | gb_catalog_required_fields | 轻量迭代 | ✅已完成 | [2026-04/202604031701_gb_catalog_required_fields](2026-04/202604031701_gb_catalog_required_fields/) |
 | 202604021432 | gat1400_keepalive_demo_single_shot_split | 轻量迭代 | ✅已完成 | [2026-04/202604021432_gat1400_keepalive_demo_single_shot_split](2026-04/202604021432_gat1400_keepalive_demo_single_shot_split/) |
@@ -88,6 +89,7 @@
 
 ### 2026-04
 
+- [202604071641_gb_talk_audio_output_session_boundary](2026-04/202604071641_gb_talk_audio_output_session_boundary/) - 将 GB28181 广播/对讲下行的扬声器控制改为按会话边界处理：旧连接关闭时清掉 `AUDIO_TALK_TYPE`，新的 `UDP apply` 或 `TCP connect/accept` 成功后再明确打开，修正第二次有码流但设备侧无声的播放恢复时机
 - [202604071542_gb_broadcast_rx_dump_and_decode_align](2026-04/202604071542_gb_broadcast_rx_dump_and_decode_align/) - 分析 `234.pcap` / `debug.log` 后，给 GB28181 广播下行增加解码前原始音频落盘能力，并将 G711A/U 解码目标缓冲改为 `int16_t` 对齐写法，便于继续排查“第二次有流但设备侧无声/声音难听”
 - [202604031701_gb_catalog_required_fields](2026-04/202604031701_gb_catalog_required_fields/) - 根据 `224.pcap` 修复 GB28181 `Catalog` 查询响应和目录订阅通知字段缺失，统一补齐 `Name/Owner/CivilCode/Address/IPAddress/RegisterWay/Status/Event` 等目录项基础信息，并修正 XML 打包层把这些字段真正编码出去
 - [202604021432_gat1400_keepalive_demo_single_shot_split](2026-04/202604021432_gat1400_keepalive_demo_single_shot_split/) - 按 issue 41 最新评论将 keepalive demo 拆成人脸/机动车两个单次函数，改用四张独立图片并去掉失败后的心跳重试，避免平台持续看到重复上报

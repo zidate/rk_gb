@@ -530,6 +530,11 @@ int GB28181BroadcastBridge::SetupRecvSocket()
         }
 
         m_recv_sock = sockfd;
+        if (EnsureAudioOutputStarted() != 0) {
+            close(sockfd);
+            m_recv_sock = -1;
+            return -17;
+        }
         printf("[GB28181][Broadcast] tcp active connected remote=%s:%d\n",
                m_remote_ip.c_str(),
                m_remote_port);
@@ -554,6 +559,11 @@ void GB28181BroadcastBridge::CloseAcceptedSocket()
         m_recv_sock = -1;
     }
     m_tcp_recv_buffer.clear();
+
+    if (m_audio_opened) {
+        IAudioManager::instance()->StopAudioOut(IAudioManager::AUDIO_TALK_TYPE, true);
+        m_audio_opened = false;
+    }
 }
 
 void GB28181BroadcastBridge::CloseRecvSocket()
@@ -652,6 +662,13 @@ int GB28181BroadcastBridge::RunRecvLoop()
 
                 CloseAcceptedSocket();
                 m_recv_sock = clientSock;
+                if (EnsureAudioOutputStarted() != 0) {
+                    printf("[GB28181][Broadcast] tcp passive start audio output failed remote=%s:%d\n",
+                           sourceIp,
+                           sourcePort);
+                    CloseAcceptedSocket();
+                    continue;
+                }
                 printf("[GB28181][Broadcast] tcp passive accept remote=%s:%d local_port=%d\n",
                        sourceIp,
                        sourcePort,
@@ -1025,6 +1042,13 @@ int GB28181BroadcastBridge::ApplyTransportHint(const std::string& remoteIp,
                 }
             }
             return ret;
+        }
+    }
+
+    if (m_running && m_param.input_mode == "stream" && normalizedTransport == kRtpOverUdp) {
+        const int audioRet = EnsureAudioOutputStarted();
+        if (audioRet != 0) {
+            return -27;
         }
     }
 
