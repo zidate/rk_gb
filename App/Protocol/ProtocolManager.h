@@ -307,9 +307,13 @@ private:
 
         uint32_t sent_audio_frames;
 
+        uint32_t dropped_stream_mismatch_frames;
+
         uint64_t last_capture_log_ms;
 
         uint64_t last_wait_idr_log_ms;
+
+        uint64_t last_stream_mismatch_log_ms;
 
 
 
@@ -337,9 +341,13 @@ private:
 
               sent_audio_frames(0),
 
+              dropped_stream_mismatch_frames(0),
+
               last_capture_log_ms(0),
 
-              last_wait_idr_log_ms(0)
+              last_wait_idr_log_ms(0),
+
+              last_stream_mismatch_log_ms(0)
 
         {
 
@@ -736,7 +744,6 @@ private:
 
 
 #endif
-
 
 
 

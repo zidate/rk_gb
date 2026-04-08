@@ -305,6 +305,39 @@ static const char* GbVideoStartStateName(GbVideoStartState state)
     }
 }
 
+static const char* GbLiveStreamName(bool preferSubStream)
+{
+    return preferSubStream ? "sub" : "main";
+}
+
+static const char* GbLiveCaptureChannelName(int mediaChn)
+{
+    switch (mediaChn) {
+    case DMC_MEDIA_VIDEO_MAIN_STREAM:
+        return "main";
+    case DMC_MEDIA_VIDEO_SUB_STREAM:
+        return "sub";
+    case DMC_MEDIA_AUDIO_FRIST_STREAM:
+        return "audio";
+    default:
+        return "other";
+    }
+}
+
+static const char* GbLiveCaptureMediaTypeName(int mediaType)
+{
+    switch (mediaType) {
+    case DMC_MEDIA_TYPE_H264:
+        return "h264";
+    case DMC_MEDIA_TYPE_H265:
+        return "h265";
+    case DMC_MEDIA_TYPE_AUDIO:
+        return "audio";
+    default:
+        return "unknown";
+    }
+}
+
 
 
 static std::string NormalizeCodec(const std::string& codecIn)
@@ -6322,6 +6355,7 @@ int ProtocolManager::PushLiveVideoEsFrame(const uint8_t* data,
     uint32_t recvAudio = 0;
     uint32_t sentVideo = 0;
     uint32_t sentAudio = 0;
+    uint32_t droppedMismatch = 0;
     const uint64_t nowMs = GetNowMs();
     const GbVideoStartState startState = DetectGbVideoStartState(mediaType, data, size);
     bool waitingFirstIdr = false;
@@ -6329,6 +6363,7 @@ int ProtocolManager::PushLiveVideoEsFrame(const uint8_t* data,
     bool firstIdrAccepted = false;
     bool dropBeforeIdr = false;
     bool logDropBeforeIdr = false;
+    bool preferSubStream = false;
 
     {
 
@@ -6343,7 +6378,9 @@ int ProtocolManager::PushLiveVideoEsFrame(const uint8_t* data,
             recvAudio = m_gb_live_session.recv_audio_frames;
             sentVideo = m_gb_live_session.sent_video_frames;
             sentAudio = m_gb_live_session.sent_audio_frames;
+            droppedMismatch = m_gb_live_session.dropped_stream_mismatch_frames;
             waitingFirstIdr = m_gb_live_session.wait_first_idr;
+            preferSubStream = m_gb_live_session.prefer_sub_stream;
             if (m_gb_live_session.wait_first_idr) {
                 if (startState == kGbVideoStartIdr) {
                     m_gb_live_session.wait_first_idr = false;
@@ -6369,8 +6406,9 @@ int ProtocolManager::PushLiveVideoEsFrame(const uint8_t* data,
     }
 
     if (logFrame) {
-        printf("[ProtocolManager] gb live video es handle=%p acked=%d wait_first_idr=%d start=%s recv_video=%u recv_audio=%u sent_video=%u sent_audio=%u size=%lu key=%d pts90k=%llu\n",
+        printf("[ProtocolManager] gb live video es handle=%p stream=%s acked=%d wait_first_idr=%d start=%s recv_video=%u recv_audio=%u sent_video=%u sent_audio=%u drop_mismatch=%u size=%lu key=%d pts90k=%llu\n",
                handle,
+               GbLiveStreamName(preferSubStream),
                acked ? 1 : 0,
                waitingFirstIdr ? 1 : 0,
                GbVideoStartStateName(startState),
@@ -6378,6 +6416,7 @@ int ProtocolManager::PushLiveVideoEsFrame(const uint8_t* data,
                recvAudio,
                sentVideo,
                sentAudio,
+               droppedMismatch,
                (unsigned long)size,
                keyFrame ? 1 : 0,
                (unsigned long long)pts90k);
@@ -7278,10 +7317,20 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
     const int requestedStreamNum = ResolveGbStreamNumber(input, m_cfg);
 
     const bool preferSubStream = (requestedStreamNum > 0);
+    const std::string availableStreamList = BuildGbStreamNumberList();
+
+    if (needReplaceSession) {
+        printf("[ProtocolManager] gb live request switch old_stream=%s new_stream=%s same_stream=%d old_handle=%p new_handle=%p gb=%s\n",
+               GbLiveStreamName(replacedSession.prefer_sub_stream),
+               GbLiveStreamName(preferSubStream),
+               replacedSession.prefer_sub_stream == preferSubStream ? 1 : 0,
+               replacedSession.stream_handle,
+               handle,
+               gbCode != NULL ? gbCode : "");
+    }
 
 
-
-    printf("[ProtocolManager] gb live request enter gb=%s handle=%p offered_transport=%s remote=%s:%d stream_num=%d audio_requested=%d ps_mux_offer=%d force_audio=%d audio_enabled=%d\n",
+    printf("[ProtocolManager] gb live request enter gb=%s handle=%p offered_transport=%s remote=%s:%d stream_num=%d stream=%s available_streams=%s default_stream=%s audio_requested=%d ps_mux_offer=%d force_audio=%d audio_enabled=%d\n",
 
            gbCode != NULL ? gbCode : "",
 
@@ -7294,6 +7343,12 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
            endpointKnown ? remotePort : 0,
 
            requestedStreamNum,
+
+           GbLiveStreamName(preferSubStream),
+
+           availableStreamList.c_str(),
+
+           m_cfg.gb_live.video_stream_id.c_str(),
 
            audioRequested ? 1 : 0,
 
@@ -7343,7 +7398,7 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
 
                requestedStreamNum,
 
-               preferSubStream ? "sub" : "main",
+               GbLiveStreamName(preferSubStream),
 
                audioRequested ? 1 : 0,
 
@@ -10758,13 +10813,13 @@ void ProtocolManager::HandleGbStopStreamRequest(StreamHandle handle, const char*
 
         ResetGbMediaSenderRuntime(kLiveStream);
 
-        printf("[ProtocolManager] gb live session stopped gb=%s handle=%p stream=%s audio_requested=%d audio_enabled=%d sent_video=%u sent_audio=%u\n",
+        printf("[ProtocolManager] gb live session stopped gb=%s handle=%p stream=%s audio_requested=%d audio_enabled=%d sent_video=%u sent_audio=%u drop_mismatch=%u\n",
 
                liveSession.gb_code.c_str(),
 
                liveSession.stream_handle,
 
-               liveSession.prefer_sub_stream ? "sub" : "main",
+               GbLiveStreamName(liveSession.prefer_sub_stream),
 
                liveSession.audio_requested ? 1 : 0,
 
@@ -10772,7 +10827,9 @@ void ProtocolManager::HandleGbStopStreamRequest(StreamHandle handle, const char*
 
                liveSession.sent_video_frames,
 
-               liveSession.sent_audio_frames);
+               liveSession.sent_audio_frames,
+
+               liveSession.dropped_stream_mismatch_frames);
 
     }
 
@@ -10968,12 +11025,13 @@ int ProtocolManager::ReconfigureGbLiveSender(const MediaInfo* input, const char*
         runtimeParam.video_codec = NormalizeGbLiveVideoCodec(runtimeParam.video_codec);
     }
 
-    printf("[ProtocolManager] gb %s stream runtime codec stream=%s codec=%s remote=%s:%d\n",
+    printf("[ProtocolManager] gb %s stream runtime codec stream=%s codec=%s remote=%s:%d requested_stream_num=%d\n",
            StreamRequestTypeName(requestType),
            runtimeParam.video_stream_id.c_str(),
            runtimeParam.video_codec.c_str(),
            runtimeParam.target_ip.c_str(),
-           runtimeParam.target_port);
+           runtimeParam.target_port,
+           requestedStreamNum);
 
     GbMediaSenderRuntime* runtime = GetGbMediaSenderRuntime(requestType);
     if (runtime == NULL) {
@@ -11025,19 +11083,20 @@ int ProtocolManager::ReconfigureGbLiveSender(const MediaInfo* input, const char*
         }
 
         runtime->current_port = runtime->sender.GetLocalPort();
-        printf("[ProtocolManager] gb %s stream sender prepared target=%s:%d local_port=%d gb=%s transport=%s open=pre_response\n",
+        printf("[ProtocolManager] gb %s stream sender prepared target=%s:%d local_port=%d gb=%s stream=%s transport=%s open=pre_response\n",
                StreamRequestTypeName(requestType),
                remoteIp.c_str(),
                remotePort,
                runtime->current_port,
                gbCode != NULL ? gbCode : "",
+               runtimeParam.video_stream_id.c_str(),
                runtimeParam.transport.c_str());
         return 0;
     }
 
     if (requestType == kLiveStream) {
 
-        printf("[ProtocolManager] gb %s stream sender prepared target=%s:%d local_port=%d gb=%s transport=%s open=deferred_until_ack\n",
+        printf("[ProtocolManager] gb %s stream sender prepared target=%s:%d local_port=%d gb=%s stream=%s transport=%s open=deferred_until_ack\n",
 
                StreamRequestTypeName(requestType),
 
@@ -11048,6 +11107,8 @@ int ProtocolManager::ReconfigureGbLiveSender(const MediaInfo* input, const char*
                runtimeParam.local_port,
 
                gbCode != NULL ? gbCode : "",
+
+               runtimeParam.video_stream_id.c_str(),
 
                runtimeParam.transport.c_str());
 
@@ -12436,6 +12497,36 @@ int ProtocolManager::HandleGbLiveCaptureInternal(int media_chn,
         const bool isSubStream = (media_chn == DMC_MEDIA_VIDEO_SUB_STREAM);
 
         if (needSubStream != isSubStream) {
+            bool logMismatch = false;
+            uint32_t droppedMismatch = 0;
+
+            {
+                std::lock_guard<std::mutex> lock(m_gb_live_mutex);
+
+                if (m_gb_live_session.active &&
+                    m_gb_live_session.stream_handle == session.stream_handle) {
+                    ++m_gb_live_session.dropped_stream_mismatch_frames;
+                    droppedMismatch = m_gb_live_session.dropped_stream_mismatch_frames;
+                    if (m_gb_live_session.last_stream_mismatch_log_ms == 0 ||
+                        timestampMs >= m_gb_live_session.last_stream_mismatch_log_ms + 1000ULL) {
+                        m_gb_live_session.last_stream_mismatch_log_ms = timestampMs;
+                        logMismatch = true;
+                    }
+                }
+            }
+
+            if (logMismatch) {
+                printf("[ProtocolManager] gb live drop stream mismatch handle=%p expected=%s incoming=%s codec=%s acked=%d wait_first_idr=%d drop_mismatch=%u size=%d pts90k=%llu\n",
+                       session.stream_handle,
+                       GbLiveStreamName(needSubStream),
+                       GbLiveCaptureChannelName(media_chn),
+                       GbLiveCaptureMediaTypeName(media_type),
+                       session.acked ? 1 : 0,
+                       session.wait_first_idr ? 1 : 0,
+                       droppedMismatch,
+                       frame_len,
+                       (unsigned long long)pts90k);
+            }
 
             return 0;
 
