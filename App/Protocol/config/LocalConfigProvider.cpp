@@ -227,6 +227,20 @@ protocol::GbZeroConfigParam BuildDefaultGbZeroConfigParam()
     return param;
 }
 
+void ApplyGbRuntimeZeroConfigFields(protocol::GbRegisterParam& param)
+{
+    param.register_mode = protocol::NormalizeGbRegisterMode(param.register_mode);
+    if (!protocol::IsGbRegisterModeZeroConfig(param)) {
+        return;
+    }
+
+    const protocol::GbRegisterParam defaults = BuildDefaultGbRegisterParam();
+    param.server_ip = defaults.server_ip;
+    param.server_port = defaults.server_port;
+    param.redirect_domain = defaults.redirect_domain;
+    param.redirect_server_id = defaults.redirect_server_id;
+}
+
 protocol::GatRegisterParam BuildDefaultGatRegisterParam()
 {
     protocol::GatRegisterParam param;
@@ -249,9 +263,13 @@ protocol::GatRegisterParam BuildDefaultGatRegisterParam()
 
 void ApplyGbRegisterEditableFields(protocol::GbRegisterParam& target, const protocol::GbRegisterParam& source)
 {
-    target = source;
     target.enabled = (source.enabled != 0) ? 1 : 0;
     target.register_mode = protocol::NormalizeGbRegisterMode(source.register_mode);
+    target.server_ip = source.server_ip;
+    target.server_port = source.server_port;
+    target.device_id = source.device_id;
+    target.username = source.username;
+    target.password = source.password;
 }
 
 void ApplyGbZeroConfigEditableFields(protocol::GbRegisterParam& target, const protocol::GbZeroConfigParam& source)
@@ -603,6 +621,7 @@ LocalConfigSyncState SyncLocalConfigFiles(protocol::ProtocolExternalConfig& cfg)
     if (IsZeroConfigFileMissing(state, cfg.gb_register)) {
         state.zero_sync_ret = RequiredZeroConfigFileError();
     }
+    ApplyGbRuntimeZeroConfigFields(cfg.gb_register);
 
     state.gat_source = LoadExistingGatRegisterConfig(cfg.gat_register);
     if (state.gat_source != kLocalConfigLoadCurrent) {
@@ -701,6 +720,17 @@ int LocalConfigProvider::LoadOrCreateGbRegisterConfig(GbRegisterParam& out)
     return 0;
 }
 
+int LocalConfigProvider::LoadOrCreateGbRuntimeRegisterConfig(GbRegisterParam& out)
+{
+    const int ret = LoadOrCreateGbRegisterConfig(out);
+    if (ret != 0) {
+        return ret;
+    }
+
+    ApplyGbRuntimeZeroConfigFields(out);
+    return 0;
+}
+
 int LocalConfigProvider::UpdateGbRegisterConfig(const GbRegisterParam& param)
 {
     GbRegisterParam next = BuildDefaultGbRegisterConfig();
@@ -718,7 +748,7 @@ int LocalConfigProvider::UpdateGbRegisterConfig(const GbRegisterParam& param)
         return saveGbRet;
     }
 
-    return SaveLocalGbZeroConfigFile(next);
+    return 0;
 }
 
 int LocalConfigProvider::UpdateGbZeroConfig(const GbZeroConfigParam& param)
@@ -820,7 +850,21 @@ int LocalConfigProvider::PushApply(const ProtocolExternalConfig& cfg)
     ProtocolExternalConfig normalized = cfg;
     NormalizeGbRegisterConfig(normalized.gb_register);
     m_cached_cfg = normalized;
-    const int saveGbRet = SaveLocalGbConfigFile(m_cached_cfg.gb_register);
+
+    GbRegisterParam persistedGb = BuildDefaultGbRegisterConfig();
+    LoadExistingGbRegisterConfig(persistedGb);
+    LoadExistingGbZeroConfig(persistedGb);
+    const std::string storedServerIp = persistedGb.server_ip;
+    const int storedServerPort = persistedGb.server_port;
+    ApplyGbRegisterEditableFields(persistedGb, normalized.gb_register);
+    if (protocol::IsGbRegisterModeZeroConfig(normalized.gb_register)) {
+        persistedGb.server_ip = storedServerIp;
+        persistedGb.server_port = storedServerPort;
+    }
+    persistedGb.string_code = normalized.gb_register.string_code;
+    persistedGb.mac_address = normalized.gb_register.mac_address;
+
+    const int saveGbRet = SaveLocalGbConfigFile(persistedGb);
     if (saveGbRet != 0) {
         printf("[Protocol][Config] module=config event=config_apply_fail trace=provider error=%d source=local stage=persist version=%s tag=%s path=%s\n",
                saveGbRet,
@@ -830,7 +874,7 @@ int LocalConfigProvider::PushApply(const ProtocolExternalConfig& cfg)
         return saveGbRet;
     }
 
-    const int saveZeroRet = SaveLocalGbZeroConfigFile(m_cached_cfg.gb_register);
+    const int saveZeroRet = SaveLocalGbZeroConfigFile(persistedGb);
     if (saveZeroRet != 0) {
         printf("[Protocol][Config] module=config event=config_apply_fail trace=provider error=%d source=local stage=persist version=%s tag=%s path=%s\n",
                saveZeroRet,

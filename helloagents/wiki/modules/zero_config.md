@@ -90,7 +90,7 @@
 
 ## 当前代码落点
 - `gb28181.ini` 新增 `register_mode=standard|zero_config` 作为运行时模式开关；`zero_config.ini` 当前只承载 `StringCode/Mac` 两个零配置外部可编辑入口字段，不承担模式判定职责，也不保存 `302` 返回的正式平台 `ServerIp/ServerPort/ServerDomain/ServerId/deviceId`。
-- `LocalConfigProvider` 已内置一组零配置 `302` 接入默认入口参数，用于在本地文件尚未覆盖时提供 `redirect_server_id/server_ip/server_port/string_code/password/mac_address` 的缺省值；当前仍保持 `register_mode=standard` 默认行为，不会因为这组默认值自动切到零配置流程。
+- `LocalConfigProvider` 已内置一组零配置 `302` 接入默认入口参数，用于在零配置运行态固定 `redirect_server_id/server_ip/server_port/string_code/password/mac_address`；其中 `server_id/server_ip/server_port` 当前已明确与 `gb28181.ini` 中保存的标准国标注册参数分离，切到 `register_mode=zero_config` 时只在运行态生效，不回写标准配置文件。
 - `register_mode=zero_config` 时，`LocalConfigProvider` 会校验 `StringCode`、`redirect_server_id` 等关键字段，且本地 flash 中 `/userdata/conf/Config/GB/zero_config.ini` 缺失时会直接记录日志并返回错误，不做兼容迁移；`register_mode=standard` 时忽略该文件缺失。
 - `ProtocolManager` 现新增零配置专用 `GetGbZeroConfig()/SetGbZeroConfig()` 接口，供其他模块直接读写 `StringCode/Mac`；接口语义与现有 GB/GAT 配置接口保持一致，`get` 只读 flash，`set` 只写 flash，不直接热重启注册链路。
 - `ProtocolManager` 启动零配置链路时，现已将 `StringCode` 校验与标准国标编码校验拆开：标准国标仍要求本地身份满足纯数字 GB 编码，零配置 `StringCode` 则允许 `C044...` 这类字母数字串码，只要能作为安全的 SIP 身份使用即可。
@@ -108,7 +108,7 @@
 ## 设备侧实现清单
 
 ### P0 必须具备
-- 能从本地配置中读取并持久化零配置入口参数；当前设备侧本地落盘拆成 `gb28181.ini` 保存通用注册字段和首次接入 `server_ip/server_port`，`zero_config.ini` 只保存 `StringCode/Mac`，其余 `Line/redirect_domain/redirect_server_id/CustomProtocolVersion/manufacturer/model` 统一走代码默认值，`302` 返回的正式平台参数当前不落盘。
+- 能从本地配置中读取并持久化零配置入口参数；当前设备侧本地落盘拆成 `gb28181.ini` 保存标准国标注册字段，`zero_config.ini` 只保存 `StringCode/Mac`，零配置首次重定向入口 `server_id/server_ip/server_port` 与其余 `Line/redirect_domain/redirect_server_id/CustomProtocolVersion/manufacturer/model` 统一走代码默认值，`302` 返回的正式平台参数当前不落盘。
 - 首次上电和重启后，自动走重定向注册闭环，无需人工点击。
 - 首次 REGISTER 使用 `StringCode` 身份，并带齐 `Mac/StringCode/Line/Manufacturer/Model/Name/CustomProtocolVersion`。
 - 能正确解析 `302 Moved` 返回的正式平台信息，并切换到 `deviceId` 完成正式注册；这组正式平台参数当前只允许进程内缓存，不写回 flash。
@@ -145,6 +145,7 @@
 
 ## 变更历史
 - 2026-04-08: 按 issue 42 收缩 `zero_config.ini` 到 `StringCode/Mac` 两个字段，并新增 `ProtocolManager::GetGbZeroConfig()/SetGbZeroConfig()` 供其他模块直接读写零配置入口值
+- 2026-04-08: 按 issue 42 最新评论继续收口零配置与标准国标配置边界；`register_mode=zero_config` 时运行态固定使用代码内置的重定向 `server_id/server_ip/server_port`，不再复用 `gb28181.ini` 中的 `username/server_ip/server_port`
 - 2026-03-27: 修复 issue40：零配置启动时不再把 `StringCode` 误按纯数字国标编码校验，允许 `C044...` 这类字母数字串码通过本地身份检查
 - 2026-03-27: 根据最新零配置 `302` 接入参数，更新代码内置默认入口值；覆盖 `redirect_server_id/server_ip/server_port/string_code/password/mac_address`，但不改变 `register_mode` 默认值
 - 2026-03-27: 明确零配置 `302` 返回的正式平台参数只保存在 SDK 进程内存，不写入 flash；`Stop` / 进程重启 / 设备重启后清空，下次启动重新通过重定向获取

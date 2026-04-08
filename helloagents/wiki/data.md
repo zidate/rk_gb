@@ -69,13 +69,13 @@
 |--------|------|------|
 | `enabled` | `int` | GB28181 总开关，`0` 为禁用，`1` 为启用 |
 | `register_mode` | `std::string` | 运行时注册模式，取值为 `standard` 或 `zero_config` |
-| `server_ip` | `std::string` | GB 平台 SIP 接入地址 |
-| `server_port` | `int` | GB 平台 SIP 接入端口 |
+| `server_ip` | `std::string` | 标准 GB 平台 SIP 接入地址 |
+| `server_port` | `int` | 标准 GB 平台 SIP 接入端口 |
 | `device_id` | `std::string` | 设备国标编码 |
 | `username` | `std::string` | 注册用户名 / 接入编码 |
 | `password` | `std::string` | 注册密码 |
 
-**说明:** 当前 `gb28181.ini` 只持久化上述 7 个注册字段；`device_name`、`expires_sec`、`gb_talk`、`gb_broadcast`、`gb_upgrade`、`gb_reboot` 等其余 GB 协议项统一使用代码默认值，不再落本地 `ini`。在 `register_mode=zero_config` 下，这里的 `server_ip/server_port` 仍表示首次重定向接入入口，而不是 `302` 返回的正式平台地址。
+**说明:** 当前 `gb28181.ini` 只持久化上述 7 个注册字段；`device_name`、`expires_sec`、`gb_talk`、`gb_broadcast`、`gb_upgrade`、`gb_reboot` 等其余 GB 协议项统一使用代码默认值，不再落本地 `ini`。在 `register_mode=zero_config` 下，这里的 `server_ip/server_port` 仅保留标准国标配置语义；零配置运行态使用的首次重定向 `server_id/server_ip/server_port` 固定走代码默认值，不回写该文件。
 
 ### `GbZeroConfigParam`
 
@@ -84,7 +84,7 @@
 | `string_code` | `std::string` | 首次重定向注册使用的设备身份 |
 | `mac_address` | `std::string` | 首次重定向注册扩展头 `Mac` |
 
-**说明:** 当前 `zero_config.ini` 只持久化上述 2 个零配置字段；`Line/redirect_domain/redirect_server_id/CustomProtocolVersion/manufacturer/model` 已固定回代码默认值。只有当 `gb28181.ini` 中 `register_mode=zero_config` 时，`LocalConfigProvider` 才要求该文件存在，缺失时会直接记录日志并返回错误，不做兼容迁移或自动补文件。运行期 `302` 返回的正式平台 `ServerIp/ServerPort/ServerDomain/ServerId/deviceId` 不会写入该文件，而是只保存在 SDK 进程内存中。
+**说明:** 当前 `zero_config.ini` 只持久化上述 2 个零配置字段；`Line/redirect_domain/redirect_server_id/CustomProtocolVersion/manufacturer/model` 已固定回代码默认值。只有当 `gb28181.ini` 中 `register_mode=zero_config` 时，`LocalConfigProvider` 才要求该文件存在，缺失时会直接记录日志并返回错误，不做兼容迁移或自动补文件。零配置运行态首次重定向使用的 `server_id/server_ip/server_port` 也固定走代码默认值，不复用 `gb28181.ini` 中的标准注册参数；运行期 `302` 返回的正式平台 `ServerIp/ServerPort/ServerDomain/ServerId/deviceId` 不会写入该文件，而是只保存在 SDK 进程内存中。
 
 ### `GatRegisterParam` 本地持久化子集
 

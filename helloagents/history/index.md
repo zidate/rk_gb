@@ -8,6 +8,7 @@
 
 | 时间戳 | 功能名称 | 类型 | 状态 | 方案包路径 |
 |--------|----------|------|------|------------|
+| 202604081645 | issue42_zero_config_redirect_target | 轻量迭代 | ✅已完成 | [2026-04/202604081645_issue42_zero_config_redirect_target](2026-04/202604081645_issue42_zero_config_redirect_target/) |
 | 202604081458 | issue42_zero_config_trim | 轻量迭代 | ✅已完成 | [2026-04/202604081458_issue42_zero_config_trim](2026-04/202604081458_issue42_zero_config_trim/) |
 | 202604071753 | gb_register_2022_style | 开发 | ✅已完成 | [2026-04/202604071753_gb_register_2022_style](2026-04/202604071753_gb_register_2022_style/) |
 | 202604071712 | gb_broadcast_raw_dump_removal | 轻量迭代 | ✅已完成 | [2026-04/202604071712_gb_broadcast_raw_dump_removal](2026-04/202604071712_gb_broadcast_raw_dump_removal/) |
@@ -92,6 +93,7 @@
 
 ### 2026-04
 
+- [202604081645_issue42_zero_config_redirect_target](2026-04/202604081645_issue42_zero_config_redirect_target/) - 按 issue 42 最新评论将零配置首次重定向 `server_id/server_ip/server_port` 与 `gb28181.ini` 中的标准国标注册参数彻底分离，并避免 `SetGbRegisterConfig()` 回写污染 `zero_config.ini`
 - [202604081458_issue42_zero_config_trim](2026-04/202604081458_issue42_zero_config_trim/) - 按 issue 42 收口零配置本地配置模型：`zero_config.ini` 只保留 `string_code/mac_address`，并新增 `ProtocolManager::GetGbZeroConfig()/SetGbZeroConfig()` 供其他模块直接读写零配置入口值
 - [202604071753_gb_register_2022_style](2026-04/202604071753_gb_register_2022_style/) - 将 GB28181 注册主链切到更接近 `GB/T 28181-2022` 的口径：新增 `X-GB-Ver: 3.0`，SDK 启动版本切到 `kGB2022Version`，并让现有 `2016` 扩展字段逻辑按“2016 及以上版本”继续复用
 - [202604071712_gb_broadcast_raw_dump_removal](2026-04/202604071712_gb_broadcast_raw_dump_removal/) - 去掉 GB28181 广播下行排障期间临时加入的原始音频落盘逻辑，删除 `/mnt/sdcard/gb_broadcast_rx_*` 写文件分支和相关状态变量，保留 `g711a/g711u` 的对齐解码修正

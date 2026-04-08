@@ -22,6 +22,7 @@ public:
     static int LoadGbZeroConfig(GbZeroConfigParam& out);
     static int UpdateGbZeroConfig(const GbZeroConfigParam& param);
     static int LoadOrCreateGbRegisterConfig(GbRegisterParam& out);
+    static int LoadOrCreateGbRuntimeRegisterConfig(GbRegisterParam& out);
     static int UpdateGbRegisterConfig(const GbRegisterParam& param);
     static GatRegisterParam BuildDefaultGatRegisterConfig();
     static int LoadOrCreateGatRegisterConfig(GatRegisterParam& out);

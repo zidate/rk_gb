@@ -6136,7 +6136,7 @@ int ProtocolManager::SetGbRegisterConfig(const GbRegisterParam& param)
     }
 
     GbRegisterParam latest = LocalConfigProvider::BuildDefaultGbRegisterConfig();
-    const int loadRet = LocalConfigProvider::LoadOrCreateGbRegisterConfig(latest);
+    const int loadRet = LocalConfigProvider::LoadOrCreateGbRuntimeRegisterConfig(latest);
     printf("[ProtocolManager] module=config event=gb_register_set_success trace=manager error=%d stage=persist started=%d enabled=%d gb=%s:%d\n",
            loadRet,
            m_started ? 1 : 0,
@@ -6164,7 +6164,7 @@ int ProtocolManager::RestartGbRegisterService()
            m_started ? 1 : 0);
 
     GbRegisterParam latest = LocalConfigProvider::BuildDefaultGbRegisterConfig();
-    const int loadRet = LocalConfigProvider::LoadOrCreateGbRegisterConfig(latest);
+    const int loadRet = LocalConfigProvider::LoadOrCreateGbRuntimeRegisterConfig(latest);
     if (loadRet != 0) {
         printf("[ProtocolManager] module=config event=gb_register_restart_fail trace=manager error=%d stage=load_flash started=%d\n",
                loadRet,
