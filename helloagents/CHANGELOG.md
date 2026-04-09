@@ -26,6 +26,7 @@
 - 新增 `App/Media/GAT1400CaptureControl.*` 抓拍桥接层，供编码侧 / 算法侧以“人脸 / 机动车 + 图片 / 视频 / 文件”事件方式向 1400 模块投递待上传数据，并补齐调用方接入使用说明。
 
 ### 变更
+- 按 `GB/T 28181-2022` 附录 G 收口 GB28181 实时点播的 `f=` 处理：`ProtocolManager` 现保持按 `a=streamnumber` / 本地默认配置选择目标码流，再解析 `INVITE` SDP 里的 `f=` 视频参数并通过现有编码参数接口下发到该码流；当前只先打通协议层入口与日志，不额外扩展底层编码器动态重配实现。
 - 按 issue 42 最新评论继续收口零配置与标准国标配置边界：`register_mode=zero_config` 时运行态固定使用代码内置的重定向 `server_id/server_ip/server_port`，不再复用 `gb28181.ini` 中的 `username/server_ip/server_port`；同时 `SetGbRegisterConfig()` 不再顺带写 `zero_config.ini`，避免标准配置接口污染零配置入口文件。
 - 按 issue 42 收口零配置本地配置模型：`zero_config.ini` 现只落盘 `string_code/mac_address` 两个字段，其余 `line_id/redirect_domain/redirect_server_id/custom_protocol_version/manufacturer/model` 统一走代码默认值；同时新增 `ProtocolManager::GetGbZeroConfig()/SetGbZeroConfig()` 供其他模块直接读写零配置入口参数。
 - 将 GB28181 注册主链切到更接近 `GB/T 28181-2022` 的口径：`ProtocolManager` 启动 SDK 时改传 `kGB2022Version`，`GBClientImpl -> SipClientImpl -> SipEventManager` 每次 `REGISTER` 都会显式补标准头 `X-GB-Ver: 3.0`，同时把默认 `CustomProtocolVersion` 调整为 `3.0`，并让 XML 解析层把原 `2016` 扩展字段逻辑按“2016 及以上版本”复用。

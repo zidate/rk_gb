@@ -763,6 +763,117 @@ static bool IsVideoEncodeStreamConfigMatched(const media::VideoEncodeStreamConfi
     return true;
 }
 
+static int ResolveGbStreamNumber(const MediaInfo* input,
+                                 const protocol::ProtocolExternalConfig& cfg);
+
+static std::vector<std::string> SplitKeepEmpty(const std::string& text, char separator)
+{
+    std::vector<std::string> parts;
+    size_t begin = 0;
+    while (begin <= text.size()) {
+        const size_t end = text.find(separator, begin);
+        if (end == std::string::npos) {
+            parts.push_back(text.substr(begin));
+            break;
+        }
+        parts.push_back(text.substr(begin, end - begin));
+        begin = end + 1;
+    }
+    return parts;
+}
+
+static bool ParseGbMediaFVideoConfig(const std::string& mediaFIn,
+                                     media::VideoEncodeStreamConfig* desired)
+{
+    if (desired == NULL) {
+        return false;
+    }
+
+    *desired = media::VideoEncodeStreamConfig();
+
+    const std::string mediaF = TrimWhitespaceCopy(mediaFIn);
+    const std::string lower = ToLowerCopy(mediaF);
+    if (mediaF.empty() || lower.compare(0, 2, "v/") != 0) {
+        return false;
+    }
+
+    const size_t audioPos = lower.find("a/");
+    const std::string videoPart = mediaF.substr(2, (audioPos == std::string::npos) ? std::string::npos : (audioPos - 2));
+    std::vector<std::string> fields = SplitKeepEmpty(videoPart, '/');
+    while (fields.size() < 5) {
+        fields.push_back("");
+    }
+
+    if (!TrimWhitespaceCopy(fields[0]).empty()) {
+        desired->codec = ResolveCodecByGb2022VideoFormat(fields[0]);
+    }
+    if (!TrimWhitespaceCopy(fields[1]).empty()) {
+        desired->resolution = ResolveResolutionByGb2022Value(fields[1]);
+    }
+
+    const unsigned int fps = ParseUnsignedTextValue(fields[2]);
+    if (fps > 0) {
+        desired->fps = static_cast<int>(fps);
+    }
+
+    const unsigned int bitrateType = ParseUnsignedTextValue(fields[3]);
+    if (bitrateType > 0) {
+        desired->bitrate_type = ResolveBitrateTypeByGb2022Code(bitrateType);
+    }
+
+    const unsigned int bitrate = ParseUnsignedTextValue(fields[4]);
+    if (bitrate > 0) {
+        desired->bitrate_kbps = static_cast<int>(bitrate);
+    }
+
+    return HasVideoEncodeStreamConfig(*desired);
+}
+
+static int MaybeApplyGbLiveMediaFVideoConfig(int streamId,
+                                             const std::string& mediaF,
+                                             const char* gbCode)
+{
+    media::VideoEncodeStreamConfig desired;
+    if (!ParseGbMediaFVideoConfig(mediaF, &desired)) {
+        return 0;
+    }
+
+    media::VideoEncodeStreamState runtimeState;
+    const bool hasRuntimeState =
+        media::QueryVideoEncodeStreamState(streamId, &runtimeState) &&
+        HasVideoEncodeStreamState(runtimeState);
+    const media::VideoEncodeStreamState* runtimeStreamState =
+        hasRuntimeState ? &runtimeState : NULL;
+
+    const bool skipApply =
+        hasRuntimeState && IsVideoEncodeStreamConfigMatched(desired, runtimeStreamState);
+    const int ret = skipApply ? 0 : media::ApplyVideoEncodeStreamConfig(streamId, desired);
+
+    printf("[ProtocolManager] gb live media_f %s ret=%d stream=%d current_codec=%s current_resolution=%s current_fps=%s current_bitrate_type=%s current_bitrate=%d value_codec=%s value_resolution=%s value_fps=%d value_bitrate_type=%s value_bitrate=%d media_f=%s gb=%s\n",
+           skipApply ? "skip_apply" : "dispatch",
+           ret,
+           streamId,
+           (runtimeStreamState != NULL && runtimeStreamState->has_codec) ?
+               runtimeStreamState->codec.c_str() : "unknown",
+           (runtimeStreamState != NULL && runtimeStreamState->has_resolution) ?
+               runtimeStreamState->resolution.c_str() : "unknown",
+           (runtimeStreamState != NULL && runtimeStreamState->has_frame_rate) ?
+               runtimeStreamState->frame_rate.c_str() : "unknown",
+           (runtimeStreamState != NULL && runtimeStreamState->has_bitrate_type) ?
+               runtimeStreamState->bitrate_type.c_str() : "unknown",
+           (runtimeStreamState != NULL && runtimeStreamState->has_bitrate) ?
+               runtimeStreamState->bitrate_kbps : -1,
+           desired.codec.empty() ? "unchanged" : desired.codec.c_str(),
+           desired.resolution.empty() ? "unchanged" : desired.resolution.c_str(),
+           desired.fps,
+           desired.bitrate_type.empty() ? "unchanged" : desired.bitrate_type.c_str(),
+           desired.bitrate_kbps,
+           mediaF.c_str(),
+           gbCode != NULL ? gbCode : "");
+
+    return ret;
+}
+
 static std::string NormalizeHexDigest(const std::string& text)
 {
     std::string out;
@@ -7315,9 +7426,9 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
     const bool audioEnabled = audioRequested || psMuxOffer || forceAudio;
 
     const int requestedStreamNum = ResolveGbStreamNumber(input, m_cfg);
-
     const bool preferSubStream = (requestedStreamNum > 0);
     const std::string availableStreamList = BuildGbStreamNumberList();
+    const std::string mediaF = SafeStr(input->MediaF, sizeof(input->MediaF));
 
     if (needReplaceSession) {
         printf("[ProtocolManager] gb live request switch old_stream=%s new_stream=%s same_stream=%d old_handle=%p new_handle=%p gb=%s\n",
@@ -7330,7 +7441,7 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
     }
 
 
-    printf("[ProtocolManager] gb live request enter gb=%s handle=%p offered_transport=%s remote=%s:%d stream_num=%d stream=%s available_streams=%s default_stream=%s audio_requested=%d ps_mux_offer=%d force_audio=%d audio_enabled=%d\n",
+    printf("[ProtocolManager] gb live request enter gb=%s handle=%p offered_transport=%s remote=%s:%d requested_stream_num=%d stream=%s available_streams=%s default_stream=%s media_f=%s audio_requested=%d ps_mux_offer=%d force_audio=%d audio_enabled=%d\n",
 
            gbCode != NULL ? gbCode : "",
 
@@ -7350,6 +7461,8 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
 
            m_cfg.gb_live.video_stream_id.c_str(),
 
+           mediaF.c_str(),
+
            audioRequested ? 1 : 0,
 
            psMuxOffer ? 1 : 0,
@@ -7358,9 +7471,12 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
 
            audioEnabled ? 1 : 0);
 
+    int ret = MaybeApplyGbLiveMediaFVideoConfig(requestedStreamNum, mediaF, gbCode);
+    if (ret != 0) {
+        return ret;
+    }
 
-
-    int ret = ReconfigureGbLiveSender(input, gbCode, kLiveStream);
+    ret = ReconfigureGbLiveSender(input, gbCode, kLiveStream);
 
     if (ret != 0) {
 
@@ -7390,7 +7506,7 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
 
         m_gb_live_session.acked = false;
 
-        printf("[ProtocolManager] gb live request gb=%s handle=%p stream_num=%d stream=%s audio_requested=%d force_audio=%d audio_enabled=%d\n",
+        printf("[ProtocolManager] gb live request gb=%s handle=%p requested_stream_num=%d stream=%s media_f=%s audio_requested=%d force_audio=%d audio_enabled=%d\n",
 
                m_gb_live_session.gb_code.c_str(),
 
@@ -7399,6 +7515,8 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
                requestedStreamNum,
 
                GbLiveStreamName(preferSubStream),
+
+               mediaF.c_str(),
 
                audioRequested ? 1 : 0,
 
@@ -11025,13 +11143,14 @@ int ProtocolManager::ReconfigureGbLiveSender(const MediaInfo* input, const char*
         runtimeParam.video_codec = NormalizeGbLiveVideoCodec(runtimeParam.video_codec);
     }
 
-    printf("[ProtocolManager] gb %s stream runtime codec stream=%s codec=%s remote=%s:%d requested_stream_num=%d\n",
+    printf("[ProtocolManager] gb %s stream runtime codec stream=%s codec=%s remote=%s:%d requested_stream_num=%d media_f=%s\n",
            StreamRequestTypeName(requestType),
            runtimeParam.video_stream_id.c_str(),
            runtimeParam.video_codec.c_str(),
            runtimeParam.target_ip.c_str(),
            runtimeParam.target_port,
-           requestedStreamNum);
+           requestedStreamNum,
+           SafeStr(input->MediaF, sizeof(input->MediaF)).c_str());
 
     GbMediaSenderRuntime* runtime = GetGbMediaSenderRuntime(requestType);
     if (runtime == NULL) {
