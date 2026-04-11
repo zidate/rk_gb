@@ -134,6 +134,7 @@
 
 ### 优化
 - 删除 GB28181 广播下行排障期间临时加入的原始音频落盘调试逻辑，去掉 `GB28181BroadcastBridge` 中写 `/mnt/sdcard/gb_broadcast_rx_*` 的函数和相关状态变量，避免 demo 版本继续带着额外 I/O 分支。
+- 删除历史遗留的 `ProtocolFeatureSwitch.h` 与 `PROTOCOL_HAS_GB28181_CLIENT_SDK` 编译期开关：当前产品线固定直接编入 GB28181 Client SDK，`App/CMakeLists.txt` / `App/Protocol/gb28181/sdk_port/CMakeLists.txt` 的重复宏定义已去掉，`ProtocolManager` 里围绕该宏的恒真条件编译也已收口为单一路径。
 - 删除 `ProtocolManager` 中零调用的 `const GetGatClientService()` / `const GetGbClientReceiver()` 重载，并清理 `LowerGAT1400SDK` 对应的冗余 `const` 壳声明；在同工具链、同宏条件下，`ProtocolManager.o` 的 `dec` 从 `167103` 降到 `167071`。
 - 删除 `ProtocolManager` 中零调用的私有方法 `ClearGbBroadcastSessionState()`，继续收口广播链路中的死 helper。
 - 删除 `ProtocolManager` 中零调用的 `PushListenAudioFrame()`、`ApplyGbBroadcastSdpOffer()`、`SetGbBroadcastPcmCallback()` 转发方法，并清理 `TrimWhitespaceCopy()`、`NormalizeGbOsdTextTemplate()` 的重复前置声明，继续收口协议层无意义编译内容。

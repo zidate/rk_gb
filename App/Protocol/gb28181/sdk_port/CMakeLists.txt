@@ -2,7 +2,6 @@
 	add_definitions(-DDDBUG)
 endif()
 
-add_definitions(-DPROTOCOL_HAS_GB28181_CLIENT_SDK=1)
 
 message("compile for RV1106_DUAL_IPC")
 

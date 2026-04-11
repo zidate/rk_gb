@@ -1,5 +1,4 @@
 ﻿#include "GBClientImpl.h"
-#include "ProtocolFeatureSwitch.h"
 
 
 #include "SipStackSDK.h"

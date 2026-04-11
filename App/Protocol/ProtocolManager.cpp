@@ -1,7 +1,7 @@
 #include "ProtocolManager.h"
 #include "gat1400/GAT1400ClientService.h"
 #include "ProtocolLog.h"
-#include "ProtocolFeatureSwitch.h"
+#include "GB28181ClientSDK.h"
 
 
 
@@ -26,14 +26,6 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
-
-
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
-
-#include "GB28181ClientSDK.h"
-
-#endif
 
 
 
@@ -3709,7 +3701,6 @@ static int ResolveGbRegisterRetryDelaySec(const protocol::ProtocolExternalConfig
     return delaySec;
 }
 
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
 static const char* ResolveGbRegisterFailureStage(int sdkRet)
 {
     if (sdkRet == kGbRegistFormalFail) {
@@ -3734,7 +3725,6 @@ static int MapGbRegisterFailureCode(int sdkRet)
     }
     return -113;
 }
-#endif
 
 
 
@@ -5377,9 +5367,6 @@ int ProtocolManager::ReloadExternalConfig()
 int ProtocolManager::StartGbClientLifecycle()
 
 {
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
-
     if (m_cfg.gb_register.enabled == 0) {
         printf("[ProtocolManager] gb client lifecycle disabled by config\n");
         return 0;
@@ -5527,12 +5514,6 @@ int ProtocolManager::StartGbClientLifecycle()
 
     return 0;
 
-#else
-
-    return 0;
-
-#endif
-
 }
 
 
@@ -5540,9 +5521,6 @@ int ProtocolManager::StartGbClientLifecycle()
 void ProtocolManager::StopGbClientLifecycle()
 
 {
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
-
     m_gb_heartbeat_running.store(false);
 
     if (m_gb_heartbeat_thread.joinable()) {
@@ -5603,26 +5581,11 @@ void ProtocolManager::StopGbClientLifecycle()
     m_gb_register_success_ms = 0;
     m_gb_register_expires_sec = 0;
 
-#else
-
-    m_gb_heartbeat_running.store(false);
-
-    m_gb_client_started = false;
-
-    m_gb_client_registered = false;
-    m_gb_register_success_ms = 0;
-    m_gb_register_expires_sec = 0;
-
-#endif
-
 }
 
 int ProtocolManager::RegisterGbClient(bool force)
 
 {
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
-
     std::lock_guard<std::mutex> lock(m_gb_lifecycle_mutex);
 
     if (m_cfg.gb_register.enabled == 0) {
@@ -5864,21 +5827,12 @@ int ProtocolManager::RegisterGbClient(bool force)
 
     return 0;
 
-#else
-
-    (void)force;
-
-    return 0;
-
-#endif
-
 }
 
 int ProtocolManager::QueryGbRegisterDate(std::string& outDate) const
 {
     outDate.clear();
 
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
     if (m_gb_client_sdk == NULL || !m_gb_client_started) {
         return -1;
     }
@@ -5893,9 +5847,6 @@ int ProtocolManager::QueryGbRegisterDate(std::string& outDate) const
     rawDate = NULL;
 
     return outDate.empty() ? -3 : 0;
-#else
-    return -4;
-#endif
 }
 
 int ProtocolManager::PrepareGbRegisterTimeSync(const std::string& rawDate)
@@ -5950,9 +5901,6 @@ int ProtocolManager::PrepareGbRegisterTimeSync(const std::string& rawDate)
 int ProtocolManager::SendGbHeartbeatOnce()
 
 {
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
-
     std::lock_guard<std::mutex> lock(m_gb_lifecycle_mutex);
 
     if (m_gb_client_sdk == NULL || !m_gb_client_started || !m_gb_client_registered) {
@@ -5987,12 +5935,6 @@ int ProtocolManager::SendGbHeartbeatOnce()
 
     return 0;
 
-#else
-
-    return 0;
-
-#endif
-
 }
 
 
@@ -6000,9 +5942,6 @@ int ProtocolManager::SendGbHeartbeatOnce()
 void ProtocolManager::GbHeartbeatLoop()
 
 {
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
-
     int intervalSec = m_cfg.gb_keepalive.interval_sec;
 
     if (intervalSec <= 0) {
@@ -6208,12 +6147,6 @@ void ProtocolManager::GbHeartbeatLoop()
         }
 
     }
-
-#else
-
-    return;
-
-#endif
 
 }
 
@@ -6988,13 +6921,6 @@ int ProtocolManager::BuildGbTalkMediaInfo(const char* gbCode,
 int ProtocolManager::HandleGbBroadcastNotifyResponse(const char* gbCode, const BroadcastInfo* info, bool ok)
 
 {
-
-#if !PROTOCOL_HAS_GB28181_CLIENT_SDK
-    (void)gbCode;
-    (void)info;
-    (void)ok;
-    return -1;
-#else
     if (!ok || info == NULL) {
 
         printf("[ProtocolManager] gb broadcast notify response unavailable gb=%s ok=%d\n",
@@ -7206,7 +7132,6 @@ int ProtocolManager::HandleGbBroadcastNotifyResponse(const char* gbCode, const B
     }
 
     return 0;
-#endif
 
 }
 
@@ -9529,8 +9454,6 @@ int ProtocolManager::NotifyGbAlarm(AlarmNotifyInfo* info)
 
     SubscribeHandle handle = NULL;
 
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
-
     {
 
         std::lock_guard<std::mutex> lock(m_gb_subscribe_mutex);
@@ -9564,8 +9487,6 @@ int ProtocolManager::NotifyGbAlarm(AlarmNotifyInfo* info)
         return ret;
 
     }
-
-#endif
 
 
 
@@ -9640,8 +9561,6 @@ int ProtocolManager::NotifyGbMobilePosition(const MobilePositionInfo* info)
 
     SubscribeHandle handle = NULL;
 
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
-
     {
 
         std::lock_guard<std::mutex> lock(m_gb_subscribe_mutex);
@@ -9676,8 +9595,6 @@ int ProtocolManager::NotifyGbMobilePosition(const MobilePositionInfo* info)
 
     }
 
-#endif
-
 
 
     printf("[ProtocolManager] module=gb28181 event=mobile_position_notify device=%s session=%p trace=manager error=0 lon=%.6f lat=%.6f speed=%.2f direction=%.2f\n",
@@ -9709,8 +9626,6 @@ int ProtocolManager::NotifyGbCatalogInternal(const char* gbCode)
     const int catalogCount = 1;
     const std::string manufacturer = ResolveGbManufacturerName(m_cfg);
     const std::string model = ResolveGbModelName(m_cfg);
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
 
     {
 
@@ -9770,8 +9685,6 @@ int ProtocolManager::NotifyGbCatalogInternal(const char* gbCode)
         return ret;
 
     }
-
-#endif
 
 
 
@@ -9885,9 +9798,6 @@ int ProtocolManager::ResponseGbQueryDeviceInfo(ResponseHandle handle, const Quer
 
     }
 
-
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
 
     DeviceInfo info;
 
@@ -10005,12 +9915,6 @@ int ProtocolManager::ResponseGbQueryDeviceInfo(ResponseHandle handle, const Quer
 
     return IsGbSdkSuccess(ret) ? 0 : ret;
 
-#else
-
-    return 0;
-
-#endif
-
 }
 
 
@@ -10025,9 +9929,6 @@ int ProtocolManager::ResponseGbQueryDeviceStatus(ResponseHandle handle, const Qu
 
     }
 
-
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
 
     DeviceStatus status;
 
@@ -10095,12 +9996,6 @@ int ProtocolManager::ResponseGbQueryDeviceStatus(ResponseHandle handle, const Qu
 
     return IsGbSdkSuccess(ret) ? 0 : ret;
 
-#else
-
-    return 0;
-
-#endif
-
 }
 
 
@@ -10115,9 +10010,6 @@ int ProtocolManager::ResponseGbQueryCatalog(ResponseHandle handle, const QueryPa
 
     }
 
-
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
 
     DeviceCatalogList catalogList;
 
@@ -10160,12 +10052,6 @@ int ProtocolManager::ResponseGbQueryCatalog(ResponseHandle handle, const QueryPa
 
     return IsGbSdkSuccess(ret) ? 0 : ret;
 
-#else
-
-    return 0;
-
-#endif
-
 }
 
 
@@ -10180,9 +10066,6 @@ int ProtocolManager::ResponseGbQueryRecord(ResponseHandle handle, const QueryPar
 
     }
 
-
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
 
     RecordIndex recordIndex;
 
@@ -10300,12 +10183,6 @@ int ProtocolManager::ResponseGbQueryRecord(ResponseHandle handle, const QueryPar
 
     return IsGbSdkSuccess(ret) ? 0 : ret;
 
-#else
-
-    return 0;
-
-#endif
-
 }
 
 
@@ -10321,8 +10198,6 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
     }
 
 
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
 
     DeviceConfigDownload deviceConfig;
 
@@ -10728,12 +10603,6 @@ int ProtocolManager::ResponseGbQueryConfig(ResponseHandle handle, const QueryPar
 
     return IsGbSdkSuccess(ret) ? 0 : ret;
 
-#else
-
-    return 0;
-
-#endif
-
 }
 
 
@@ -10749,8 +10618,6 @@ int ProtocolManager::ResponseGbQueryPreset(ResponseHandle handle, const QueryPar
     }
 
 
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
 
     PresetInfo presetInfo;
 
@@ -10783,12 +10650,6 @@ int ProtocolManager::ResponseGbQueryPreset(ResponseHandle handle, const QueryPar
     const int ret = m_gb_client_sdk->ResponseDevicePresetInfo(handle, &presetInfo);
 
     return IsGbSdkSuccess(ret) ? 0 : ret;
-
-#else
-
-    return 0;
-
-#endif
 
 }
 
@@ -11617,8 +11478,6 @@ int ProtocolManager::NotifyGbMediaStatus(StreamHandle handle,
 
 {
 
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
-
     std::lock_guard<std::mutex> lock(m_gb_lifecycle_mutex);
 
     if (m_gb_client_sdk == NULL) {
@@ -11671,18 +11530,6 @@ int ProtocolManager::NotifyGbMediaStatus(StreamHandle handle,
 
            reason != NULL ? reason : "");
 
-#else
-
-    (void)handle;
-
-    (void)gbCode;
-
-    (void)notifyType;
-
-    (void)reason;
-
-#endif
-
     return 0;
 
 }
@@ -11696,8 +11543,6 @@ int ProtocolManager::NotifyGbUpgradeResult(const char* gbCode,
                                            const char* description)
 
 {
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
 
     if (m_gb_client_sdk == NULL) {
 
@@ -11732,16 +11577,6 @@ int ProtocolManager::NotifyGbUpgradeResult(const char* gbCode,
            (sessionId != NULL) ? sessionId : "",
            (firmware != NULL) ? firmware : "",
            (description != NULL) ? description : "");
-
-#else
-
-    (void)gbCode;
-    (void)sessionId;
-    (void)firmware;
-    (void)result;
-    (void)description;
-
-#endif
 
     return 0;
 
@@ -11794,9 +11629,6 @@ int ProtocolManager::PersistGbUpgradePendingState(const char* gbCode,
 int ProtocolManager::ReportPendingGbUpgradeResult()
 
 {
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
-
     CConfigTable table;
     if (!g_configManager.getConfig(getConfigName(CFG_UPDATE), table)) {
         return -3;
@@ -11842,12 +11674,6 @@ int ProtocolManager::ReportPendingGbUpgradeResult()
            sessionId.c_str(),
            firmware.c_str(),
            description.c_str());
-
-#else
-
-    return 0;
-
-#endif
 
     return 0;
 
@@ -12914,9 +12740,6 @@ void ProtocolManager::SetGbTimeSyncHook(GbTimeSyncHook hook, void* userData)
 void ProtocolManager::BindGbClientSdk()
 
 {
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
-
     GB28181ClientSDK* sdk = NULL;
 
     {
@@ -12951,16 +12774,6 @@ void ProtocolManager::BindGbClientSdk()
 
     printf("[ProtocolManager] bind owned gb sdk success, receiver attached\n");
 
-#else
-
-    m_gb_client_sdk = NULL;
-
-    SetGbMediaPlayInfoResponder(NULL, NULL);
-
-    printf("[ProtocolManager] bind gb sdk skipped, PROTOCOL_HAS_GB28181_CLIENT_SDK=0\n");
-
-#endif
-
 }
 
 
@@ -12971,9 +12784,6 @@ void ProtocolManager::UnbindGbClientSdk()
 
     StopGbClientLifecycle();
 
-
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
 
     GB28181ClientSDK* oldSdk = NULL;
 
@@ -12994,12 +12804,6 @@ void ProtocolManager::UnbindGbClientSdk()
         delete oldSdk;
 
     }
-
-#else
-
-    m_gb_client_sdk = NULL;
-
-#endif
 
 
 
@@ -13040,9 +12844,6 @@ GAT1400ClientService* ProtocolManager::GetGatClientService()
 int ProtocolManager::OnGbMediaPlayInfoRespond(StreamHandle handle, const MediaInfo* info, void* userData)
 
 {
-
-#if PROTOCOL_HAS_GB28181_CLIENT_SDK
-
     ProtocolManager* self = (ProtocolManager*)userData;
 
     if (self == NULL || info == NULL) {
@@ -13066,18 +12867,6 @@ int ProtocolManager::OnGbMediaPlayInfoRespond(StreamHandle handle, const MediaIn
     const int ret = self->m_gb_client_sdk->ResponseMediaPlayInfo(handle, info);
 
     return IsGbSdkSuccess(ret) ? 0 : ret;
-
-#else
-
-    (void)handle;
-
-    (void)info;
-
-    (void)userData;
-
-    return -1;
-
-#endif
 
 }
 

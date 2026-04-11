@@ -8,6 +8,7 @@
 
 | 时间戳 | 功能名称 | 类型 | 状态 | 方案包路径 |
 |--------|----------|------|------|------------|
+| 202604111448 | protocol_feature_switch_trim | 轻量迭代 | ✅已完成 | [2026-04/202604111448_protocol_feature_switch_trim](2026-04/202604111448_protocol_feature_switch_trim/) |
 | 202604101715 | issue43_gat1400_protocol_entry_cleanup | 轻量迭代 | ✅已完成 | [2026-04/202604101715_issue43_gat1400_protocol_entry_cleanup](2026-04/202604101715_issue43_gat1400_protocol_entry_cleanup/) |
 | 202604091005 | gb_live_mediaf_stream_config | 开发 | ✅已完成 | [2026-04/202604091005_gb_live_mediaf_stream_config](2026-04/202604091005_gb_live_mediaf_stream_config/) |
 | 202604081645 | issue42_zero_config_redirect_target | 轻量迭代 | ✅已完成 | [2026-04/202604081645_issue42_zero_config_redirect_target](2026-04/202604081645_issue42_zero_config_redirect_target/) |
@@ -95,6 +96,7 @@
 
 ### 2026-04
 
+- [202604111448_protocol_feature_switch_trim](2026-04/202604111448_protocol_feature_switch_trim/) - 删除 `ProtocolFeatureSwitch.h` 与 `PROTOCOL_HAS_GB28181_CLIENT_SDK` 历史编译期开关，去掉重复构建宏，收口 `ProtocolManager` 中围绕该宏的恒真条件编译分支
 - [202604101715_issue43_gat1400_protocol_entry_cleanup](2026-04/202604101715_issue43_gat1400_protocol_entry_cleanup/) - 按 issue 43 最新评论完成 GAT1400 收口：对外只保留 `NotifyGatFaces/NotifyGatMotorVehicles/NotifyGatNonMotorVehicles` 3 个结构化对象接口，并删除 `NotifyGatAlarm()`、keepalive demo 与未使用的抓拍桥接链路
 - [202604091005_gb_live_mediaf_stream_config](2026-04/202604091005_gb_live_mediaf_stream_config/) - 按 `GB/T 28181-2022` 附录 G 收口实时点播 `f=` 处理，保持按 `streamnumber/default` 选目标码流，再把 `f=` 中的视频参数通过编码配置接口下发到该路码流，并补齐联调日志
 - [202604081645_issue42_zero_config_redirect_target](2026-04/202604081645_issue42_zero_config_redirect_target/) - 按 issue 42 最新评论将零配置首次重定向 `server_id/server_ip/server_port` 与 `gb28181.ini` 中的标准国标注册参数彻底分离，并避免 `SetGbRegisterConfig()` 回写污染 `zero_config.ini`
