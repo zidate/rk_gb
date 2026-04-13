@@ -1,4 +1,5 @@
 #include "ProtocolManager.h"
+#include "gb28181/GbAlarmIdentity.h"
 #include "gat1400/GAT1400ClientService.h"
 #include "ProtocolLog.h"
 #include "GB28181ClientSDK.h"
@@ -4720,7 +4721,8 @@ ProtocolManager::ProtocolManager()
 
       m_started(false),
 
-      m_gb_device_name("")
+      m_gb_device_name(""),
+      m_gb_runtime_device_id("")
 
 {
 
@@ -9354,6 +9356,9 @@ int ProtocolManager::HandleGbSubscribe(SubscribeHandle handle, SubscribeType typ
         case kCatalogSubscribe:
 
             m_gb_catalog_subscribe_handle = handle;
+            if (gbCode != NULL && gbCode[0] != '\0') {
+                m_gb_runtime_device_id = gbCode;
+            }
 
             notifyCatalog = true;
 
@@ -9362,12 +9367,18 @@ int ProtocolManager::HandleGbSubscribe(SubscribeHandle handle, SubscribeType typ
         case kAlarmSubscribe:
 
             m_gb_alarm_subscribe_handle = handle;
+            if (gbCode != NULL && gbCode[0] != '\0') {
+                m_gb_runtime_device_id = gbCode;
+            }
 
             break;
 
         case kMobilePositionSubscribe:
 
             m_gb_mobile_position_subscribe_handle = handle;
+            if (gbCode != NULL && gbCode[0] != '\0') {
+                m_gb_runtime_device_id = gbCode;
+            }
 
             break;
 
@@ -9450,15 +9461,16 @@ int ProtocolManager::NotifyGbAlarm(AlarmNotifyInfo* info)
         return -91;
 
     }
-        strncpy(info->DeviceID, m_cfg.gb_register.device_id.c_str(), GB_ID_LEN - 1);
 
     SubscribeHandle handle = NULL;
+    std::string runtimeDeviceId;
 
     {
 
         std::lock_guard<std::mutex> lock(m_gb_subscribe_mutex);
 
         handle = m_gb_alarm_subscribe_handle;
+        runtimeDeviceId = m_gb_runtime_device_id;
 
     }
 
@@ -9467,6 +9479,8 @@ int ProtocolManager::NotifyGbAlarm(AlarmNotifyInfo* info)
         return 0;
 
     }
+
+    protocol::gb28181::NormalizeGbAlarmIdentity(m_cfg, runtimeDeviceId, *info);
 
 
 

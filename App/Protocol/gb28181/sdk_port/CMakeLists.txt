@@ -194,6 +194,7 @@ set(Protocol_SRC
 	Protocol/gb28181/GB28181ListenBridge.cpp
 	Protocol/gb28181/GB28181RtpPsSender.cpp
 	Protocol/gb28181/GB28181ClientReceiverAdapter.cpp
+	Protocol/gb28181/GbAlarmIdentity.cpp
 )
 #加密和产测配置 模块
 set(Encryption_SRC Encryption/Encryption.cpp)

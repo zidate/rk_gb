@@ -662,6 +662,7 @@ private:
     ProtocolExternalConfig m_cfg;
 
     std::string m_gb_device_name;
+    std::string m_gb_runtime_device_id;
 
     GB28181BroadcastBridge m_broadcast;
 
@@ -746,7 +747,6 @@ private:
 
 
 #endif
-
 
 
 
