@@ -26,7 +26,7 @@
 - 新增 `App/Media/GAT1400CaptureControl.*` 抓拍桥接层，供编码侧 / 算法侧以“人脸 / 机动车 + 图片 / 视频 / 文件”事件方式向 1400 模块投递待上传数据，并补齐调用方接入使用说明。
 
 ### 变更
-- 按 issue 44 继续收口 GB28181 报警通知的设备编号来源：结合 `245.pcap` 可见报警 XML 应与设备当前真实连接的 SIP 本端 ID 保持一致，因此 `ProtocolManager::NotifyGbAlarm()` 现在优先读取 `GB28181ClientSDK` 当前 `local_code`，不再依赖订阅回调缓存值；零配置 `302` 后会随 SDK 内部切到的正式平台 `deviceId` 一起变化，同时当调用方未填写 `AlarmID` 时，默认补成同一运行态设备编号。
+- 按 issue 44 继续收口 GB28181 报警通知的设备编号来源：结合 `245.pcap`、`246.pcap` 与 `debug.log` 可见，报警 XML 应与设备当前真实连接的 SIP 本端 ID 保持一致。当前除了 `ProtocolManager::NotifyGbAlarm()` 会优先读取 `GB28181ClientSDK` 的 `local_code` 归一化 `DeviceID/AlarmID` 外，最终 `CGB28181XmlParser::PackAlarmNotify()` 组包时也会优先使用运行态 `m_local_code` 写 `<DeviceID>`，避免上层仍带旧 `C044...` 时报警 `NOTIFY` 体继续发错 ID。
 - 按 issue 43 最新评论完成 GAT1400 收口：`ProtocolManager` 当前只保留 `NotifyGatFaces()` / `NotifyGatMotorVehicles()` / `NotifyGatNonMotorVehicles()` 3 个结构化对象上报接口，分别对接 `PostFaces/PostMotorVehicles/PostNonMotorVehicles`；已注册时直接发送，未注册时直接写入现有失败补传队列。同时删除 `ProtocolManager::NotifyGatAlarm()`、keepalive demo，以及 `GAT1400CaptureControl` / `GAT1400CaptureEvent` / `GAT1400ClientService::NotifyCaptureEvent()` 这条未再被调用的抓拍桥接链路。
 - 按 `GB/T 28181-2022` 附录 G 收口 GB28181 实时点播的 `f=` 处理：`ProtocolManager` 现保持按 `a=streamnumber` / 本地默认配置选择目标码流，再解析 `INVITE` SDP 里的 `f=` 视频参数并通过现有编码参数接口下发到该码流；当前只先打通协议层入口与日志，不额外扩展底层编码器动态重配实现。
 - 按 issue 42 最新评论继续收口零配置与标准国标配置边界：`register_mode=zero_config` 时运行态固定使用代码内置的重定向 `server_id/server_ip/server_port`，不再复用 `gb28181.ini` 中的 `username/server_ip/server_port`；同时 `SetGbRegisterConfig()` 不再顺带写 `zero_config.ini`，避免标准配置接口污染零配置入口文件。

@@ -38,7 +38,7 @@
 - `GbHeartbeatLoop()` 在未注册态下会按 `gb_keepalive.interval_sec` 节奏重试注册；只有 `server_ip/server_port/device_id` 这类静态配置校验失败时，GB 生命周期才会立即返回错误。
 - 当前 `gb28181.ini` 只保留 6 个国标注册字段；`image_flip_mode`、`gb_talk`、`gb_reboot`、`gb_upgrade`、`gb_broadcast`、`gb_listen` 等其余 GB 协议项都不再写入本地 ini，而是固定使用代码默认值。
 - 当前 `zero_config.ini` 独立持久化 `StringCode/Mac` 2 个零配置外部可编辑字段；`Line/redirect_domain/redirect_server_id/CustomProtocolVersion/manufacturer/model` 固定走代码默认值，不再和 `gb28181.ini` 混存。`register_mode=zero_config` 时，运行态还会把首次重定向入口 `server_id/server_ip/server_port` 固定到代码默认值，与 `gb28181.ini` 中保存的标准国标注册参数彻底分离。
-- `ProtocolManager::NotifyGbAlarm()` 现在会直接向 `GB28181ClientSDK` 读取当前 `local_code` 作为报警 `DeviceID/AlarmID` 的优先来源，不再额外缓存订阅回调里的 `gbCode`。这样报警 XML 会和设备当前真实连接的 SIP 本端 ID 保持一致；零配置 `302` 之后，SDK 一旦切到正式平台 `deviceId`，报警上报也会随之切换。
+- `ProtocolManager::NotifyGbAlarm()` 现在会直接向 `GB28181ClientSDK` 读取当前 `local_code` 作为报警 `DeviceID/AlarmID` 的优先来源，不再额外缓存订阅回调里的 `gbCode`。同时最终 `Alarm NOTIFY` 的 XML 组包层也会再次优先使用 `GB28181XmlParser::m_local_code` 写 `<DeviceID>`，把“报警体设备号必须跟随当前 SIP 本端 ID”收口到最后一跳，避免上层仍带旧值时报文回退。
 - 当前 `gat1400.ini` 只持久化 `GatRegisterParam`；`gat_upload`、`gat_capture` 等其他 1400 相关参数继续使用代码默认值或 HTTP 配置链路。
 - `gb_register.enabled` 为 `0` 时，`ProtocolManager` 会跳过 GB client 生命周期启动与重注册，但 GAT1400 相关配置校验和生命周期不受影响。
 - `GAT1400` 的 `GetTime()`/`GET_SYNCTIME` 当前已禁用为 no-op；设备时间统一由 GB28181 校时链路负责，启动阶段只打印 `event=get_time note=disabled` 作为诊断标记。
