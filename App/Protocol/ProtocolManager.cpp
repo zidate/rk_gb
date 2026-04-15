@@ -53,6 +53,7 @@ extern "C"
 extern void NormalRestart();
 
 extern bool CreateDetachedThread(char *threadName, void *(*route)(void*), void *param, bool scope);
+extern int gb_upgrade_firmware();
 
 #define printf protocol::ProtocolPrintf
 
@@ -7428,7 +7429,7 @@ int ProtocolManager::HandleGbLiveStreamRequest(StreamHandle handle, const char* 
 
            audioEnabled ? 1 : 0);
 
-    int ret = MaybeApplyGbLiveMediaFVideoConfig(requestedStreamNum, mediaF, gbCode);
+    int ret = 0;//MaybeApplyGbLiveMediaFVideoConfig(requestedStreamNum, mediaF, gbCode);
     if (ret != 0) {
         return ret;
     }
@@ -9321,10 +9322,14 @@ int ProtocolManager::HandleGbDeviceUpgradeControl(const DevControlCmd* cmd)
     std::unique_ptr<GbUpgradeThreadContext> threadCtx(new GbUpgradeThreadContext());
     threadCtx->manager = this;
     m_gb_upgrade_running.store(true);
-    if (!CreateDetachedThread((char*)"gb_upgrade_apply", ProtocolManager::GbUpgradeApplyThread, threadCtx.get(), true)) {
-        m_gb_upgrade_running.store(false);
-        return fail(-114, "apply_thread_failed");
-    }
+//    if (!CreateDetachedThread((char*)"gb_upgrade_apply", ProtocolManager::GbUpgradeApplyThread, threadCtx.get(), true)) {
+//        m_gb_upgrade_running.store(false);
+//        return fail(-114, "apply_thread_failed");
+//    }
+
+	gb_upgrade_firmware();
+
+	
     threadCtx.release();
 
     printf("[ProtocolManager] gb upgrade staged firmware=%s manufacturer=%s session=%s force=%d expected_size=%llu actual_size=%llu checksum=%s package=%s gb=%s\n",

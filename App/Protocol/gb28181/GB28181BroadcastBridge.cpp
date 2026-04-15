@@ -860,24 +860,24 @@ int GB28181BroadcastBridge::OnAudioFrame(const uint8_t* data, size_t size, uint6
         return -3;
     }
 
-    std::vector<char> pcm;
-    ret = DecodeToPcm16(data, size, pcm);
-    if (ret < 0) {
-        printf("[GB28181][Broadcast] decode frame failed codec=%s ret=%d size=%lu\n",
-               m_param.codec.c_str(),
-               ret,
-               (unsigned long)size);
-        return -4;
-    }
+//    std::vector<char> pcm;
+//    ret = DecodeToPcm16(data, size, pcm);
+//    if (ret < 0) {
+//        printf("[GB28181][Broadcast] decode frame failed codec=%s ret=%d size=%lu\n",
+//               m_param.codec.c_str(),
+//               ret,
+//               (unsigned long)size);
+//        return -4;
+//    }
+//
+//    if (m_pcm_callback != NULL && !pcm.empty()) {
+//        m_pcm_callback((const uint8_t*)&pcm[0], pcm.size(), timestamp, m_pcm_callback_user);
+//    }
 
-    if (m_pcm_callback != NULL && !pcm.empty()) {
-        m_pcm_callback((const uint8_t*)&pcm[0], pcm.size(), timestamp, m_pcm_callback_user);
-    }
-
-    if (!IAudioManager::instance()->PlayVoice((unsigned char*)&pcm[0],
-                                              static_cast<int>(pcm.size()),
+    if (!IAudioManager::instance()->PlayVoice((unsigned char*)data,
+                                              static_cast<int>(size),
                                               IAudioManager::AUDIO_TALK_TYPE)) {
-        printf("[GB28181][Broadcast] play voice failed pcm_size=%lu\n", (unsigned long)pcm.size());
+        printf("[GB28181][Broadcast] play voice failed pcm_size=%lu\n", (unsigned long)size);
         return -5;
     }
 
