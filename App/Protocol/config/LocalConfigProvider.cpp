@@ -244,6 +244,7 @@ void ApplyGbRuntimeZeroConfigFields(protocol::GbRegisterParam& param)
 protocol::GatRegisterParam BuildDefaultGatRegisterParam()
 {
     protocol::GatRegisterParam param;
+    param.enabled = 1;
     param.server_ip = "183.252.186.166";
     param.server_port = 33855;
     param.scheme = "http";
@@ -305,12 +306,17 @@ int ValidateGbRegisterEditableFields(const protocol::GbRegisterParam& param)
 void ApplyGatRegisterEditableFields(protocol::GatRegisterParam& target, const protocol::GatRegisterParam& source)
 {
     target = source;
+    target.enabled = (source.enabled != 0) ? 1 : 0;
 }
 
 int ValidateGatRegisterEditableFields(const protocol::GatRegisterParam& param)
 {
-    if ((param.scheme != "http" && param.scheme != "https") ||
-        param.server_ip.empty() || param.server_port <= 0) {
+    if (param.scheme != "http" && param.scheme != "https") {
+        return -1;
+    }
+
+    if (param.enabled != 0 &&
+        (param.server_ip.empty() || param.server_port <= 0)) {
         return -1;
     }
 
@@ -460,6 +466,10 @@ bool LoadGatRegisterConfigFromFile(const char* path, protocol::GatRegisterParam&
     }
 
     CInifile ini;
+    int ivalue = 0;
+    if (ReadIniInt(ini, kLocalGatConfigSection, "enable", path, ivalue)) {
+        out.enabled = (ivalue != 0) ? 1 : 0;
+    }
     ReadIniString(ini, kLocalGatConfigSection, "scheme", path, out.scheme);
     ReadIniString(ini, kLocalGatConfigSection, "server_ip", path, out.server_ip);
     ReadIniInt(ini, kLocalGatConfigSection, "server_port", path, out.server_port);
@@ -572,6 +582,7 @@ int SaveLocalGatConfigFile(const protocol::GatRegisterParam& param)
     }
 
     fprintf(fp, "[%s]\n", kLocalGatConfigSection);
+    fprintf(fp, "enable=%d\n", param.enabled != 0 ? 1 : 0);
     fprintf(fp, "scheme=%s\n", param.scheme.c_str());
     fprintf(fp, "server_ip=%s\n", param.server_ip.c_str());
     fprintf(fp, "server_port=%d\n", param.server_port);

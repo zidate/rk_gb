@@ -21,7 +21,7 @@
 - GB28181 远程抓拍与目录订阅专项审查记录见 [`gb28181-snapshot-subscribe-review.md`](gb28181-snapshot-subscribe-review.md)。
 
 ## 注意事项
-- `LocalConfigProvider` 现在读取 `/userdata/conf/Config/GB/gb28181.ini`、`/userdata/conf/Config/GB/zero_config.ini` 与 `/userdata/conf/Config/GB/gat1400.ini`；其中 `gb28181.ini` / `gat1400.ini` 缺失时仍可按默认值自动生成。`gb28181.ini` 新增 `register_mode=standard|zero_config` 作为运行时模式开关：`standard` 模式下忽略 `zero_config.ini` 缺失，`zero_config` 模式下若 `zero_config.ini` 缺失则会直接记录日志并返回错误；旧的 `/userdata/conf/Config/gb28181.ini` 路径不再兼容，也不自动迁移。
+- `LocalConfigProvider` 现在读取 `/userdata/conf/Config/GB/gb28181.ini`、`/userdata/conf/Config/GB/zero_config.ini` 与 `/userdata/conf/Config/GB/gat1400.ini`；其中 `gb28181.ini` / `gat1400.ini` 缺失时仍可按默认值自动生成。`gb28181.ini` 新增 `register_mode=standard|zero_config` 作为运行时模式开关：`standard` 模式下忽略 `zero_config.ini` 缺失，`zero_config` 模式下若 `zero_config.ini` 缺失则会直接记录日志并返回错误；`gat1400.ini` 当前也新增 `enable` 作为 1400 注册生命周期开关。旧的 `/userdata/conf/Config/gb28181.ini` 路径不再兼容，也不自动迁移。
 - `ProtocolManager` 现已改为进程内单例；主程序在正常启动路径中通过 `ProtocolManager::Instance().Init()/Start()` 拉起协议栈，`LowerGAT1400SDK` 等外部模块也统一直接取这个单例，不再经过 `CSofia::GetProtocolManager()` 转发。
 - `ProtocolManager` 当前对 GAT1400 服务实例和 GB28181 receiver 只保留运行中真实使用的非 `const` getter；此前零调用的 `const GetGatClientService()` / `const GetGbClientReceiver()` 已从协议胶水层移除。
 - `GB28181ClientSDK` 的创建、绑定、释放现全部下沉到 `ProtocolManager` 私有生命周期中；`CSofia` 不再持有 SDK 指针，也不再负责 `Bind/Unbind`。
@@ -29,18 +29,18 @@
 - `SetGbRegisterConfig()` 只负责把当前 `gb28181.ini` 对应的 7 个外部可编辑字段写回 flash：`enabled`、`register_mode`、`username`、`server_ip`、`server_port`、`device_id`、`password`；`device_name`、`expires_sec` 等其余注册参数继续沿用代码默认值，也不再顺带改写 `zero_config.ini`。
 - 新增 `GetGbZeroConfig()` / `SetGbZeroConfig()`；只负责零配置入口的 `string_code`、`mac_address` flash 读写，不直接修改运行中的 GB 注册生命周期。
 - 新增 `RestartGbRegisterService()` 作为单独的 GB 服务重载入口；它会从 flash 重新读取注册配置，并根据 `ProtocolManager` 当前是否已启动、GB 生命周期是否正在运行以及 `enabled` 新值决定只刷新缓存、停服或重启注册。
-- 新增 `GetGatRegisterConfig()` / `SetGatRegisterConfig()` / `RestartGatRegisterService()`；语义与 GB 接口保持一致，分别负责“只读 flash”“只写 flash”和“显式把 `gat1400.ini` 重载到运行态”。
+- 新增 `GetGatRegisterConfig()` / `SetGatRegisterConfig()` / `RestartGatRegisterService()`；语义与 GB 接口保持一致，分别负责“只读 flash”“只写 flash”和“显式把 `gat1400.ini` 重载到运行态”。`RestartGatRegisterService()` 会根据 `enabled` 决定只刷新缓存、停服或重启 1400 生命周期。
 - `ProtocolManager` 当前只保留 `NotifyGatFaces()` / `NotifyGatMotorVehicles()` / `NotifyGatNonMotorVehicles()` 3 个 1400 对外上报入口，供外部模块直接上报人脸、机动车、非机动车；若 1400 未注册，则直接落现有失败补传队列。旧的 `NotifyGatAlarm()`、keepalive demo 和 `GAT1400CaptureEvent/GAT1400CaptureControl` 抓拍桥接链路均已移除。
 - `ProtocolManager::Start()` 在真正拉起 RTP/广播/监听/注册链路前，会先执行一次 `ReloadExternalConfig()`，确保 `Init()` 之后、`Start()` 之前通过 `SetGbRegisterConfig()` 落盘的新值会被带入运行态。
 - `StartGbClientLifecycle()` 当前固定以本地端口 `0` 启动 GB28181 SIP 客户端，由内核分配随机本地监听端口；`gb_register.server_port` 只保留远端平台 SIP 端口语义，不再复用为本地绑定端口。
 - `SipEventManager` 在随机端口场景下会先用临时 socket `bind(0)` 获取一个可用端口，再用该端口走现有 `eXosip_listen_addr()` 建立正式监听，并把实际端口回写到 `ClientInfo.LocalPort`，保证 `REGISTER` / `MESSAGE` / `INVITE` 的 `From/Contact` 与真实监听端口一致。
 - `StartGbClientLifecycle()` 现在把“SDK 已启动但首次 `Register()` 失败”的场景视为可恢复错误：生命周期不会直接退出，而是打印 `note=defer_retry` 日志并继续保留后台线程。
 - `GbHeartbeatLoop()` 在未注册态下会按 `gb_keepalive.interval_sec` 节奏重试注册；只有 `server_ip/server_port/device_id` 这类静态配置校验失败时，GB 生命周期才会立即返回错误。
-- 当前 `gb28181.ini` 只保留 6 个国标注册字段；`image_flip_mode`、`gb_talk`、`gb_reboot`、`gb_upgrade`、`gb_broadcast`、`gb_listen` 等其余 GB 协议项都不再写入本地 ini，而是固定使用代码默认值。
+- 当前 `gb28181.ini` 只保留 7 个国标注册字段；`image_flip_mode`、`gb_talk`、`gb_reboot`、`gb_upgrade`、`gb_broadcast`、`gb_listen` 等其余 GB 协议项都不再写入本地 ini，而是固定使用代码默认值。
 - 当前 `zero_config.ini` 独立持久化 `StringCode/Mac` 2 个零配置外部可编辑字段；`Line/redirect_domain/redirect_server_id/CustomProtocolVersion/manufacturer/model` 固定走代码默认值，不再和 `gb28181.ini` 混存。`register_mode=zero_config` 时，运行态还会把首次重定向入口 `server_id/server_ip/server_port` 固定到代码默认值，与 `gb28181.ini` 中保存的标准国标注册参数彻底分离。
 - `ProtocolManager::NotifyGbAlarm()` 现在会直接向 `GB28181ClientSDK` 读取当前 `local_code` 作为报警 `DeviceID/AlarmID` 的优先来源，不再额外缓存订阅回调里的 `gbCode`。同时最终 `Alarm NOTIFY` 的 XML 组包层也会再次优先使用 `GB28181XmlParser::m_local_code` 写 `<DeviceID>`，把“报警体设备号必须跟随当前 SIP 本端 ID”收口到最后一跳，避免上层仍带旧值时报文回退。
-- 当前 `gat1400.ini` 只持久化 `GatRegisterParam`；`gat_upload`、`gat_capture` 等其他 1400 相关参数继续使用代码默认值或 HTTP 配置链路。
-- `gb_register.enabled` 为 `0` 时，`ProtocolManager` 会跳过 GB client 生命周期启动与重注册，但 GAT1400 相关配置校验和生命周期不受影响。
+- 当前 `gat1400.ini` 只持久化 `GatRegisterParam`；其中 `enable` 控制 1400 生命周期启停，`gat_upload`、`gat_capture` 等其他 1400 相关参数继续使用代码默认值或 HTTP 配置链路。
+- `gb_register.enabled` 与 `gat_register.enabled` 现在分别控制 GB28181 和 GAT1400 生命周期；两条协议链路的启停互不隐式联动，但都会在 `ProtocolManager::Start()` 和对应的 `Restart*RegisterService()` 中按各自开关决定是否启动或停服。
 - `GAT1400` 的 `GetTime()`/`GET_SYNCTIME` 当前已禁用为 no-op；设备时间统一由 GB28181 校时链路负责，启动阶段只打印 `event=get_time note=disabled` 作为诊断标记。
 - GB `TeleBoot` 远程重启已接入冷却保护；短时间内重复命令会被拒绝并打印 `gb teleboot rejected` 日志。
 - GB `DeviceUpgrade` 现在区分“控制命令应答”和“最终升级结果通知”两层语义：收到合法命令并完成下载校验后，只返回本次控制应答；最终 `DeviceUpgradeResult` 仅在升级执行并重启后的注册恢复阶段补报。

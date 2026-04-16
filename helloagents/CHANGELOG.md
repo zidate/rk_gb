@@ -6,6 +6,9 @@
 
 ## [Unreleased]
 
+### 修复
+- 按 issue 45 补齐 GAT1400 注册配置 `enabled`：`gat1400.ini` 新增 `enable` 持久化字段，`ProtocolManager::Start()` 与 `RestartGatRegisterService()` 现按开关决定是否启动或注销停服；同时复核 GB28181 现有 `enabled` 语义，确认 `RestartGbRegisterService()` 已支持关闭后停服且不重启。
+
 ### 新增
 - 初始化 `helloagents/` 知识库。
 - 新增 `rk_gb` 项目总览、架构、接口、数据模型文档。

@@ -2443,6 +2443,15 @@ int GAT1400ClientService::Start(const ProtocolExternalConfig& cfg, const GbRegis
 {
     Stop();
 
+    if (cfg.gat_register.enabled == 0) {
+        std::lock_guard<std::mutex> lock(m_state_mutex);
+        m_cfg = cfg;
+        m_started = false;
+        m_registered = false;
+        m_regist_state = EM_REGIST_OFF;
+        return 0;
+    }
+
     const std::string deviceId = ResolveGatRuntimeDeviceId(cfg, &gbRegister);
     if (cfg.gat_register.server_ip.empty() || cfg.gat_register.server_port <= 0 ||
         cfg.gat_register.listen_port <= 0 || deviceId.empty()) {
@@ -2522,6 +2531,7 @@ void GAT1400ClientService::Stop()
 int GAT1400ClientService::Reload(const ProtocolExternalConfig& cfg, const GbRegisterParam& gbRegister)
 {
     const std::string nextDeviceId = ResolveGatRuntimeDeviceId(cfg, &gbRegister);
+    const bool nextEnabled = cfg.gat_register.enabled != 0;
     bool started = false;
     bool restartRequired = false;
     bool pendingConfigChanged = false;
@@ -2529,8 +2539,10 @@ int GAT1400ClientService::Reload(const ProtocolExternalConfig& cfg, const GbRegi
     {
         std::lock_guard<std::mutex> lock(m_state_mutex);
         started = m_started;
+        const bool currentEnabled = m_cfg.gat_register.enabled != 0;
         const std::string currentDeviceId = ResolveGatRuntimeDeviceId(m_cfg);
-        restartRequired = (m_cfg.gat_register.server_ip != cfg.gat_register.server_ip) ||
+        restartRequired = (currentEnabled != nextEnabled) ||
+                          (m_cfg.gat_register.server_ip != cfg.gat_register.server_ip) ||
                           (m_cfg.gat_register.server_port != cfg.gat_register.server_port) ||
                           (m_cfg.gat_register.listen_port != cfg.gat_register.listen_port) ||
                           (m_cfg.gat_register.username != cfg.gat_register.username) ||
@@ -2542,12 +2554,23 @@ int GAT1400ClientService::Reload(const ProtocolExternalConfig& cfg, const GbRegi
                               (m_cfg.gat_upload.replay_interval_sec != cfg.gat_upload.replay_interval_sec);
         if (!started) {
             m_cfg = cfg;
+        }
+    }
+
+    if (!started) {
+        if (!nextEnabled) {
             return 0;
         }
+        return Start(cfg, gbRegister);
     }
 
     if (restartRequired) {
         Stop();
+        if (!nextEnabled) {
+            std::lock_guard<std::mutex> lock(m_state_mutex);
+            m_cfg = cfg;
+            return 0;
+        }
         return Start(cfg, gbRegister);
     }
 

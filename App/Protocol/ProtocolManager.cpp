@@ -4040,6 +4040,8 @@ static std::string BuildConfigDiffSummary(const protocol::ProtocolExternalConfig
 
     AppendConfigDiff(diff, "gb.osd.alert_enabled", before.gb_osd.alert_enabled, after.gb_osd.alert_enabled);
 
+    AppendConfigDiff(diff, "gat.register.enabled", before.gat_register.enabled, after.gat_register.enabled);
+
     AppendConfigDiff(diff, "gat.register.server_ip", before.gat_register.server_ip, after.gat_register.server_ip);
 
     AppendConfigDiff(diff, "gat.register.scheme", before.gat_register.scheme, after.gat_register.scheme);
@@ -4978,16 +4980,20 @@ int ProtocolManager::Start()
     }
 
     if (m_gat_client.get() != NULL) {
-        ret = m_gat_client->Start(m_cfg, m_cfg.gb_register);
-        if (ret != 0) {
-            printf("[ProtocolManager] start gat1400 client failed: %d\n", ret);
-            StopGbClientLifecycle();
-            m_talk_broadcast.StopSession();
-            m_listen.StopSession();
-            m_broadcast.StopSession();
-            m_gb_live_media_runtime.sender.CloseSession();
-            m_gb_replay_media_runtime.sender.CloseSession();
-            return ret;
+        if (m_cfg.gat_register.enabled != 0) {
+            ret = m_gat_client->Start(m_cfg, m_cfg.gb_register);
+            if (ret != 0) {
+                printf("[ProtocolManager] start gat1400 client failed: %d\n", ret);
+                StopGbClientLifecycle();
+                m_talk_broadcast.StopSession();
+                m_listen.StopSession();
+                m_broadcast.StopSession();
+                m_gb_live_media_runtime.sender.CloseSession();
+                m_gb_replay_media_runtime.sender.CloseSession();
+                return ret;
+            }
+        } else {
+            printf("[ProtocolManager] skip gat1400 client because config disabled\n");
         }
     }
 
@@ -5163,7 +5169,8 @@ int ProtocolManager::ReloadExternalConfig()
 
                                    (m_cfg.gb_register.model != latest.gb_register.model);
 
-    const bool reloadGat = (m_cfg.gat_register.scheme != latest.gat_register.scheme) ||
+    const bool reloadGat = (m_cfg.gat_register.enabled != latest.gat_register.enabled) ||
+                           (m_cfg.gat_register.scheme != latest.gat_register.scheme) ||
 
                            (m_cfg.gat_register.server_ip != latest.gat_register.server_ip) ||
 
@@ -6339,9 +6346,10 @@ int ProtocolManager::SetGatRegisterConfig(const GatRegisterParam& param)
 
     GatRegisterParam latest = LocalConfigProvider::BuildDefaultGatRegisterConfig();
     const int loadRet = LocalConfigProvider::LoadOrCreateGatRegisterConfig(latest);
-    printf("[ProtocolManager] module=config event=gat_register_set_success trace=manager error=%d stage=persist started=%d gat=%s://%s:%d listen=%d\n",
+    printf("[ProtocolManager] module=config event=gat_register_set_success trace=manager error=%d stage=persist started=%d enabled=%d gat=%s://%s:%d listen=%d\n",
            loadRet,
            m_started ? 1 : 0,
+           latest.enabled != 0 ? 1 : 0,
            latest.scheme.c_str(),
            latest.server_ip.c_str(),
            latest.server_port,
@@ -6378,8 +6386,9 @@ int ProtocolManager::RestartGatRegisterService()
     m_cfg.gat_register = latest;
 
     if (!m_started || m_gat_client.get() == NULL) {
-        printf("[ProtocolManager] module=config event=gat_register_restart_success trace=manager error=0 stage=cache_only started=%d gat=%s://%s:%d listen=%d\n",
+        printf("[ProtocolManager] module=config event=gat_register_restart_success trace=manager error=0 stage=cache_only started=%d enabled=%d gat=%s://%s:%d listen=%d\n",
                m_started ? 1 : 0,
+               m_cfg.gat_register.enabled != 0 ? 1 : 0,
                m_cfg.gat_register.scheme.c_str(),
                m_cfg.gat_register.server_ip.c_str(),
                m_cfg.gat_register.server_port,
@@ -6389,8 +6398,9 @@ int ProtocolManager::RestartGatRegisterService()
 
     const int reloadRet = m_gat_client->Reload(m_cfg, m_cfg.gb_register);
     if (reloadRet != 0) {
-        printf("[ProtocolManager] module=config event=gat_register_restart_fail trace=manager error=%d stage=gat_reload started=1 gat=%s://%s:%d listen=%d\n",
+        printf("[ProtocolManager] module=config event=gat_register_restart_fail trace=manager error=%d stage=gat_reload started=1 enabled=%d gat=%s://%s:%d listen=%d\n",
                reloadRet,
+               m_cfg.gat_register.enabled != 0 ? 1 : 0,
                m_cfg.gat_register.scheme.c_str(),
                m_cfg.gat_register.server_ip.c_str(),
                m_cfg.gat_register.server_port,
@@ -6398,7 +6408,8 @@ int ProtocolManager::RestartGatRegisterService()
         return reloadRet;
     }
 
-    printf("[ProtocolManager] module=config event=gat_register_restart_success trace=manager error=0 stage=gat_reload started=1 gat=%s://%s:%d listen=%d\n",
+    printf("[ProtocolManager] module=config event=gat_register_restart_success trace=manager error=0 stage=gat_reload started=1 enabled=%d gat=%s://%s:%d listen=%d\n",
+           m_cfg.gat_register.enabled != 0 ? 1 : 0,
            m_cfg.gat_register.scheme.c_str(),
            m_cfg.gat_register.server_ip.c_str(),
            m_cfg.gat_register.server_port,

@@ -8,6 +8,7 @@
 
 | 时间戳 | 功能名称 | 类型 | 状态 | 方案包路径 |
 |--------|----------|------|------|------------|
+| 202604161722 | issue45_gb_gat_register_enabled | 修复 | ✅已完成 | [2026-04/202604161722_issue45_gb_gat_register_enabled](2026-04/202604161722_issue45_gb_gat_register_enabled/) |
 | 202604161016 | packaging_archive | 开发 | ✅已完成 | [2026-04/202604161016_packaging_archive](2026-04/202604161016_packaging_archive/) |
 | 202604151948 | dg_ipc_replay | 开发 | ✅已完成 | [2026-04/202604151948_dg_ipc_replay](2026-04/202604151948_dg_ipc_replay/) |
 | 202604131401 | issue44_gb_alarm_pack_local_id | 轻量迭代 | ✅已完成 | [2026-04/202604131401_issue44_gb_alarm_pack_local_id](2026-04/202604131401_issue44_gb_alarm_pack_local_id/) |
@@ -102,6 +103,7 @@
 
 ### 2026-04
 
+- [202604161722_issue45_gb_gat_register_enabled](2026-04/202604161722_issue45_gb_gat_register_enabled/) - 按 issue 45 为 GAT1400 注册配置补齐 `enabled` 与停服语义，并复核 GB28181 现有 `enabled` 停服行为已满足要求
 - [202604161016_packaging_archive](2026-04/202604161016_packaging_archive/) - 将默认 `packaging/` 目录收敛为 `packaging.tar.xz`，并在 `build.sh` 中增加目录缺失时的自动解压恢复逻辑，减少板级二进制资源在 Git 中的路径噪声
 - [202604151948_dg_ipc_replay](2026-04/202604151948_dg_ipc_replay/) - 以 `feature/gb-zero-config-macro-switch-20260326` 为协议基线，顺序吸收本地/远端独有协议提交并回放 `feature/dg_ipc` 的 IPC 适配，同时清理 `cmake-build`、调试目录、压缩包和资料类垃圾文件
 - [202604131401_issue44_gb_alarm_pack_local_id](2026-04/202604131401_issue44_gb_alarm_pack_local_id/) - 基于 `246.pcap` 和 `debug.log` 继续收口 issue 44，把报警 `NOTIFY` 的最终 `<DeviceID>` 约束下沉到 `PackAlarmNotify()`，强制对齐运行态 `m_local_code`

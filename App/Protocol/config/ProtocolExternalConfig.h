@@ -259,6 +259,7 @@ struct GbListenParam
 
 struct GatRegisterParam
 {
+    int enabled;
     std::string scheme;
     std::string server_ip;
     int server_port;
@@ -275,7 +276,8 @@ struct GatRegisterParam
     std::string retry_backoff_policy;
 
     GatRegisterParam()
-        : scheme("http"),
+        : enabled(1),
+          scheme("http"),
           server_port(0),
           base_path(""),
           auth_method("digest"),

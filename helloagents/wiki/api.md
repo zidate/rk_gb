@@ -54,13 +54,14 @@
 **描述:** 只写入 GAT1400 注册配置到 flash，不直接修改运行中的 GAT1400 生命周期。
 
 #### `RestartGatRegisterService()`
-**描述:** 从 flash 重新读取 GAT1400 注册配置，并在 `ProtocolManager` 已启动时调用 `m_gat_client->Reload(...)` 使新配置生效；未启动时只刷新缓存。
+**描述:** 从 flash 重新读取 GAT1400 注册配置，并按当前运行状态与 `enabled` 决定只刷新缓存、停止 1400 服务或重新启动注册生命周期；若当前 1400 已停止但新配置重新启用，也会从停止态拉起。
 
 **当前约束:**
-- 当前仅持久化 `GatRegisterParam`：`scheme`、`server_ip`、`server_port`、`base_path`、`device_id`、`username`、`password`、`auth_method`、`listen_port`、`expires_sec`、`keepalive_interval_sec`、`max_retry`、`request_timeout_ms`、`retry_backoff_policy`
+- 当前仅持久化 `GatRegisterParam`：`enabled`、`scheme`、`server_ip`、`server_port`、`base_path`、`device_id`、`username`、`password`、`auth_method`、`listen_port`、`expires_sec`、`keepalive_interval_sec`、`max_retry`、`request_timeout_ms`、`retry_backoff_policy`
 - `gat_upload`、`gat_capture` 等其他 1400 协议项不写入本地 `ini`
 - `SetGatRegisterConfig()` 成功仅表示 flash 落盘成功；运行中如需生效，需再显式调用 `RestartGatRegisterService()`
-- `RestartGatRegisterService()` 在 `ProtocolManager` 已启动且 `m_gat_client` 已构造时会复用现有 `Reload()` 逻辑决定是否热更新或重启本地 1400 服务
+- `RestartGatRegisterService()` 在 `ProtocolManager` 未启动时只刷新缓存；已启动时若 `enabled=0` 会注销并停掉本地 1400 服务，若 `enabled=1` 则按现有 `Reload()` 逻辑决定热更新、重启，或从停止态重新启动
+- `ProtocolManager::Start()` 会在启动阶段读取 `gat_register.enabled`；当其为 `0` 时不会自动拉起 GAT1400 生命周期
 - 当前本地注册配置只认 `/userdata/conf/Config/GB/gb28181.ini`、`/userdata/conf/Config/GB/zero_config.ini` 与 `/userdata/conf/Config/GB/gat1400.ini` 三个新路径；旧的 `/userdata/conf/Config/gb28181.ini` 不再作为读取或迁移来源
 
 ### ProtocolManager 核心回调

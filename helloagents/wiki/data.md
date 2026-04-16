@@ -25,7 +25,7 @@
 | `gb_broadcast` | `GbBroadcastParam` | 可选 | 广播接收参数 |
 | `gb_talk` | `GbTalkParam` | 可选 | 对讲接收与编码参数 |
 | `gb_listen` | `GbListenParam` | 可选 | 监听发送参数 |
-| `gat_register` | `GatRegisterParam` | 必填 | GAT1400 注册、本地监听和对上请求地址参数 |
+| `gat_register` | `GatRegisterParam` | 必填 | GAT1400 注册开关、本地监听和对上请求地址参数 |
 | `gat_upload` | `GatUploadParam` | 可选 | 批量大小、重试策略和失败补传队列参数 |
 | `gat_capture` | `GatCaptureParam` | 可选 | 采集侧并发和 profile 参数 |
 
@@ -90,6 +90,7 @@
 
 | 字段名 | 类型 | 说明 |
 |--------|------|------|
+| `enabled` | `int` | GAT1400 注册总开关，`0` 为禁用，`1` 为启用 |
 | `scheme` | `std::string` | 对上请求协议，当前配置支持 `http/https`，实现层仅真正支持 `http` |
 | `server_ip` / `server_port` | `std::string` / `int` | 平台地址 |
 | `base_path` | `std::string` | 统一 URI 前缀，例如平台部署在反向代理子路径下 |
@@ -98,7 +99,7 @@
 | `request_timeout_ms` | `int` | 对上 HTTP 请求超时 |
 | `retry_backoff_policy` | `std::string` | 注册失败后的退避序列，逗号分隔秒数 |
 
-**说明:** 当前 `gat1400.ini` 只持久化 `GatRegisterParam`；`gat_upload`、`gat_capture` 等其余 1400 协议项统一使用代码默认值或 HTTP 配置链路，不落本地 `ini`。
+**说明:** 当前 `gat1400.ini` 只持久化 `GatRegisterParam`；`enabled=0` 时允许先保存“停服态”配置，运行中需配合 `RestartGatRegisterService()` 才会真正注销并停掉 1400 服务。`gat_upload`、`gat_capture` 等其余 1400 协议项统一使用代码默认值或 HTTP 配置链路，不落本地 `ini`。
 
 ### `GatUploadParam`
 
@@ -139,6 +140,7 @@
 
 | 键名 | 说明 |
 |------|------|
+| `enable` | GAT1400 开关 |
 | `scheme` | 对上请求协议 |
 | `server_ip` | 平台地址 |
 | `server_port` | 平台端口 |
@@ -342,7 +344,7 @@
 
 - 配置来源: `LocalConfigProvider -> ProtocolExternalConfig -> ProtocolManager / GAT1400ClientService`
 - 本地配置: `/userdata/conf/Config/GB/gb28181.ini + /userdata/conf/Config/GB/zero_config.ini -> LocalConfigProvider -> GetGbRegisterConfig()/SetGbRegisterConfig()/GetGbZeroConfig()/SetGbZeroConfig()/RestartGbRegisterService() -> ProtocolManager::Start()/GB lifecycle`
-- 本地配置: `/userdata/conf/Config/GB/gat1400.ini -> LocalConfigProvider -> GetGatRegisterConfig()/SetGatRegisterConfig()/RestartGatRegisterService() -> ProtocolManager::Start()/GAT1400 lifecycle`
+- 本地配置: `/userdata/conf/Config/GB/gat1400.ini -> LocalConfigProvider -> GetGatRegisterConfig()/SetGatRegisterConfig()/RestartGatRegisterService() -> ProtocolManager::Start()/GAT1400 lifecycle(enabled 决定停服/启动)`
 - 实时流关联: `GbLiveSession -> GB28181RtpPsSender`
 - 回放关联: `GbReplaySession -> Storage_Module_*`
 - 订阅关联: `m_subscriptions -> observer 回调 -> 上层业务`
