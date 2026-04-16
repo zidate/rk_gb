@@ -1,4 +1,4 @@
-﻿if (debug) 
+if (debug) 
 	add_definitions(-DDDBUG)
 endif()
 
@@ -7,11 +7,17 @@ message("compile for RV1106_DUAL_IPC")
 
 if (RC0240) 
 	add_definitions(-DRC0240)
+elseif (RC0240V20)
+	add_definitions(-DRC0240V20)
+elseif (RC0240V30)
+	add_definitions(-DRC0240V30)
+elseif (RC0240V40)
+	add_definitions(-DRC0240V40)
 elseif (RC0240_LGV10)
 	add_definitions(-DRC0240_LGV10)
 endif()
 
-#?????
+#指定头文件
 include_directories(
 	${PROJECT_SOURCE_DIR}/Middleware/Include/
 	${CMAKE_CURRENT_SOURCE_DIR}/
@@ -45,16 +51,23 @@ include_directories(
 	${PROJECT_SOURCE_DIR}/third_party/media-server/librtp/include/
     ${CMAKE_CURRENT_SOURCE_DIR}/Encryption/
     ${CMAKE_CURRENT_SOURCE_DIR}/ProductCof/
+	${CMAKE_CURRENT_SOURCE_DIR}/WebServer/
 )
 
 if (RC0240) 
+	include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Storage/common)
+elseif (RC0240V20)
+	include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Storage/common)
+elseif (RC0240V30)
+	include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Storage/common)
+elseif (RC0240V40)
 	include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Storage/common)
 elseif (RC0240_LGV10)
 	include_directories(${CMAKE_CURRENT_SOURCE_DIR}/Storage/lg)
 endif()
 
-#?????? ble ???
-if (ATBM6062) #?????????
+#指定库头文件 ble 配网库
+if (ATBM6062) #根据宏开关判断逻辑
     message("compile for ATBM6062")
 	link_directories(${PROJECT_SOURCE_DIR}/Lib/Device/Ble/atbm6062)
 	add_definitions(-DBLE_ATBM6062)
@@ -90,14 +103,14 @@ link_directories(
 	${PROJECT_SOURCE_DIR}/Lib/Device/ThirdPartyLibs/fdk-aac
 	${PROJECT_SOURCE_DIR}/Lib/Device/ThirdPartyLibs/libevent
 	${PROJECT_SOURCE_DIR}/Lib/Device/ThirdPartyLibs/TestModuleV2
-	${PROJECT_SOURCE_DIR}/Lib/Device/Tuya
+#	${PROJECT_SOURCE_DIR}/Lib/Device/Tuya
 	${PROJECT_SOURCE_DIR}/Lib/Package
 	${PROJECT_SOURCE_DIR}/Middleware/Lib
 )
 
-#?????
-#media ??
-set(Media_SRC
+#指定源文件
+#media 模块
+set(Media_SRC 
 	Media/AVManager.cpp
 	Media/VideoOsdControl.cpp
 	Media/VideoEncodeControl.cpp
@@ -116,9 +129,9 @@ set(Media_SRC
 
 #set(Media_SRC ${Media_SRC} Media/AnBaoLightManager.cpp)
 
-#Manager??
+#Manager模块
 set(Manager_SRC Manager/ManagerDefaultConfig.cpp)
-#Tuya??
+#Tuya模块
 set(Tuya_SRC tuya/Tuya.cpp
 	tuya/Tuya_common.cpp
 	tuya/tuya_ipc_cloud_storage.cpp
@@ -136,19 +149,43 @@ set(Tuya_SRC tuya/Tuya.cpp
 	tuya/tuya_ipc_sdk_simple_start.cpp
 	tuya/tuya_ipc_doorbell.cpp
 )
-#Net??
+#Net模块
 set(Net_SRC Net/NetConfigHook.cpp)
-#QrCode??
+#QrCode模块
 set(QrCode_SRC QrCode/QrCode.cpp)
-#Http??
+#Http模块
 set(HttpServer_SRC HttpServer/HttpServer.cpp)
-#????
+#产测模块
 #set(Produce_SRC ProduceNew/Produce.cpp ProduceNew/NetWifi.cpp)
 set(Produce_SRC ProduceNew/NetWifi.cpp)
-#?????
+#新产测模块
 set(TestModuleV2_SRC TestModuleV2/TestModuleV2_Demo.cpp TestModuleV2/TestMonitor.cpp)
-#????
+#存储模块
 if (RC0240) 
+	set(Storage_SRC Storage/common/DiskManager.cpp
+		Storage/common/Mp4_Demuxer.cpp
+		Storage/common/mp4_muxing.cpp
+		Storage/common/Storage_api.cpp
+		Storage/common/StorageManager.cpp
+		Storage/common/RingBuffer.cpp
+	)
+elseif (RC0240V20)
+	set(Storage_SRC Storage/common/DiskManager.cpp
+		Storage/common/Mp4_Demuxer.cpp
+		Storage/common/mp4_muxing.cpp
+		Storage/common/Storage_api.cpp
+		Storage/common/StorageManager.cpp
+		Storage/common/RingBuffer.cpp
+	)
+elseif (RC0240V30)
+	set(Storage_SRC Storage/common/DiskManager.cpp
+		Storage/common/Mp4_Demuxer.cpp
+		Storage/common/mp4_muxing.cpp
+		Storage/common/Storage_api.cpp
+		Storage/common/StorageManager.cpp
+		Storage/common/RingBuffer.cpp
+	)
+elseif (RC0240V40)
 	set(Storage_SRC Storage/common/DiskManager.cpp
 		Storage/common/Mp4_Demuxer.cpp
 		Storage/common/mp4_muxing.cpp
@@ -166,13 +203,13 @@ elseif (RC0240_LGV10)
 	)
 endif()
 
-#????
+#云台模块
 set(Ptz_SRC Ptz/Ptz.cpp)
-#Pcba????
+#Pcba测试模块
 set(Pcba_SRC Pcba/Pcba.cpp)
-#wdt??
+#wdt模块
 set(Wdt_SRC Wdt/Wdt.cpp)
-#Rtsp serer??
+#Rtsp serer模块
 # set(Rtsp_SRC Rtsp/VideoRTSPMan.cpp
 # 		Rtsp/StreamSource.cpp
 # 		Rtsp/live_rtsp.cpp
@@ -186,7 +223,7 @@ aux_source_directory(RtspServer/src/xop RtspServer_xop_SRC)
 #message("RtspServer_xop_SRC=${RtspServer_xop_SRC}")
 
 set(Onvif Onvif/Onvif.cpp)
-#??????
+#升级烧录模块
 set(Update Update/update.cpp)
 set(Protocol_SRC
 	Protocol/ProtocolManager.cpp
@@ -198,7 +235,7 @@ set(Protocol_SRC
 	Protocol/gat1400/GAT1400ClientService.cpp
 	Protocol/gat1400/LowerGAT1400SDK.cpp
 )
-#??????? ??
+#加密和产测配置 模块
 set(Encryption_SRC Encryption/Encryption.cpp)
 set(ProductCof_SRC ProductCof/ProductCof.cpp)
 
@@ -407,11 +444,14 @@ target_link_libraries(gb28181_client_sdk_port
 	resolv
 	dl
 )
-#?????
+
+set(WebServer WebServer/mongoose.c WebServer/web_server.c)
+
+#可执行文件
 add_executable(${PROJECT_NAME} ./Main.cpp ./Common.cpp ./Inifile.cpp
 	${Media_SRC} 
 	${Manager_SRC} 
-	${Tuya_SRC} 
+#	${Tuya_SRC} 
 	${Net_SRC} 
 	${QrCode_SRC} 
 	${Produce_SRC} 
@@ -429,9 +469,10 @@ add_executable(${PROJECT_NAME} ./Main.cpp ./Common.cpp ./Inifile.cpp
     ${Encryption_SRC}
     ${ProductCof_SRC}
 	${Wdt_SRC}
+	${WebServer}
 )
 
-#???????
+#指定连接库文件
 set(COMLIBSDIR libManager.a
 	libInfra.a
 	libExchanger.a
@@ -478,7 +519,7 @@ target_link_libraries(
 	${COMLIBSDIR}
 	${LIBMIDWARE_DIR}
 	${LIBBLE_DIR}
-	${LIBTUYA_DIR}
+#	${LIBTUYA_DIR}
 	${LIBFFMPEG_DIR}
 #	${LIBICONV_DIR}
 	${LIBRTSP_DIR}
@@ -495,28 +536,16 @@ target_link_libraries(
 	pthread
 )
 
-# ?????????????? CMakeLists.txt ??
+# 添加子目录，并使用子目录中的 CMakeLists.txt 文件
 # add_subdirectory(src/module1)
 # add_subdirectory(src/module2)
 
-#PROJECT_SOURCE_DIR???????
-#PROJECT_BINARY_DIR???cmake?????????${CMAKE_CURRENT_SOURCE_DIR}/build
-#PROJECT_NAME????? project ?????????
-#CMAKE_CURRENT_SOURCE_DIR?????? CMakeLists.txt ?????
-#CMAKE_CURRENT_BINARY_DIR?target ????
-#CMAKE_CURRENT_LIST_DIR?CMakeLists.txt ?????
-#EXECUTABLE_OUTPUT_PATH????????????????????
-#LIBRARY_OUTPUT_PATH?????????????????
+#PROJECT_SOURCE_DIR：工程的根目录
+#PROJECT_BINARY_DIR：运行cmake命令的目录，通常为${CMAKE_CURRENT_SOURCE_DIR}/build
+#PROJECT_NAME：返回通过 project 命令定义的项目名称
+#CMAKE_CURRENT_SOURCE_DIR：当前处理的 CMakeLists.txt 所在的路径
+#CMAKE_CURRENT_BINARY_DIR：target 编译目录
+#CMAKE_CURRENT_LIST_DIR：CMakeLists.txt 的完整路径
+#EXECUTABLE_OUTPUT_PATH：重新定义目标二进制可执行文件的存放位置
+#LIBRARY_OUTPUT_PATH：重新定义目标链接库文件的存放位置
 set (EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/Bin)
-
-
-
-
-
-
-
-
-
-
-
-

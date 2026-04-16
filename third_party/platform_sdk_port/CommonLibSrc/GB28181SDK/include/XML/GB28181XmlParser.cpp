@@ -2351,8 +2351,7 @@ void CGB28181XmlParser::PackAlarmNotify(int sn ,const AlarmNotifyInfo* info, std
     slothxml::alarm_notify_t notify;
     notify.CmdType = protocol::gb28181::kCmdTypeAlarm;
     notify.SN = m_sn.Increment();
-    // Keep alarm XML aligned with the actual SIP local identity in use.
-    notify.DeviceID = !m_local_code.empty() ? m_local_code : info->DeviceID;
+    notify.DeviceID = info->DeviceID;
     notify.AlarmTime = info->AlarmTime;
     notify.AlarmPriority = info->AlarmPriority;
     notify.AlarmMethod = info->AlarmMethod;
