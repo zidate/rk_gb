@@ -465,7 +465,7 @@ void CNetConfigHook::ThreadProc(void)
 //						NetSetEth_Peiwang();
 //					}
 					
-					CTime::sleep(3 * 1000);
+//					CTime::sleep(3 * 1000);
 					m_eth0_status = NET_CHECK_ETH0_INLINE;
 				}
 				else

@@ -14,6 +14,7 @@
 unsigned char bStartPrivateMode; 		//是否开启隐私模式
 PtzPosition_s pstPtzPosition_sleep;
 int s_scale = 1;
+static bool s_bUpgrading = false;
 //--------------------
 static int onCapture_test(int media_chn,
         int media_type,
@@ -615,6 +616,140 @@ int gb_upgrade_firmware()
 	return 0;
 }
 
+static void *thread_monitor_dev_status(void *args)
+{
+	int ret;
+
+	while (1)
+	{
+		if( true == s_bUpgrading )
+			continue;
+		
+		//监测SD卡状态, 如果卡异常一分钟, 则重启设备
+		{
+			static bool bSdcardNormal = false;
+			static int sdcard_error_count = 0;
+			//获取SD卡状态
+			static int iLastDiskStatus = DISK_STATUS_UNKNOWN;
+			int iDiskStatus = DISK_STATUS_UNKNOWN;
+			iDiskStatus = g_StorageManager->GetDiskState();
+
+			if( DISK_STATUS_UNKNOWN == iLastDiskStatus )
+			{
+				iLastDiskStatus = iDiskStatus;
+			}
+			if( iLastDiskStatus != iDiskStatus )
+			{
+				iLastDiskStatus = iDiskStatus;
+			}
+
+			if( DISK_STATUS_NORMAL == iDiskStatus )
+				bSdcardNormal = true;
+
+			if( bSdcardNormal ) 	//只有卡从正产变为异常的时候才会重启
+			{
+				if( DISK_STATUS_ERROR == iDiskStatus )
+				{
+					sdcard_error_count++;
+				}
+				else
+				{
+					sdcard_error_count = 0;
+				}
+
+				if( sdcard_error_count >= 60 )
+				{
+					sdcard_error_count = 0;
+					AppErr("sd card error more than 1 min. reboot\n");
+					AbnormalRestart();
+				}
+			}
+		}
+
+		//监测主码流编码
+//		if (1)
+		{
+			static unsigned long long LastFrameCount = 0;
+			static int SameCount = 0;
+
+			if( 1 )
+			{
+				unsigned int FrameCount = CaptureGetEncodeFrameCount(0);
+//				AppInfo("[main encode] ----------frame count : %u\n", FrameCount);
+				if (LastFrameCount == FrameCount) 
+				{
+					SameCount ++;
+				}
+				else
+				{
+					SameCount = 0;
+				}
+					
+				if (SameCount > 60) 
+				{
+					AppErr("CheckMainStreamEncodeFrameCount count=[%d] system reboot\n",SameCount);
+					AbnormalRestart();
+				}
+				LastFrameCount = FrameCount;
+			}
+			else
+			{
+				SameCount = 0;
+			}
+		}
+		
+		//监测子码流编码
+//		if(1)
+		{
+			static unsigned long long LastFrameCount = 0;
+			static int SameCount = 0;
+
+			if( 1 )
+			{
+				unsigned int FrameCount = CaptureGetEncodeFrameCount(1);
+//				AppInfo("[sub encode] ----------frame count : %u\n", FrameCount);
+				if (LastFrameCount == FrameCount) 
+				{
+					SameCount ++;
+				}
+				else
+				{
+					SameCount = 0;
+				}
+					
+				if (SameCount > 60) 
+				{
+					AppErr("CheckSubStreamEncodeFrameCount count=[%d] system reboot\n",SameCount);
+					AbnormalRestart();
+				}
+				LastFrameCount = FrameCount;
+			}
+			else
+			{
+				SameCount = 0;
+			}
+		}
+
+		sleep(1);
+	}
+	return NULL;
+}
+
+static void *thread_test_rtsp(void *args)
+{
+	StartRtspPthread();
+	while (1)
+	{
+		if (g_test_enc_type_change) 
+		{
+			StopRtspPthread();
+			StartRtspPthread();
+			g_test_enc_type_change = 0;
+		}
+		sleep(2);
+	}
+	return NULL;
+}
 
 //------------------CSofia---------------
 PATTERN_SINGLETON_IMPLEMENT(CSofia)
@@ -932,7 +1067,6 @@ bool CSofia::start()
 
 		g_Siren.Start();
 		g_Siren.SetMDEnable(true);
-		// 初始化白光灯灭
 		g_Camera.start();
 		g_Alarm.SetAllowMotionDetTime(time(NULL) + 10);
 		g_Alarm.Start();
@@ -952,19 +1086,36 @@ bool CSofia::start()
 			}
 		}
 		g_AVManager.RealTimeStreamStart(DMC_MEDIA_TYPE_H264 | DMC_MEDIA_TYPE_H265 | DMC_MEDIA_TYPE_AUDIO, onCapture_test);
-		StartRtspPthread();
+		CreateDetachedThread((char*)"test_rtsp",thread_test_rtsp, (void *)NULL, true);
+		int ret;
+		char buf[32];
+		int mirror;
+		int flip;
 		while (1)
 		{
-			if (g_test_enc_type_change) 
+			if(access("/tmp/flip", F_OK) == 0)
 			{
-				StopRtspPthread();
-				StartRtspPthread();
-				g_test_enc_type_change = 0;
-			}
-			sleep(2);
+				FILE *fp = fopen("/tmp/flip", "r");
+				if (fp)
+				{
+					ret = fread(buf, 1 ,31, fp);
+					if (ret > 0)
+					{
+						buf[ret] = '\0';
+						if (sscanf(buf, "%d,%d", &mirror, &flip) > 0)
+						{
+							CaptureSetMirrorAndFlip(mirror, flip);
+						}
+					}
+					fclose(fp);
+				}
+				
+				remove("/tmp/flip");
+			}			
+			usleep(200*1000);
 		}
 		#endif
-		
+
 #if 01
 		// Start protocol manager (GB28181/GAT1400/broadcast/listen)
 		protocol::ProtocolManager& protocolManager = protocol::ProtocolManager::Instance();
@@ -979,12 +1130,12 @@ bool CSofia::start()
 				AppErr("ProtocolManager Start failed\n");
 			}
 		}
+		CreateDetachedThread((char*)"thread_update_gb_status",thread_update_gb_status, (void *)NULL, true);
+		CreateDetachedThread((char*)"gb_monitor_network",thread_gb_monitor_network_status, (void *)NULL, true);
 #endif
 //		StartLocalRuntimeServices();
 
-		CreateDetachedThread((char*)"thread_update_gb_status",thread_update_gb_status, (void *)NULL, true);
-		CreateDetachedThread((char*)"gb_monitor_network",thread_gb_monitor_network_status, (void *)NULL, true);
-
+		CreateDetachedThread((char*)"monitor_dev_status",thread_monitor_dev_status, (void *)NULL, true);
 	}
 
 	return true;
@@ -1098,6 +1249,8 @@ void CSofia::onAppEvent(std::string code, int index, appEventAction action, cons
 
 	if ("UpgradeReleaseResource" == code)
 	{
+		s_bUpgrading = true;
+		
 		AppErr("ProtocolManager stop for upgrade\n");
 		protocol::ProtocolManager* protocolManager = protocol::ProtocolManager::InstanceIfCreated();
 		if (protocolManager != NULL)

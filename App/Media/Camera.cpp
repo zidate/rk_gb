@@ -733,6 +733,10 @@ CAMERA_MODE_E CCamera::CheckDayNightByCds(int cdsValue, CAMERA_MODE_E oldStatus)
 {
 //	printf("cdsValue: %d, oldStatus: %d\n", cdsValue, oldStatus);
 //	printf("lamp_board: %d, lamp_board_value: %d, lamp_board_value_method: %d\n", ProductCof_g.lamp_board, ProductCof_g.lamp_board_value, ProductCof_g.lamp_board_value_method);
+
+	if (-1 == cdsValue) //未完成首次采集统计
+		return oldStatus;
+
 	if (ProductCof_g.lamp_board == 0)
 	{
 		if( CAMERA_MODE_NONE == oldStatus )
@@ -1441,7 +1445,7 @@ int CCamera::doMirrorFlipCtrl(bool mirror, bool flip)
 		flip = !flip;
 	}
 	
-	return CaptureSetMirrorAndFlip(mirror, flip);	
+	return CaptureSetMirrorAndFlip(mirror, flip);
 }
 
 /*****************************底层控制接口*****************************/

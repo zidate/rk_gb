@@ -224,6 +224,8 @@ int CaptureInitEncParam(int channel, int enc_type, int bit_rate, int frmae_rate,
 		g_video_chn_0_bit_rate = bit_rate;
 		g_video_chn_0_frmae_rate = frmae_rate;
 		g_video_chn_0_gop = gop;
+		
+		my_video_init_param_2(channel, enc_type, bit_rate, frmae_rate, gop);
 		return 0;
 	}
 	if (1 == channel)
@@ -233,6 +235,8 @@ int CaptureInitEncParam(int channel, int enc_type, int bit_rate, int frmae_rate,
 		g_video_chn_1_bit_rate = bit_rate;
 		g_video_chn_1_frmae_rate = frmae_rate;
 		g_video_chn_1_gop = gop;
+
+		my_video_init_param_2(channel, enc_type, bit_rate, frmae_rate, gop);
 		return 0;
 	}
 
@@ -244,31 +248,35 @@ int CaptureChangeEncParam(int channel, int enc_type, int bit_rate, int frmae_rat
 	if (0 == s_is_video_inited)
 		return -1;
 
-	int old_enc_type;
-	if (0 == channel && g_video_chn_0_enc_param_inited)
-	{
-		old_enc_type = g_video_chn_0_enc_type;
-		g_video_chn_0_enc_type = enc_type;
-		g_video_chn_0_bit_rate = bit_rate;
-		g_video_chn_0_frmae_rate = frmae_rate;
-		g_video_chn_0_gop = gop;
-		if (old_enc_type != enc_type)
-			my_video_0_restart();
-		else
-			my_video_set_param(0);
-	}
-	if (1 == channel && g_video_chn_1_enc_param_inited)
-	{
-		old_enc_type = g_video_chn_1_enc_type;
-		g_video_chn_1_enc_type = enc_type;
-		g_video_chn_1_bit_rate = bit_rate;
-		g_video_chn_1_frmae_rate = frmae_rate;
-		g_video_chn_1_gop = gop;
-		if (old_enc_type != enc_type)
-			my_video_1_restart();
-		else
-			my_video_set_param(0);
-	}
+//	int old_enc_type;
+//	if (0 == channel && g_video_chn_0_enc_param_inited)
+//	{
+//		old_enc_type = g_video_chn_0_enc_type;
+//		g_video_chn_0_enc_type = enc_type;
+//		g_video_chn_0_bit_rate = bit_rate;
+//		g_video_chn_0_frmae_rate = frmae_rate;
+//		g_video_chn_0_gop = gop;
+//		if (old_enc_type != enc_type)
+//			my_video_0_restart();
+//		else
+//			my_video_set_param(0);
+//	}
+//	if (1 == channel && g_video_chn_1_enc_param_inited)
+//	{
+//		old_enc_type = g_video_chn_1_enc_type;
+//		g_video_chn_1_enc_type = enc_type;
+//		g_video_chn_1_bit_rate = bit_rate;
+//		g_video_chn_1_frmae_rate = frmae_rate;
+//		g_video_chn_1_gop = gop;
+//		if (old_enc_type != enc_type)
+//			my_video_1_restart();
+//		else
+//			my_video_set_param(0);
+//	}
+
+	MSG("CaptureChangeEncParam ->channel[%d], enc_type[%d], bit_rate[%d], frmae_rate[%d], gop[%d]\n", 
+		channel, enc_type, bit_rate, frmae_rate, gop);
+	my_video_set_param_2(channel, enc_type, bit_rate, frmae_rate, gop);
 
 	return 0;
 }
