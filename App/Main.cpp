@@ -178,11 +178,14 @@ static int my_config_handler(const device_state_t *state) {
 	g_configManager.getConfig(getConfigName(CFG_AUDIO), table);
 	TExchangeAL<AudioConf_S>::getConfig(table, AudioConfig);
 	if (AUDIO_CODEC_G711A == state->audio_codec)
-		AudioConfig.enc_type = 0;
+		AudioConfig.enc_type = 0;
+
 	else if (AUDIO_CODEC_G711U == state->audio_codec)
-		AudioConfig.enc_type = 1;
+		AudioConfig.enc_type = 1;
+
 	else if (AUDIO_CODEC_AAC == state->audio_codec)
-		AudioConfig.enc_type = 2;
+		AudioConfig.enc_type = 2;
+
 	TExchangeAL<AudioConf_S>::setConfig(AudioConfig, table);
 	g_configManager.setConfig(getConfigName(CFG_AUDIO), table, 0, IConfigManager::applyOK);
 
@@ -737,17 +740,17 @@ static void *thread_monitor_dev_status(void *args)
 
 static void *thread_test_rtsp(void *args)
 {
-	StartRtspPthread();
-	while (1)
-	{
-		if (g_test_enc_type_change) 
-		{
-			StopRtspPthread();
-			StartRtspPthread();
-			g_test_enc_type_change = 0;
-		}
-		sleep(2);
-	}
+	// StartRtspPthread();
+	// while (1)
+	// {
+	// 	if (g_test_enc_type_change) 
+	// 	{
+	// 		StopRtspPthread();
+	// 		StartRtspPthread();
+	// 		g_test_enc_type_change = 0;
+	// 	}
+	// 	sleep(2);
+	// }
 	return NULL;
 }
 
@@ -755,7 +758,8 @@ static void *thread_test_rtsp(void *args)
 PATTERN_SINGLETON_IMPLEMENT(CSofia)
 
 CSofia::CSofia()
-{
+{
+
 }
 
 CSofia::~CSofia()
