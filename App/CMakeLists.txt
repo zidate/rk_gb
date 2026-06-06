@@ -47,6 +47,14 @@ include_directories(
 	${CMAKE_CURRENT_SOURCE_DIR}/Protocol/config/
 	${CMAKE_CURRENT_SOURCE_DIR}/Protocol/gb28181/
 	${CMAKE_CURRENT_SOURCE_DIR}/Protocol/gat1400/
+	${CMAKE_CURRENT_SOURCE_DIR}/DM/
+	${PROJECT_SOURCE_DIR}/third_party/wakaama/include/
+	${PROJECT_SOURCE_DIR}/third_party/wakaama/core/
+	${PROJECT_SOURCE_DIR}/third_party/wakaama/coap/
+	${PROJECT_SOURCE_DIR}/third_party/wakaama/coap/er-coap-13/
+	${PROJECT_SOURCE_DIR}/third_party/wakaama/transport/udp/include/
+	${PROJECT_SOURCE_DIR}/third_party/wakaama/examples/shared/
+	${PROJECT_SOURCE_DIR}/third_party/wakaama/examples/client/common/
 	${PROJECT_SOURCE_DIR}/third_party/media-server/libmpeg/include/
 	${PROJECT_SOURCE_DIR}/third_party/media-server/librtp/include/
     ${CMAKE_CURRENT_SOURCE_DIR}/Encryption/
@@ -234,6 +242,12 @@ set(Protocol_SRC
 	Protocol/gb28181/GB28181ClientReceiverAdapter.cpp
 	Protocol/gat1400/GAT1400ClientService.cpp
 	Protocol/gat1400/LowerGAT1400SDK.cpp
+)
+set(DM_SRC
+	DM/DmClientService.cpp
+	DM/DmConfig.cpp
+	DM/DmCrypto.cpp
+	DM/DmLwm2mObjects.cpp
 )
 #加密和产测配置 模块
 set(Encryption_SRC Encryption/Encryption.cpp)
@@ -445,6 +459,62 @@ target_link_libraries(gb28181_client_sdk_port
 	dl
 )
 
+set(WAKAAMA_ROOT ${PROJECT_SOURCE_DIR}/third_party/wakaama)
+set(WAKAAMA_SRC
+	${WAKAAMA_ROOT}/core/bootstrap.c
+	${WAKAAMA_ROOT}/core/discover.c
+	${WAKAAMA_ROOT}/core/liblwm2m.c
+	${WAKAAMA_ROOT}/core/list.c
+	${WAKAAMA_ROOT}/core/logging.c
+	${WAKAAMA_ROOT}/core/management.c
+	${WAKAAMA_ROOT}/core/objects.c
+	${WAKAAMA_ROOT}/core/observe.c
+	${WAKAAMA_ROOT}/core/packet.c
+	${WAKAAMA_ROOT}/core/registration.c
+	${WAKAAMA_ROOT}/core/reporting.c
+	${WAKAAMA_ROOT}/core/uri.c
+	${WAKAAMA_ROOT}/core/utils.c
+	${WAKAAMA_ROOT}/coap/block.c
+	${WAKAAMA_ROOT}/coap/transaction.c
+	${WAKAAMA_ROOT}/coap/er-coap-13/er-coap-13.c
+	${WAKAAMA_ROOT}/data/data.c
+	${WAKAAMA_ROOT}/data/json.c
+	${WAKAAMA_ROOT}/data/json_common.c
+	${WAKAAMA_ROOT}/data/senml_common.c
+	${WAKAAMA_ROOT}/data/senml_json.c
+	${WAKAAMA_ROOT}/data/tlv.c
+	${WAKAAMA_ROOT}/examples/shared/commandline.c
+	${WAKAAMA_ROOT}/examples/shared/platform.c
+	${WAKAAMA_ROOT}/examples/client/common/object_security.c
+	${WAKAAMA_ROOT}/examples/client/common/object_server.c
+	${WAKAAMA_ROOT}/transport/udp/connection.c
+)
+
+add_library(wakaama_static STATIC ${WAKAAMA_SRC})
+target_include_directories(wakaama_static PRIVATE
+	${WAKAAMA_ROOT}/include
+	${WAKAAMA_ROOT}/core
+	${WAKAAMA_ROOT}/coap
+	${WAKAAMA_ROOT}/coap/er-coap-13
+	${WAKAAMA_ROOT}/transport/udp/include
+	${WAKAAMA_ROOT}/examples/shared
+	${WAKAAMA_ROOT}/examples/client/common
+)
+target_compile_definitions(wakaama_static PUBLIC
+	LWM2M_CLIENT_MODE
+	LWM2M_SUPPORT_TLV
+	LWM2M_SUPPORT_JSON
+	LWM2M_SUPPORT_SENML_JSON
+	LWM2M_OLD_CONTENT_FORMAT_SUPPORT
+	LWM2M_COAP_DEFAULT_BLOCK_SIZE=1024
+	LWM2M_COAP_MAX_MESSAGE_SIZE=2048
+	LWM2M_COAP_DEFAULT_MAX_RETRANSMIT=4
+	LWM2M_COAP_SEPARATE_TIMEOUT=15
+	LWM2M_LITTLE_ENDIAN
+)
+target_compile_definitions(wakaama_static PRIVATE static_assert=_Static_assert)
+target_compile_options(wakaama_static PRIVATE -std=gnu11)
+
 set(WebServer WebServer/mongoose.c WebServer/web_server.c)
 
 #可执行文件
@@ -466,6 +536,7 @@ add_executable(${PROJECT_NAME} ./Main.cpp ./Common.cpp ./Inifile.cpp
 	${Onvif} 
 	${Update}
 	${Protocol_SRC}
+	${DM_SRC}
     ${Encryption_SRC}
     ${ProductCof_SRC}
 	${Wdt_SRC}
@@ -529,12 +600,14 @@ target_link_libraries(
 	${LIB_TESTMODULEV2}
 	media_server_mpeg
 	media_server_rtp
+	wakaama_static
 	gat1400_client_sdk_port
 	gb28181_client_sdk_port
 	sip_sdk_port
 	dl
 	pthread
 )
+target_compile_definitions(${PROJECT_NAME} PRIVATE DM_CRYPTO_USE_FFMPEG)
 
 # 添加子目录，并使用子目录中的 CMakeLists.txt 文件
 # add_subdirectory(src/module1)

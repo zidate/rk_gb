@@ -3,6 +3,7 @@
 
 #include "Protocol/ProtocolManager.h"
 #include "Protocol/config/LocalConfigProvider.h"
+#include "DM/DmClientService.h"
 #include "ProduceNew/Produce.h"
 #include "ProduceNew/NetWifi.h"
 #include "config/ProtocolExternalConfig.h"
@@ -938,6 +939,7 @@ static void *thread_gb_monitor_network_status(void *args)
 				protocol::ProtocolManager& pm = protocol::ProtocolManager::Instance();
 				pm.RestartGbRegisterService();
 				pm.RestartGatRegisterService();
+				dm::RestartDmClientService();
 
 				g_NetConfigHook.GetNetWorkIp(last_ip, sizeof(last_ip));
 				last_link_mode = curr_link_mode;
@@ -952,6 +954,7 @@ static void *thread_gb_monitor_network_status(void *args)
 					protocol::ProtocolManager& pm = protocol::ProtocolManager::Instance();
 					pm.RestartGbRegisterService();
 					pm.RestartGatRegisterService();
+					dm::RestartDmClientService();
 					strncpy(last_ip, curr_ip, 16);
 				}
 			}
@@ -1122,6 +1125,7 @@ CSofia::CSofia()
 
 CSofia::~CSofia()
 {
+	dm::DmClientService::Instance().Stop();
 	protocol::ProtocolManager* protocolManager = protocol::ProtocolManager::InstanceIfCreated();
 	if (protocolManager != NULL)
 	{
@@ -1497,6 +1501,11 @@ bool CSofia::start()
 		#endif
 
 #if 01
+		if (0 != dm::DmClientService::Instance().Start())
+		{
+			AppErr("DmClientService Start failed\n");
+		}
+
 		// Start protocol manager (GB28181/GAT1400/broadcast/listen)
 		protocol::ProtocolManager& protocolManager = protocol::ProtocolManager::Instance();
 		if (0 != protocolManager.Init(PROTOCOL_CONFIG_ENDPOINT))
@@ -1632,6 +1641,7 @@ void CSofia::onAppEvent(std::string code, int index, appEventAction action, cons
 		s_bUpgrading = true;
 		
 		AppErr("ProtocolManager stop for upgrade\n");
+		dm::DmClientService::Instance().Stop();
 		protocol::ProtocolManager* protocolManager = protocol::ProtocolManager::InstanceIfCreated();
 		if (protocolManager != NULL)
 		{
