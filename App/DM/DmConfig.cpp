@@ -83,6 +83,35 @@ bool ContainsEndpointSeparator(const std::string& value)
     return value.find("||") != std::string::npos;
 }
 
+const char* const kKnownDeviceValueKeys[] = {
+    "imsi",
+    "imsi2",
+    "sn",
+    "mac",
+    "rom",
+    "ram",
+    "cpu",
+    "sysVersion",
+    "softwareVer",
+    "softwareName",
+    "volte",
+    "netType",
+    "phoneNumber",
+    "batteryCapacity",
+    "batteryCapacityCurr",
+    "screenSize",
+    "networkStatus",
+    "wearingStatus",
+    "routerMac",
+    "bluetoothMac",
+    "gpu",
+    "board",
+    "resolution",
+};
+
+const size_t kKnownDeviceValueKeyCount =
+    sizeof(kKnownDeviceValueKeys) / sizeof(kKnownDeviceValueKeys[0]);
+
 std::string NormalizeOptional(const std::string& value)
 {
     return value.empty() ? std::string(kDmNoValue) : value;
@@ -95,6 +124,52 @@ std::string DeviceValueOrDefault(const DmConfig& cfg, const std::string& key)
         return kDmNoValue;
     }
     return it->second;
+}
+
+bool IsKnownDeviceValueKey(const std::string& key)
+{
+    for (size_t i = 0; i < kKnownDeviceValueKeyCount; ++i) {
+        if (key == kKnownDeviceValueKeys[i]) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void WriteDeviceValue(std::ofstream& out, const DmConfig& cfg, const std::string& key)
+{
+    out << "device_" << key << "=" << DeviceValueOrDefault(cfg, key) << "\n";
+}
+
+void WriteDeviceValues(std::ofstream& out, const DmConfig& cfg)
+{
+    for (size_t i = 0; i < kKnownDeviceValueKeyCount; ++i) {
+        WriteDeviceValue(out, cfg, kKnownDeviceValueKeys[i]);
+    }
+
+    for (std::map<std::string, std::string>::const_iterator it = cfg.device_values.begin();
+         it != cfg.device_values.end();
+         ++it) {
+        if (!IsKnownDeviceValueKey(it->first)) {
+            WriteDeviceValue(out, cfg, it->first);
+        }
+    }
+}
+
+void NormalizeDmConfigForSave(DmConfig& cfg)
+{
+    cfg.enabled = cfg.enabled != 0 ? 1 : 0;
+    if (cfg.server_uri.empty()) {
+        cfg.server_uri = kDmDefaultCommercialServerUri;
+    }
+    if (cfg.api_version.empty()) {
+        cfg.api_version = kDmDefaultApiVersion;
+    }
+    if (cfg.api_type.empty()) {
+        cfg.api_type = kDmDefaultApiType;
+    }
+    cfg.sdk_version = NormalizeOptional(cfg.sdk_version);
+    cfg.imei2 = NormalizeOptional(cfg.imei2);
 }
 
 void ApplyKeyValue(DmConfig& cfg, const std::string& rawKey, const std::string& rawValue)
@@ -167,19 +242,7 @@ int WriteDefaultConfig(const DmConfig& cfg, const std::string& path)
     out << "imei1=" << cfg.imei1 << "\n";
     out << "imei2=" << cfg.imei2 << "\n";
     out << "secret=" << cfg.secret << "\n";
-    out << "device_imsi=" << DeviceValueOrDefault(cfg, "imsi") << "\n";
-    out << "device_imsi2=" << DeviceValueOrDefault(cfg, "imsi2") << "\n";
-    out << "device_sn=" << DeviceValueOrDefault(cfg, "sn") << "\n";
-    out << "device_mac=" << DeviceValueOrDefault(cfg, "mac") << "\n";
-    out << "device_rom=" << DeviceValueOrDefault(cfg, "rom") << "\n";
-    out << "device_ram=" << DeviceValueOrDefault(cfg, "ram") << "\n";
-    out << "device_cpu=" << DeviceValueOrDefault(cfg, "cpu") << "\n";
-    out << "device_sysVersion=" << DeviceValueOrDefault(cfg, "sysVersion") << "\n";
-    out << "device_softwareVer=" << DeviceValueOrDefault(cfg, "softwareVer") << "\n";
-    out << "device_softwareName=" << DeviceValueOrDefault(cfg, "softwareName") << "\n";
-    out << "device_netType=" << DeviceValueOrDefault(cfg, "netType") << "\n";
-    out << "device_routerMac=" << DeviceValueOrDefault(cfg, "routerMac") << "\n";
-    out << "device_bluetoothMac=" << DeviceValueOrDefault(cfg, "bluetoothMac") << "\n";
+    WriteDeviceValues(out, cfg);
     return out.good() ? 0 : -3;
 }
 
@@ -237,6 +300,24 @@ int LoadDmConfig(DmConfig& out, const std::string& path)
     return 0;
 }
 
+int GetDmConfig(DmConfig& out, const std::string& path)
+{
+    return LoadDmConfig(out, path);
+}
+
+int SetDmConfig(const DmConfig& cfg, const std::string& path)
+{
+    DmConfig next = cfg;
+    NormalizeDmConfigForSave(next);
+
+    std::string reason;
+    if (!ValidateDmConfig(next, reason)) {
+        return -4;
+    }
+
+    return WriteDefaultConfig(next, path);
+}
+
 int SaveDmServerUri(const std::string& serverUri, const std::string& path)
 {
     DmConfig cfg;
@@ -245,7 +326,7 @@ int SaveDmServerUri(const std::string& serverUri, const std::string& path)
         return ret;
     }
     cfg.server_uri = serverUri;
-    return WriteDefaultConfig(cfg, path);
+    return SetDmConfig(cfg, path);
 }
 
 std::string BuildDmEndpoint(const DmConfig& cfg)

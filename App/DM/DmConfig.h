@@ -40,6 +40,8 @@ struct DmConfig
 };
 
 int LoadDmConfig(DmConfig& out, const std::string& path = kDmConfigFile);
+int GetDmConfig(DmConfig& out, const std::string& path = kDmConfigFile);
+int SetDmConfig(const DmConfig& cfg, const std::string& path = kDmConfigFile);
 int SaveDmServerUri(const std::string& serverUri,
                     const std::string& path = kDmConfigFile);
 std::string BuildDmEndpoint(const DmConfig& cfg);

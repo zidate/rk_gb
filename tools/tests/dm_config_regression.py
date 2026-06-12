@@ -48,20 +48,22 @@ int main(int argc, char** argv) {
     }
 
     dm::DmConfig cfg;
-    int ret = dm::LoadDmConfig(cfg, path);
+    int ret = dm::GetDmConfig(cfg, path);
     if (ret != 0 || cfg.enabled != 1) {
-        std::cerr << "initial load failed ret=" << ret << " enabled=" << cfg.enabled << "\n";
+        std::cerr << "initial get failed ret=" << ret << " enabled=" << cfg.enabled << "\n";
         return 2;
     }
 
-    ret = dm::SaveDmServerUri("coap://b.fxltsbl.com:5683", path);
+    cfg.server_uri = "coap://b.fxltsbl.com:5683";
+    cfg.device_values["sn"] = "SN001";
+    ret = dm::SetDmConfig(cfg, path);
     if (ret != 0) {
-        std::cerr << "SaveDmServerUri ret=" << ret << "\n";
+        std::cerr << "SetDmConfig ret=" << ret << "\n";
         return 3;
     }
 
     dm::DmConfig after;
-    ret = dm::LoadDmConfig(after, path);
+    ret = dm::GetDmConfig(after, path);
     if (ret != 0) {
         std::cerr << "reload ret=" << ret << "\n";
         return 4;
@@ -74,8 +76,33 @@ int main(int argc, char** argv) {
         std::cerr << "server_uri=" << after.server_uri << "\n";
         return 6;
     }
+    if (after.device_values["sn"] != "SN001") {
+        std::cerr << "device_sn=" << after.device_values["sn"] << "\n";
+        return 7;
+    }
 
-    std::cout << "PASS: DM config server_uri write keeps enabled flag\n";
+    ret = dm::SaveDmServerUri("coap://m.fxltsbl.com:5683", path);
+    if (ret != 0) {
+        std::cerr << "SaveDmServerUri ret=" << ret << "\n";
+        return 8;
+    }
+
+    dm::DmConfig invalid = after;
+    invalid.server_uri = "http://invalid.example.com";
+    ret = dm::SetDmConfig(invalid, path);
+    if (ret == 0) {
+        std::cerr << "SetDmConfig accepted invalid enabled config\n";
+        return 9;
+    }
+
+    dm::DmConfig unchanged;
+    ret = dm::GetDmConfig(unchanged, path);
+    if (ret != 0 || unchanged.server_uri != "coap://m.fxltsbl.com:5683") {
+        std::cerr << "invalid set changed config ret=" << ret << " server_uri=" << unchanged.server_uri << "\n";
+        return 10;
+    }
+
+    std::cout << "PASS: DM config get/set keeps enabled flag and rejects invalid active config\n";
     return 0;
 }
 '''

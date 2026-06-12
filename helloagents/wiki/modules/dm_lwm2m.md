@@ -16,6 +16,11 @@ DM 参数文件为 `/userdata/conf/Config/DM/dm.ini`。首次启动缺失该文�
 - `api_type`: 非 Android 默认 `I`
 - `device_*`: 669/0/1 上报字段来源，缺失时按 DM 文档使用 `***`
 
+对外模块可通过 `App/DM/DmConfig.h` 读写完整 DM 参数：
+- `dm::GetDmConfig(DmConfig& out, path)`: 读取 `dm.ini`，文件缺失时按默认值创建。
+- `dm::SetDmConfig(const DmConfig& cfg, path)`: 保存完整 DM 参数；启用状态下会复用 `ValidateDmConfig` 校验，非法启用配置不落盘。
+- `DmConfig::device_values` 使用不带 `device_` 前缀的字段名，保存时写成 `device_<field>`；已覆盖 669/0/1 支持的标准字段，并保留额外自定义字段。
+
 ## 实现边界
 
 Wakaama 源码 vendoring 到 `third_party/wakaama`，以 `wakaama_static` 静态库编译。工程没有使用 Wakaama 自带 CMake 入口，因为当前项目 CMake 最低版本为 3.0，而 Wakaama 自带入口要求更高版本。
