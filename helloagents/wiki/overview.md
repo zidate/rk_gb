@@ -28,6 +28,7 @@
 |---------|------|------|------|
 | BuildRuntime | 说明工具链、构建入口、运行启动链 | ✅稳定 | [modules/build_runtime.md](modules/build_runtime.md) |
 | RKSoCIpcPlatform | 说明 RK SoC IPC 平台身份、板型宏、SDK 库边界与启动主链 | ✅稳定 | [modules/rk_soc_ipc_platform.md](modules/rk_soc_ipc_platform.md) |
+| Network | 说明以太网/Wi-Fi DHCP 客户端、内核 IPv6、BusyBox 网络 applet 和 DHCPv6 缺口 | 🚧待补 DHCPv6 | [modules/network.md](modules/network.md) |
 | RKMediaPipeline | 说明 PAL/DMC、编码配置、实时流、录像、回放/下载和 OSD/翻转链路 | ✅稳定 | [modules/rk_media_pipeline.md](modules/rk_media_pipeline.md) |
 | RKDebugPlaybook | 说明构建、日志、抓包、实时流、录像回放和编码配置排查路径 | ✅稳定 | [modules/rk_debug_playbook.md](modules/rk_debug_playbook.md) |
 | Protocol | 说明协议编排、配置加载、会话生命周期与近期实现约束 | ✅稳定 | [modules/protocol.md](modules/protocol.md) |

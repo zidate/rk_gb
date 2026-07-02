@@ -193,6 +193,62 @@ RKIPC_MAYBE_UNUSED static int whether_ether_is_linked(char *ifname, int ifname_s
 	return 1;
 }
 
+static void rk_network_ipv6_conf_set(const char *ifname, const char *key, const char *value) {
+	char cmd[256] = {0};
+
+	snprintf(cmd, sizeof(cmd),
+	         "if [ -e /proc/sys/net/ipv6/conf/%s/%s ]; then echo %s > "
+	         "/proc/sys/net/ipv6/conf/%s/%s; fi",
+	         ifname, key, value, ifname, key);
+	LOG_INFO("netconfig_cmd:%s\n", cmd);
+	system(cmd);
+}
+
+static void rk_network_ipv6_enable(const char *ifname) {
+	rk_network_ipv6_conf_set(ifname, "disable_ipv6", "0");
+	rk_network_ipv6_conf_set(ifname, "forwarding", "0");
+	rk_network_ipv6_conf_set(ifname, "accept_ra", "1");
+	rk_network_ipv6_conf_set(ifname, "autoconf", "1");
+}
+
+static void rk_network_ipv6_flush(const char *ifname) {
+	char cmd[256] = {0};
+
+	snprintf(cmd, sizeof(cmd),
+	         "if command -v ip >/dev/null 2>&1; then ip -6 addr flush dev %s 2>/dev/null; fi",
+	         ifname);
+	LOG_INFO("netconfig_cmd:%s\n", cmd);
+	system(cmd);
+}
+
+static void rk_network_dhcpv6_stop(const char *ifname) {
+	char cmd[256] = {0};
+
+	snprintf(cmd, sizeof(cmd),
+	         "if [ -f /var/run/udhcpc6.%s.pid ]; then kill $(cat /var/run/udhcpc6.%s.pid) "
+	         "2>/dev/null; rm -f /var/run/udhcpc6.%s.pid; fi",
+	         ifname, ifname, ifname);
+	LOG_INFO("netconfig_cmd:%s\n", cmd);
+	system(cmd);
+}
+
+static void rk_network_dhcpv6_start(const char *ifname) {
+	char cmd[512] = {0};
+
+	rk_network_dhcpv6_stop(ifname);
+	rk_network_ipv6_enable(ifname);
+	snprintf(cmd, sizeof(cmd),
+	         "mkdir -p /var/run; "
+	         "script=/usr/share/udhcpc6/default.script; "
+	         "[ -x \"$script\" ] || script=/usr/share/udhcpc/default.script; "
+	         "if command -v udhcpc6 >/dev/null 2>&1; then "
+	         "udhcpc6 -i %s -s \"$script\" -p /var/run/udhcpc6.%s.pid -b -q; "
+	         "else busybox udhcpc6 -i %s -s \"$script\" -p /var/run/udhcpc6.%s.pid -b -q; fi",
+	         ifname, ifname, ifname, ifname);
+	LOG_INFO("netconfig_cmd:%s\n", cmd);
+	system(cmd);
+}
+
 int rk_network_ipv4_set(char *interface, char *method, char *address, char *netmask,
                         char *gateway) {
 	char netconfig_cmd[512] = {0};
@@ -209,13 +265,17 @@ int rk_network_ipv4_set(char *interface, char *method, char *address, char *netm
 		LOG_INFO("netconfig_cmd:%s\n", netconfig_cmd);
 		system(netconfig_cmd);
 		//}
+		rk_network_dhcpv6_start(interface);
 	}
 	// IPv4 DHCP
 	if (strcasecmp(method, "dhcp") == 0) {
 		// Ether_info.v4_is_dhcp = true;
 		memcpy(netmode, method, strlen(method));
 		snprintf(netmode, sizeof(netmode), "%s", method);
-		system("udhcpc -n &");
+		snprintf(netconfig_cmd, sizeof(netconfig_cmd), "udhcpc -i %s -n &", interface);
+		LOG_INFO("netconfig_cmd:%s\n", netconfig_cmd);
+		system(netconfig_cmd);
+		rk_network_dhcpv6_start(interface);
 	}
 
 	return 0;
@@ -674,7 +734,7 @@ int rk_network_get_cable_state() {
 	struct sockaddr_nl addr;
 	struct nlmsghdr *nh;
 	struct ifinfomsg *ifinfo;
-	char name[IFNAMSIZ], cmd1[64], cmd2[64];
+	char name[IFNAMSIZ], cmd1[128], cmd2[64];
 	// struct rtattr *attr;
 
 	fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
@@ -698,19 +758,21 @@ int rk_network_get_cable_state() {
 			if_indextoname(ifinfo->ifi_index, name);
 			LOG_INFO("\n[%s] link %s\n", name, (ifinfo->ifi_flags & IFF_LOWER_UP) ? "up" : "down");
 
-			memset(cmd1, 0, 32);
-			memset(cmd2, 0, 32);
-			sprintf(cmd1, "udhcpc -i %s -T 1 -A 0 -b -q", name);
-			sprintf(cmd2, "ifconfig %s 0.0.0.0", name);
+			memset(cmd1, 0, sizeof(cmd1));
+			memset(cmd2, 0, sizeof(cmd2));
+			snprintf(cmd1, sizeof(cmd1), "udhcpc -i %s -T 1 -A 0 -b -q", name);
+			snprintf(cmd2, sizeof(cmd2), "ifconfig %s 0.0.0.0", name);
 
 			if (ifinfo->ifi_flags & IFF_LOWER_UP) {
 				status = 1;
 				system("killall -9 udhcpc");
 				system("route del default gw 0.0.0.0");
-				system("cat /dev/null > /etc/resolv.conf");
 				system(cmd1);
+				rk_network_dhcpv6_start(name);
 			} else {
 				status = 0;
+				rk_network_dhcpv6_stop(name);
+				rk_network_ipv6_flush(name);
 				system(cmd2);
 			}
 
