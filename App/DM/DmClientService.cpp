@@ -413,6 +413,10 @@ int DmClientService::RunLwm2mClientOnce()
                                                                 cfg.short_server_id,
                                                                 true);
                 printf("[DM] heartbeat update ret=%d\n", updateRet);
+                if (updateRet == 0) {
+                    ++state.reportsInWindow;
+                    state.lastReportTime = now;
+                }
             } else {
                 printf("[DM] heartbeat skipped by reportNum/reportTime rule\n");
             }

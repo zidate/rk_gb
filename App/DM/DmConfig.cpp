@@ -249,23 +249,26 @@ int WriteDefaultConfig(const DmConfig& cfg, const std::string& path)
 }
 
 DmConfig::DmConfig()
-    : enabled(0),
-      server_uri(kDmDefaultCommercialServerUri),
+    : enabled(1),
+      server_uri(kDmDefaultAdaptServerUri),
       local_port(0),
       lifetime_sec(86400),
       short_server_id(123),
       startup_retry_interval_sec(60),
-      brand(kDmNoValue),
-      model(kDmNoValue),
-      app_key(kDmNoValue),
+      brand(kDmDefaultBrand),
+      model(kDmDefaultModel),
+      app_key(kDmDefaultAppkey),
       sdk_version(kDmNoValue),
       api_version(kDmDefaultApiVersion),
       api_type(kDmDefaultApiType),
-      template_id(kDmNoValue),
+      template_id(kDmDefaultTemplateId),
       imei1(kDmNoValue),
       imei2(kDmNoValue),
-      secret(kDmNoValue)
+      secret(kDmDefaultSecret)
 {
+    device_values["sysVersion"] = "5.10.160";
+    device_values["softwareVer"] = "1.0.9";
+    
 }
 
 int LoadDmConfig(DmConfig& out, const std::string& path)
