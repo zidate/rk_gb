@@ -3,7 +3,9 @@ project(dgiot)
 
 #add_definitions(-Werror)
 #add_definitions(-Wno-error=deprecated-declarations)
-add_definitions(-O3)
+# Field reports show -O3 builds can crash when encoder starts.
+# Keep global optimization unset unless a target is proven safe.
+#add_definitions(-O3)
 
 #add_definitions(-Wall -o3)
 add_definitions(-w -Wno-psabi)
@@ -14,6 +16,13 @@ option(ATBM6052 "compile for ATBM6052" OFF)
 option(ATBM6012B "compile for ATBM6012B" OFF)
 option(ATBM6132 "compile for ATBM6132" OFF)
 option(AIC8800DL "compile for AIC8800DL" OFF)
+option(RK_ENABLE_IPV6_SOCKET "enable IPv6-capable application sockets" OFF)
+
+if(RK_ENABLE_IPV6_SOCKET)
+	add_definitions(-DRK_ENABLE_IPV6_SOCKET=1)
+else()
+	add_definitions(-DRK_ENABLE_IPV6_SOCKET=0)
+endif()
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ffunction-sections -fdata-sections")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections")

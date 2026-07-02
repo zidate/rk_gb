@@ -1,5 +1,6 @@
 ﻿#include "GB28181BroadcastBridge.h"
 #include "ProtocolLog.h"
+#include "SocketCompat.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -403,7 +404,33 @@ int GB28181BroadcastBridge::SetupRecvSocket()
 {
     const bool isTcp = IsTcpTransportType(m_transport_type);
     const int sockType = isTcp ? SOCK_STREAM : SOCK_DGRAM;
+    int family = AF_INET;
+    protocol::socket_compat::Endpoint remoteEndpoint;
+
+#if RK_ENABLE_IPV6_SOCKET
+    if (m_transport_type == kRtpOverTcpActive) {
+        if (m_remote_ip.empty() || m_remote_port <= 0) {
+            printf("[GB28181][Broadcast] tcp active missing remote endpoint=%s:%d\n",
+                   m_remote_ip.c_str(),
+                   m_remote_port);
+            return -13;
+        }
+
+        if (!protocol::socket_compat::ResolveEndpoint(m_remote_ip,
+                                                       m_remote_port,
+                                                       sockType,
+                                                       &remoteEndpoint)) {
+            printf("[GB28181][Broadcast] invalid tcp active remote ip=%s\n", m_remote_ip.c_str());
+            return -14;
+        }
+        family = remoteEndpoint.family;
+    } else {
+        family = AF_INET6;
+    }
+    const int sockfd = protocol::socket_compat::CreateSocket(family, sockType, true);
+#else
     const int sockfd = socket(AF_INET, sockType, 0);
+#endif
     if (sockfd < 0) {
         printf("[GB28181][Broadcast] create %s socket failed errno=%d\n",
                TransportTypeName(m_transport_type),
@@ -415,6 +442,18 @@ int GB28181BroadcastBridge::SetupRecvSocket()
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
     SetSocketRecvTimeout(sockfd, 200);
 
+#if RK_ENABLE_IPV6_SOCKET
+    protocol::socket_compat::Endpoint localEndpoint;
+    if (!protocol::socket_compat::BuildAnyEndpoint(family, m_param.recv_port, &localEndpoint) ||
+        bind(sockfd, protocol::socket_compat::AsSockaddr(localEndpoint), localEndpoint.len) != 0) {
+        printf("[GB28181][Broadcast] bind %s port=%d failed errno=%d\n",
+               TransportTypeName(m_transport_type),
+               m_param.recv_port,
+               errno);
+        close(sockfd);
+        return -12;
+    }
+#else
     struct sockaddr_in local_addr;
     memset(&local_addr, 0, sizeof(local_addr));
     local_addr.sin_family = AF_INET;
@@ -429,6 +468,7 @@ int GB28181BroadcastBridge::SetupRecvSocket()
         close(sockfd);
         return -12;
     }
+#endif
 
     if (!isTcp) {
         m_recv_sock = sockfd;
@@ -444,6 +484,19 @@ int GB28181BroadcastBridge::SetupRecvSocket()
             return -13;
         }
 
+#if RK_ENABLE_IPV6_SOCKET
+        struct sockaddr_storage remote_addr;
+        memset(&remote_addr, 0, sizeof(remote_addr));
+        memcpy(&remote_addr, &remoteEndpoint.addr, sizeof(remoteEndpoint.addr));
+        if (connect(sockfd, (struct sockaddr*)&remote_addr, remoteEndpoint.len) != 0) {
+            printf("[GB28181][Broadcast] tcp active connect failed errno=%d remote=%s:%d\n",
+                   errno,
+                   m_remote_ip.c_str(),
+                   m_remote_port);
+            close(sockfd);
+            return -15;
+        }
+#else
         struct sockaddr_in remote_addr;
         memset(&remote_addr, 0, sizeof(remote_addr));
         remote_addr.sin_family = AF_INET;
@@ -462,6 +515,7 @@ int GB28181BroadcastBridge::SetupRecvSocket()
             close(sockfd);
             return -15;
         }
+#endif
 
         m_recv_sock = sockfd;
         if (EnsureAudioOutputStarted() != 0) {
@@ -564,7 +618,7 @@ int GB28181BroadcastBridge::RunRecvLoop()
     while (m_recv_loop && m_running) {
         if (m_transport_type == kRtpOverTcp || m_transport_type == kRtpOverTcpPassive) {
             if (m_recv_sock < 0) {
-                struct sockaddr_in remote_addr;
+                struct sockaddr_storage remote_addr;
                 socklen_t addr_len = sizeof(remote_addr);
                 const int clientSock = accept(m_listen_sock, (struct sockaddr*)&remote_addr, &addr_len);
                 if (clientSock < 0) {
@@ -582,10 +636,14 @@ int GB28181BroadcastBridge::RunRecvLoop()
 
                 SetSocketRecvTimeout(clientSock, 200);
 
-                char sourceIp[INET_ADDRSTRLEN] = {0};
-                inet_ntop(AF_INET, &remote_addr.sin_addr, sourceIp, sizeof(sourceIp));
-                const int sourcePort = ntohs(remote_addr.sin_port);
-                if (!m_remote_ip.empty() && m_remote_ip != sourceIp) {
+                char sourceIp[INET6_ADDRSTRLEN] = {0};
+                int sourcePort = 0;
+                protocol::socket_compat::SockaddrToString((struct sockaddr*)&remote_addr,
+                                                          addr_len,
+                                                          sourceIp,
+                                                          sizeof(sourceIp),
+                                                          &sourcePort);
+                if (!protocol::socket_compat::AddressMatchesText(remote_addr, m_remote_ip)) {
                     printf("[GB28181][Broadcast] tcp passive reject peer remote=%s:%d expect_ip=%s\n",
                            sourceIp,
                            sourcePort,
@@ -712,7 +770,7 @@ int GB28181BroadcastBridge::RunRecvLoop()
             continue;
         }
 
-        struct sockaddr_in remote_addr;
+        struct sockaddr_storage remote_addr;
         socklen_t addr_len = sizeof(remote_addr);
         const int n = recvfrom(m_recv_sock,
                                packet,
@@ -733,11 +791,15 @@ int GB28181BroadcastBridge::RunRecvLoop()
             continue;
         }
 
-        char sourceIp[INET_ADDRSTRLEN] = {0};
-        inet_ntop(AF_INET, &remote_addr.sin_addr, sourceIp, sizeof(sourceIp));
-        const int sourcePort = ntohs(remote_addr.sin_port);
+        char sourceIp[INET6_ADDRSTRLEN] = {0};
+        int sourcePort = 0;
+        protocol::socket_compat::SockaddrToString((struct sockaddr*)&remote_addr,
+                                                  addr_len,
+                                                  sourceIp,
+                                                  sizeof(sourceIp),
+                                                  &sourcePort);
 
-        if (!m_remote_ip.empty() && m_remote_ip != sourceIp) {
+        if (!protocol::socket_compat::AddressMatchesText(remote_addr, m_remote_ip)) {
             continue;
         }
 
@@ -997,6 +1059,11 @@ int GB28181BroadcastBridge::ApplyTransportHint(const std::string& remoteIp,
 std::string GB28181BroadcastBridge::BuildLocalAnswerSdp(const std::string& localIp) const
 {
     std::string ip = localIp.empty() ? "0.0.0.0" : localIp;
+#if RK_ENABLE_IPV6_SOCKET
+    const char* sdpAddressFamily = protocol::socket_compat::IsIpv6Text(ip) ? "IN IP6" : "IN IP4";
+#else
+    const char* sdpAddressFamily = "IN IP4";
+#endif
 
     int pt = m_negotiated_payload_type;
     if (pt < 0 || pt > 127) {
@@ -1008,9 +1075,9 @@ std::string GB28181BroadcastBridge::BuildLocalAnswerSdp(const std::string& local
 
     std::ostringstream out;
     out << "v=0\r\n";
-    out << "o=- 0 0 IN IP4 " << ip << "\r\n";
+    out << "o=- 0 0 " << sdpAddressFamily << " " << ip << "\r\n";
     out << "s=GB28181-Broadcast\r\n";
-    out << "c=IN IP4 " << ip << "\r\n";
+    out << "c=" << sdpAddressFamily << " " << ip << "\r\n";
     out << "t=0 0\r\n";
     out << protocol::gb28181::kSdpMediaAudioPrefix << m_param.recv_port << " "
         << (tcpTransport ? protocol::gb28181::kSdpTransportTcpRtpAvp

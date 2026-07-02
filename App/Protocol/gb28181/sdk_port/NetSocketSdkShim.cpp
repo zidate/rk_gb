@@ -1,4 +1,5 @@
 #include "NetSocketSDK.h"
+#include "SocketCompat.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -49,6 +50,27 @@ tint32 NET_SOCKET_AddConnect(tuint32 localIP, const char* pStrServerIP, tuint16 
         return -1;
     }
 
+#if RK_ENABLE_IPV6_SOCKET
+    protocol::socket_compat::Endpoint endpoint;
+    if (!protocol::socket_compat::ResolveEndpoint(pStrServerIP,
+                                                   netPort,
+                                                   SOCK_STREAM,
+                                                   &endpoint)) {
+        return -1;
+    }
+
+    const int fd = protocol::socket_compat::CreateSocket(endpoint.family, SOCK_STREAM, false);
+    if (fd < 0) {
+        return -1;
+    }
+
+    if (connect(fd,
+                protocol::socket_compat::AsSockaddr(endpoint),
+                endpoint.len) != 0) {
+        close(fd);
+        return -1;
+    }
+#else
     const int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) {
         return -1;
@@ -67,6 +89,7 @@ tint32 NET_SOCKET_AddConnect(tuint32 localIP, const char* pStrServerIP, tuint16 
         close(fd);
         return -1;
     }
+#endif
 
     const tint32 handle = g_next_socket_id.fetch_add(1);
     std::lock_guard<std::mutex> lock(g_socket_mutex);

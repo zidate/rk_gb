@@ -5,6 +5,10 @@
 #include <string.h>
 #include <string>
 
+#ifndef RK_ENABLE_IPV6_SOCKET
+#define RK_ENABLE_IPV6_SOCKET 0
+#endif
+
 static StreamRequestType  String2Enum( const std::string& str   )
 {
 
@@ -41,6 +45,18 @@ static std::string  Enum2String( StreamRequestType type   )
 static bool IsDownstreamMediaRequest(StreamRequestType type)
 {
       return type == kLiveStream || type == kPlayback || type == kDownload;
+}
+
+static const char* ResolveSdpAddrType(const char* ip)
+{
+#if RK_ENABLE_IPV6_SOCKET
+      if (ip && strchr(ip, ':')) {
+           return "IP6";
+      }
+#else
+      (void)ip;
+#endif
+      return "IP4";
 }
 
 static std::string StripGbSdpExtensions(const char* str, std::string* ssrc)
@@ -284,11 +300,13 @@ bool CSdpUtil::String2MediaInfo(const char* str, MediaInfo* output )
 void CSdpUtil::ToString(const MediaInfo*  gb_meida,  std::string& result )
 {
     CSdpMessage sdp;
+    const char* addrType = ResolveSdpAddrType(gb_meida ? gb_meida->IP : NULL);
+
     // v= 字段
     sdp.SetVersion("0");
 
     // o= 字段
-    sdp.SetOrigin( gb_meida->DeviceID, "0", "0", "IN", "IP4",   gb_meida->IP );
+    sdp.SetOrigin( gb_meida->DeviceID, "0", "0", "IN", addrType,   gb_meida->IP );
 
     // s= 字段
     sdp.SetSessionName(   Enum2String(gb_meida->RequestType).c_str()   );
@@ -296,7 +314,7 @@ void CSdpUtil::ToString(const MediaInfo*  gb_meida,  std::string& result )
     // c= 字段
     CSdpConnection conn;
     conn.SetAddress(gb_meida->IP);
-    conn.SetAddrType("IP4");
+    conn.SetAddrType(addrType);
     conn.SetNetType("IN");
     sdp.SetConnection(conn);
 

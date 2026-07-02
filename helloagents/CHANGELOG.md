@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 修复
+- 修正 RK830 构建优化参数基线：`Middleware/CMakeLists.txt` 的小写 `-o3` 保持禁用，避免 GCC 将其解析为输出参数；顶层 `CMakeLists.txt` 的大写 `-O3` 也保持禁用，因为现场反馈该构建虽能通过但编码启动会宕机。新增的构建参数回归检查同时拒绝主工程和 Middleware 中的 `-o3/-O3`。
 - 修复 GB28181 录像回放跨文件继续播放时平台侧缺少明确结束通知的问题：Storage 回放线程在单个 MP4 文件读到 EOF 后立即通过 NULL 回调触发协议层 `MediaStatus 121/eos`，并用 `bEosNotified` 防止最终结束块重复释放回放上下文。
 - 修复 GB28181 回放/下载混合 H264/H265 录像时编码协商与 PS 封装不一致的问题：回放建链先探测实际 MP4 录像 codec，200 OK SDP 的 `f=` 按录像 codec 改写，发送录像视频帧时按 `Mp4DemuxerFrameInfo_s::iCodeType` 选择 H264/H265 PS stream id，避免 H264 录像被当作 H265 或沿用平台请求编码导致播放失败。
 - 修正 GB28181 `f=` 编码参数应用流程：`ApplyVideoEncodeStreamConfig()` 现在会对 `CFG_VIDEO` 承载的 `enc_type/frmae_rate/bit_rate` 先统一读取当前主/辅码流配置，逐项比较后仅在有差异时一次性写回，避免一次 `INVITE f=` 触发 codec、fps、bitrate 多次连续重配。
@@ -25,9 +26,10 @@
 ### 优化
 - 收口国标配置链路冗余：删除主程序启动阶段重复读取并写回 `zero_config.ini` 的 `init_gb_zero_config()`；`zero_config` 统一由 `LocalConfigProvider` 负责读写。同时去掉 `WriteConfigHeader/WriteConfigInt/WriteConfigString`、`RequiredZeroConfigFileError/IsZeroConfigFileRequired`、`NormalizeGbRegisterConfig` 等不必要的一行包装，GB/Zero/GAT 三组 INI 保存函数恢复字段逐行显式输出；默认配置初始化改为复用结构构造函数，只覆盖本地差异项，并删除 GAT 配置更新时会被新值覆盖的旧配置读取，只保留 `FinishConfigFileWrite()` 统一处理 `fflush/fclose` 收尾。
 - 按 issue 47 基于当前 CMake 显式源码入口、仓库级 include 图和人工抽样复核，删除 `third_party/platform_sdk_port/CommonFile` 与 `third_party/platform_sdk_port/CommonLibSrc` 下 `213` 个未接入当前构建的冗余头文件 / 源码文件，主要集中在 `CommonFile/CommonLib`、`Common/Layer3_Abstract` 以及未启用的 `GB28181SDK/SipSDK` 历史分支。
-- 为恢复该分支的交叉编译验证能力，将根目录与 `Middleware` 的 `CMakeLists.txt` 优化参数从错误的 `-o3` 修正为 `-O3`，并重新跑通 `tools/issue_bot/build_verify.sh`。
+- 为恢复该分支的交叉编译验证能力，禁用根目录与 `Middleware` 的全局 `-o3/-O3` 参数，并重新跑通 `tools/issue_bot/build_verify.sh`。
 
 ### 新增
+- 新增 `RK_ENABLE_IPV6_SOCKET` 应用层 socket 宏，默认关闭保持 IPv4-only 行为；开启后 GB28181 RTP/PS、广播/对讲、GB socket shim、GB SDK SDP 地址族、RTSP TCP/UDP RTP、GAT1400 callback listener、NTP UDP connect 和 DM/LwM2M UDP 等关键路径改用 IPv4/IPv6 兼容 socket。
 - 新增 `helloagents/wiki/modules/rk_soc_ipc_platform.md`、`rk_media_pipeline.md`、`rk_debug_playbook.md`，沉淀 RK SoC IPC 平台身份、PAL/DMC 媒体链路、录像/回放 codec 边界和常用排查路径；同时更新 overview 模块索引。
 - 新增 `helloagents/wiki/modules/external_module_demos.md`，给外部模块开发提供 GB 标准注册配置、零配置串码/MAC、GAT1400 注册配置、在线状态查询和 1400 结构化对象上报的文档型 C++ demo；不新增编译目标，也不改 Makefile/CMake。
 - 初始化 `helloagents/` 知识库。
@@ -99,7 +101,7 @@
 - 补强 `helloagents/wiki/modules/gb28181.md`、`helloagents/wiki/api.md`、`helloagents/wiki/data.md`、`helloagents/wiki/overview.md`、`helloagents/project.md`，补入终端白皮书定制要求、测试映射和当前实现缺口。
 - 继续补强 `helloagents/wiki/modules/terminal_requirements.md` 与 `helloagents/wiki/modules/gb28181.md`，细化 `A.11/A.16/A.19/附录G` 的字段级审核清单、白皮书内部不一致项和联调优先级。
 - 继续补强 `helloagents/wiki/modules/terminal_requirements.md`，把注册重定向、基础参数扩展、设备信息扩展、告警扩展和多码流能力拆成可执行代码整改清单。
-- 将 `rk_gb/CMakeLists.txt` 与 `rk_gb/Middleware/CMakeLists.txt` 的优化参数从错误的 `-o3` 修正为 `-O3`。
+- 将 `rk_gb/CMakeLists.txt` 与 `rk_gb/Middleware/CMakeLists.txt` 的全局 `-o3/-O3` 优化参数改为禁用状态，避免小写 `-o3` 编译失败和大写 `-O3` 编码启动宕机风险。
 - 将主工程与 Middleware 的 `cmake_minimum_required` 提升到 `3.5`，兼容工作区私有 CMake 4.2.3。
 - 沉淀 RK830 隔离交叉编译命令，明确不使用会污染源码树固定目录的 `build.sh` 作为首选入口。
 - 在知识库中补充 GitHub Actions、self-hosted runner、issue 白名单规则和自动化安全边界。

@@ -26,8 +26,10 @@ public:
     static std::string GetPeerIp(SOCKET sockfd);
     static std::string GetSocketIp(SOCKET sockfd);
     static int GetSocketAddr(SOCKET sockfd, struct sockaddr_in* addr);
+    static int GetSocketAddr(SOCKET sockfd, struct sockaddr_storage* addr, socklen_t* addrlen);
     static uint16_t GetPeerPort(SOCKET sockfd);
     static int GetPeerAddr(SOCKET sockfd, struct sockaddr_in *addr);
+    static int GetPeerAddr(SOCKET sockfd, struct sockaddr_storage* addr, socklen_t* addrlen);
     static void Close(SOCKET sockfd);
     static bool Connect(SOCKET sockfd, std::string ip, uint16_t port, int timeout=0);
 };

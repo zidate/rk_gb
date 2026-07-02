@@ -103,9 +103,12 @@ private:
     SOCKET rtpfd_[MAX_MEDIA_CHANNEL];
     SOCKET rtcpfd_[MAX_MEDIA_CHANNEL];
 
-    struct sockaddr_in peer_addr_;
-    struct sockaddr_in peer_rtp_addr_[MAX_MEDIA_CHANNEL];
-    struct sockaddr_in peer_rtcp_sddr_[MAX_MEDIA_CHANNEL];
+    struct sockaddr_storage peer_addr_;
+    socklen_t peer_addr_len_ = 0;
+    struct sockaddr_storage peer_rtp_addr_[MAX_MEDIA_CHANNEL];
+    socklen_t peer_rtp_addr_len_[MAX_MEDIA_CHANNEL];
+    struct sockaddr_storage peer_rtcp_addr_[MAX_MEDIA_CHANNEL];
+    socklen_t peer_rtcp_addr_len_[MAX_MEDIA_CHANNEL];
     MediaChannelInfo media_channel_info_[MAX_MEDIA_CHANNEL];
 };
 

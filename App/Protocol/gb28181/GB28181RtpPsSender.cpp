@@ -1,5 +1,6 @@
 ﻿#include "GB28181RtpPsSender.h"
 #include "ProtocolLog.h"
+#include "SocketCompat.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -172,9 +173,12 @@ static void SetSocketSendTimeout(int sockfd, int timeoutMs)
     }
 }
 
-static int ConnectTcpWithTimeout(int sockfd, const struct sockaddr_in* remoteAddr, int timeoutMs)
+static int ConnectTcpWithTimeout(int sockfd,
+                                 const struct sockaddr* remoteAddr,
+                                 socklen_t remoteAddrLen,
+                                 int timeoutMs)
 {
-    if (sockfd < 0 || remoteAddr == NULL || timeoutMs <= 0) {
+    if (sockfd < 0 || remoteAddr == NULL || remoteAddrLen == 0 || timeoutMs <= 0) {
         return -1;
     }
 
@@ -183,7 +187,7 @@ static int ConnectTcpWithTimeout(int sockfd, const struct sockaddr_in* remoteAdd
         fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
     }
 
-    int ret = connect(sockfd, (const struct sockaddr*)remoteAddr, sizeof(*remoteAddr));
+    int ret = connect(sockfd, remoteAddr, remoteAddrLen);
     int savedErrno = (ret == 0) ? 0 : errno;
 
     if (ret != 0 && (savedErrno == EINPROGRESS || savedErrno == EALREADY || savedErrno == EWOULDBLOCK)) {
@@ -324,7 +328,8 @@ struct GB28181RtpPsSender::RuntimeState
     int listen_sockfd;
     bool opened;
 
-    struct sockaddr_in remote_addr;
+    struct sockaddr_storage remote_addr;
+    socklen_t remote_addr_len;
 
     struct ps_muxer_t* ps_muxer;
     void* rtp_encoder;
@@ -350,6 +355,7 @@ struct GB28181RtpPsSender::RuntimeState
         : sockfd(-1),
           listen_sockfd(-1),
           opened(false),
+          remote_addr_len(0),
           ps_muxer(NULL),
           rtp_encoder(NULL),
           current_timestamp90k(0),
@@ -444,7 +450,26 @@ int GB28181RtpPsSender::OpenTransportSocket()
     m_state->local_port = 0;
 
     const int sockType = isTcp ? SOCK_STREAM : SOCK_DGRAM;
+    int family = AF_INET;
+    protocol::socket_compat::Endpoint remoteEndpoint;
+
+#if RK_ENABLE_IPV6_SOCKET
+    if (!m_param.target_ip.empty()) {
+        if (!protocol::socket_compat::ResolveEndpoint(m_param.target_ip,
+                                                       m_param.target_port,
+                                                       sockType,
+                                                       &remoteEndpoint)) {
+            printf("[GB28181][RtpPs] invalid target ip: %s\n", m_param.target_ip.c_str());
+            return -6;
+        }
+        family = remoteEndpoint.family;
+    } else if (isTcpPassive) {
+        family = AF_INET6;
+    }
+    const int sockfd = protocol::socket_compat::CreateSocket(family, sockType, isTcpPassive);
+#else
     const int sockfd = socket(AF_INET, sockType, 0);
+#endif
     if (sockfd < 0) {
         printf("[GB28181][RtpPs] create %s socket failed errno=%d\n", isTcp ? "tcp" : "udp", errno);
         return -4;
@@ -456,6 +481,21 @@ int GB28181RtpPsSender::OpenTransportSocket()
     }
 
     if (isTcpPassive || m_param.local_port > 0) {
+#if RK_ENABLE_IPV6_SOCKET
+        protocol::socket_compat::Endpoint localEndpoint;
+        if (!protocol::socket_compat::BuildAnyEndpoint(family,
+                                                        (m_param.local_port > 0) ? m_param.local_port : 0,
+                                                        &localEndpoint) ||
+            bind(sockfd,
+                 protocol::socket_compat::AsSockaddr(localEndpoint),
+                 localEndpoint.len) != 0) {
+            printf("[GB28181][RtpPs] bind local port failed errno=%d local_port=%d\n",
+                   errno,
+                   m_param.local_port);
+            close(sockfd);
+            return -5;
+        }
+#else
         struct sockaddr_in localAddr;
         memset(&localAddr, 0, sizeof(localAddr));
         localAddr.sin_family = AF_INET;
@@ -468,17 +508,26 @@ int GB28181RtpPsSender::OpenTransportSocket()
             close(sockfd);
             return -5;
         }
+#endif
     }
 
     memset(&m_state->remote_addr, 0, sizeof(m_state->remote_addr));
+    m_state->remote_addr_len = 0;
     if (!m_param.target_ip.empty()) {
-        m_state->remote_addr.sin_family = AF_INET;
-        m_state->remote_addr.sin_port = htons(static_cast<uint16_t>(m_param.target_port));
-        if (1 != inet_pton(AF_INET, m_param.target_ip.c_str(), &m_state->remote_addr.sin_addr)) {
+#if RK_ENABLE_IPV6_SOCKET
+        memcpy(&m_state->remote_addr, &remoteEndpoint.addr, sizeof(remoteEndpoint.addr));
+        m_state->remote_addr_len = remoteEndpoint.len;
+#else
+        struct sockaddr_in* remoteAddr = (struct sockaddr_in*)&m_state->remote_addr;
+        remoteAddr->sin_family = AF_INET;
+        remoteAddr->sin_port = htons(static_cast<uint16_t>(m_param.target_port));
+        if (1 != inet_pton(AF_INET, m_param.target_ip.c_str(), &remoteAddr->sin_addr)) {
             printf("[GB28181][RtpPs] invalid target ip: %s\n", m_param.target_ip.c_str());
             close(sockfd);
             return -6;
         }
+        m_state->remote_addr_len = sizeof(struct sockaddr_in);
+#endif
     }
 
     if (isTcpPassive) {
@@ -496,7 +545,10 @@ int GB28181RtpPsSender::OpenTransportSocket()
 
     if (isTcp && !isTcpPassive) {
         const int connectTimeoutMs = 3000;
-        if (ConnectTcpWithTimeout(m_state->sockfd, &m_state->remote_addr, connectTimeoutMs) != 0) {
+        if (ConnectTcpWithTimeout(m_state->sockfd,
+                                  (const struct sockaddr*)&m_state->remote_addr,
+                                  m_state->remote_addr_len,
+                                  connectTimeoutMs) != 0) {
             printf("[GB28181][RtpPs] tcp connect failed errno=%d target=%s:%d\n",
                    errno,
                    m_param.target_ip.c_str(),
@@ -507,12 +559,12 @@ int GB28181RtpPsSender::OpenTransportSocket()
         }
     }
 
-    struct sockaddr_in localAddr;
+    struct sockaddr_storage localAddr;
     socklen_t localAddrLen = sizeof(localAddr);
     memset(&localAddr, 0, sizeof(localAddr));
     const int localSockfd = (m_state->listen_sockfd >= 0) ? m_state->listen_sockfd : m_state->sockfd;
     if (getsockname(localSockfd, (struct sockaddr*)&localAddr, &localAddrLen) == 0) {
-        m_state->local_port = static_cast<int>(ntohs(localAddr.sin_port));
+        m_state->local_port = protocol::socket_compat::GetPort(localAddr);
     } else {
         printf("[GB28181][RtpPs] getsockname failed errno=%d\n", errno);
     }
@@ -837,7 +889,7 @@ int GB28181RtpPsSender::OnRtpPacket(const void* packet, int bytes, uint32_t time
     const bool isTcpPassive = IsTcpPassiveTransport(transport);
     if (isTcpPassive && m_state->sockfd < 0 && m_state->listen_sockfd >= 0) {
         if (WaitForSocketReadable(m_state->listen_sockfd, 20) == 0) {
-            struct sockaddr_in remoteAddr;
+            struct sockaddr_storage remoteAddr;
             socklen_t remoteAddrLen = sizeof(remoteAddr);
             memset(&remoteAddr, 0, sizeof(remoteAddr));
             const int clientSockfd = accept(m_state->listen_sockfd,
@@ -847,11 +899,16 @@ int GB28181RtpPsSender::OnRtpPacket(const void* packet, int bytes, uint32_t time
                 SetSocketSendTimeout(clientSockfd, 50);
                 m_state->sockfd = clientSockfd;
 
-                char remoteIp[INET_ADDRSTRLEN] = {0};
-                inet_ntop(AF_INET, &remoteAddr.sin_addr, remoteIp, sizeof(remoteIp));
+                char remoteIp[INET6_ADDRSTRLEN] = {0};
+                int remotePort = 0;
+                protocol::socket_compat::SockaddrToString((struct sockaddr*)&remoteAddr,
+                                                          remoteAddrLen,
+                                                          remoteIp,
+                                                          sizeof(remoteIp),
+                                                          &remotePort);
                 printf("[GB28181][RtpPs] tcp passive accept remote=%s:%d local_port=%d\n",
                        remoteIp,
-                       ntohs(remoteAddr.sin_port),
+                       remotePort,
                        m_state->local_port);
             } else if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
                 printf("[GB28181][RtpPs] tcp passive accept failed errno=%d local_port=%d\n",
@@ -891,7 +948,7 @@ int GB28181RtpPsSender::OnRtpPacket(const void* packet, int bytes, uint32_t time
                              bytes,
                              0,
                              (struct sockaddr*)&m_state->remote_addr,
-                             sizeof(m_state->remote_addr));
+                             m_state->remote_addr_len);
         if (n != bytes) {
             const int savedErrno = errno;
             if (savedErrno == EPIPE || savedErrno == ECONNRESET || savedErrno == ENOTCONN) {

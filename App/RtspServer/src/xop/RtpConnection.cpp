@@ -4,6 +4,7 @@
 #include "RtpConnection.h"
 #include "RtspConnection.h"
 #include "net/SocketUtil.h"
+#include "SocketCompat.h"
 
 using namespace std;
 using namespace xop;
@@ -16,6 +17,10 @@ RtpConnection::RtpConnection(std::weak_ptr<TcpConnection> rtsp_connection)
 	for(int chn=0; chn<MAX_MEDIA_CHANNEL; chn++) {
 		rtpfd_[chn] = 0;
 		rtcpfd_[chn] = 0;
+		peer_rtp_addr_len_[chn] = 0;
+		peer_rtcp_addr_len_[chn] = 0;
+		memset(&peer_rtp_addr_[chn], 0, sizeof(peer_rtp_addr_[chn]));
+		memset(&peer_rtcp_addr_[chn], 0, sizeof(peer_rtcp_addr_[chn]));
 		memset(&media_channel_info_[chn], 0, sizeof(media_channel_info_[chn]));
 		media_channel_info_[chn].rtp_header.version = RTP_VERSION;
 		media_channel_info_[chn].packet_seq = rd()&0xffff;
@@ -23,6 +28,8 @@ RtpConnection::RtpConnection(std::weak_ptr<TcpConnection> rtsp_connection)
 		media_channel_info_[chn].rtp_header.ts = htonl(rd());
 		media_channel_info_[chn].rtp_header.ssrc = htonl(rd());
 	}
+	memset(&peer_addr_, 0, sizeof(peer_addr_));
+	peer_addr_len_ = 0;
 
 	auto conn = rtsp_connection_.lock();
 	rtsp_ip_ = conn->GetIp();
@@ -76,9 +83,12 @@ bool RtpConnection::SetupRtpOverUdp(MediaChannelId channel_id, uint16_t rtp_port
 		return false;
 	}
 
-	if(SocketUtil::GetPeerAddr(conn->GetSocket(), &peer_addr_) < 0) {
+	peer_addr_len_ = sizeof(peer_addr_);
+	if(SocketUtil::GetPeerAddr(conn->GetSocket(), &peer_addr_, &peer_addr_len_) < 0) {
 		return false;
 	}
+
+	const int peerFamily = peer_addr_.ss_family;
 
 	media_channel_info_[channel_id].rtp_port = rtp_port;
 	media_channel_info_[channel_id].rtcp_port = rtcp_port;
@@ -92,13 +102,21 @@ bool RtpConnection::SetupRtpOverUdp(MediaChannelId channel_id, uint16_t rtp_port
 		local_rtp_port_[channel_id] = rd() & 0xfffe;
 		local_rtcp_port_[channel_id] =local_rtp_port_[channel_id] + 1;
 
+#if RK_ENABLE_IPV6_SOCKET
+		rtpfd_[channel_id] = protocol::socket_compat::CreateSocket(peerFamily, SOCK_DGRAM, false);
+#else
 		rtpfd_[channel_id] = ::socket(AF_INET, SOCK_DGRAM, 0);
+#endif
 		if(!SocketUtil::Bind(rtpfd_[channel_id], "0.0.0.0",  local_rtp_port_[channel_id])) {
 			SocketUtil::Close(rtpfd_[channel_id]);
 			continue;
 		}
 
+#if RK_ENABLE_IPV6_SOCKET
+		rtcpfd_[channel_id] = protocol::socket_compat::CreateSocket(peerFamily, SOCK_DGRAM, false);
+#else
 		rtcpfd_[channel_id] = ::socket(AF_INET, SOCK_DGRAM, 0);
+#endif
 		if(!SocketUtil::Bind(rtcpfd_[channel_id], "0.0.0.0", local_rtcp_port_[channel_id])) {
 			SocketUtil::Close(rtpfd_[channel_id]);
 			SocketUtil::Close(rtcpfd_[channel_id]);
@@ -110,13 +128,20 @@ bool RtpConnection::SetupRtpOverUdp(MediaChannelId channel_id, uint16_t rtp_port
 
 	SocketUtil::SetSendBufSize(rtpfd_[channel_id], 50*1024);
 
-	peer_rtp_addr_[channel_id].sin_family = AF_INET;
-	peer_rtp_addr_[channel_id].sin_addr.s_addr = peer_addr_.sin_addr.s_addr;
-	peer_rtp_addr_[channel_id].sin_port = htons(media_channel_info_[channel_id].rtp_port);
-
-	peer_rtcp_sddr_[channel_id].sin_family = AF_INET;
-	peer_rtcp_sddr_[channel_id].sin_addr.s_addr = peer_addr_.sin_addr.s_addr;
-	peer_rtcp_sddr_[channel_id].sin_port = htons(media_channel_info_[channel_id].rtcp_port);
+	if (!protocol::socket_compat::CopyAddressWithPort(peer_addr_,
+	                                                   media_channel_info_[channel_id].rtp_port,
+	                                                   &peer_rtp_addr_[channel_id],
+	                                                   &peer_rtp_addr_len_[channel_id]) ||
+	    !protocol::socket_compat::CopyAddressWithPort(peer_addr_,
+	                                                   media_channel_info_[channel_id].rtcp_port,
+	                                                   &peer_rtcp_addr_[channel_id],
+	                                                   &peer_rtcp_addr_len_[channel_id])) {
+		SocketUtil::Close(rtpfd_[channel_id]);
+		SocketUtil::Close(rtcpfd_[channel_id]);
+		rtpfd_[channel_id] = 0;
+		rtcpfd_[channel_id] = 0;
+		return false;
+	}
 
 	media_channel_info_[channel_id].is_setup = true;
 	transport_mode_ = RTP_OVER_UDP;
@@ -144,9 +169,14 @@ bool RtpConnection::SetupRtpOverMulticast(MediaChannelId channel_id, std::string
 
 	media_channel_info_[channel_id].rtp_port = port;
 
-	peer_rtp_addr_[channel_id].sin_family = AF_INET;
-	peer_rtp_addr_[channel_id].sin_addr.s_addr = inet_addr(ip.c_str());
-	peer_rtp_addr_[channel_id].sin_port = htons(port);
+	struct sockaddr_in multicastAddr;
+	memset(&multicastAddr, 0, sizeof(multicastAddr));
+	multicastAddr.sin_family = AF_INET;
+	multicastAddr.sin_addr.s_addr = inet_addr(ip.c_str());
+	multicastAddr.sin_port = htons(port);
+	memset(&peer_rtp_addr_[channel_id], 0, sizeof(peer_rtp_addr_[channel_id]));
+	memcpy(&peer_rtp_addr_[channel_id], &multicastAddr, sizeof(multicastAddr));
+	peer_rtp_addr_len_[channel_id] = sizeof(multicastAddr);
 
 	media_channel_info_[channel_id].is_setup = true;
 	transport_mode_ = RTP_OVER_MULTICAST;
@@ -186,7 +216,13 @@ void RtpConnection::Teardown()
 
 string RtpConnection::GetMulticastIp(MediaChannelId channel_id) const
 {
-	return std::string(inet_ntoa(peer_rtp_addr_[channel_id].sin_addr));
+	char ip[INET6_ADDRSTRLEN] = {0};
+	protocol::socket_compat::SockaddrToString((const struct sockaddr*)&peer_rtp_addr_[channel_id],
+	                                          peer_rtp_addr_len_[channel_id],
+	                                          ip,
+	                                          sizeof(ip),
+	                                          NULL);
+	return std::string(ip);
 }
 
 string RtpConnection::GetRtpInfo(const std::string& rtsp_url)
@@ -285,7 +321,7 @@ int RtpConnection::SendRtpOverTcp(MediaChannelId channel_id, RtpPacket pkt)
 int RtpConnection::SendRtpOverUdp(MediaChannelId channel_id, RtpPacket pkt)
 {
 	int ret = sendto(rtpfd_[channel_id], (const char*)pkt.data.get()+4, pkt.size-4, 0,
-					(struct sockaddr *)&(peer_rtp_addr_[channel_id]), sizeof(struct sockaddr_in));
+					(struct sockaddr *)&(peer_rtp_addr_[channel_id]), peer_rtp_addr_len_[channel_id]);
                    
 	if(ret < 0) {        
 		Teardown();

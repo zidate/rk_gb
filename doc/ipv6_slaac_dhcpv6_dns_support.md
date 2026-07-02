@@ -34,13 +34,15 @@ BLE_TYPE=ATBM6062
 | 打包 rootfs BusyBox | 已用 BusyBox 1.27.2 交叉重建并替换 | `packaging/rootfs_pub/bin/busybox` |
 | rootfs applet 链接 | 已补 `udhcpc6`、`ping6`、`ip/ipaddr/iplink/iproute` | `packaging/rootfs_pub/usr/bin/udhcpc6`、`packaging/rootfs_pub/sbin/ip*` |
 | 以太网应用逻辑 | 已在 link up/static/dhcp 路径启动 IPv6 sysctl + `udhcpc6` | `Middleware/libmpp/rkipc/common/network/network.c` |
-| Wi-Fi IPv6 | 未完成验证 | `Rk_wifi.c` 中仍走 `dhcpcd wlan0 -AL -t 0 &` 路线 |
+| Wi-Fi 应用逻辑 | 已接入 BusyBox `udhcpc` + `udhcpc6` | `Middleware/libmpp/rkipc/common/network/Rk_wifi.c` |
+| 应用层业务 socket | 已增加宏开关隔离 | `RK_ENABLE_IPV6_SOCKET`，默认关闭保持 IPv4，开启后关键 GB28181/RTSP/GAT/NTP/DM(LwM2M) socket 和 GB SDP 地址族支持 IPv6 |
+| Wi-Fi 驱动 | 本次不需要修改 | 固件包内为 `packaging/oem_ipc/usr/ko/*`，完整 SDK 源码在 `sysdrv/drv_ko/wifi/` |
 | 本地固件产物 | 已生成 | `Release/raw.bin`、`Release/linux.bin`、`Release/upgrade.bin` |
 | 实机验证 | 未完成 | 需要上板确认 RA、DHCPv6 DNS、DNS 写入和业务联网 |
 
 结论：
 
-- rootfs、应用侧 DHCPv6 DNS 支持和 IPv6 kernel/boot 镜像已经进入本地打包镜像。
+- rootfs、以太网/Wi-Fi 应用侧 DHCPv6 DNS 支持和 IPv6 kernel/boot 镜像已经进入本地打包镜像。
 - 内核侧闭环使用 `/home/jerry/lhy/cmiot/RV1106_IPC_SDK.tar.gz` 解压出的完整 SDK 完成；`build.sh lunch` 选择 `9` 实际对应 `BoardConfig-SPI_NAND-NONE-RV1106_IPC38_DEMO_V10-IPC-XWR60440.mk`。
 - SDK 最终 kernel `.config` 已验证包含 `CONFIG_IPV6=y`；真正运行闭环仍需要上板检查 `/proc/net/if_inet6`、RA 路由和业务联网。
 
@@ -254,6 +256,102 @@ script=/usr/share/udhcpc6/default.script
 
 当前 rootfs 没有单独的 `/usr/share/udhcpc6/default.script`，会回退到 `/usr/share/udhcpc/default.script`。该脚本会处理 `dns` 和 `search` 环境变量并写入 `/etc/resolv.conf`，但它原本是 DHCPv4 脚本，也会尝试执行 IPv4 `ifconfig` 和 `route` 操作。上板验证时必须观察该脚本在 `udhcpc6` 事件中的实际输出，必要时应增加专用 `udhcpc6` 脚本。
 
+### 5.5 Rk_wifi.c Wi-Fi 逻辑
+
+IPv6 属于内核网络栈和用户态地址/DNS 配置能力，不要求 Wi-Fi 芯片驱动为 IPv6 单独改代码。当前需要改的是 `wlan0` 关联成功后的应用层 DHCP/SLAAC 生命周期。
+
+`Middleware/libmpp/rkipc/common/network/Rk_wifi.c` 已增加：
+
+```text
+rk_wifi_dhcpv4_start()
+rk_wifi_dhcpv4_stop()
+rk_wifi_get_ipv4_address()
+rk_wifi_ipv6_enable()
+rk_wifi_ipv6_flush()
+rk_wifi_dhcpv6_start()
+rk_wifi_dhcpv6_stop()
+```
+
+当前打包 rootfs 没有 `dhcpcd`，但有 BusyBox `udhcpc` 和 `udhcpc6`。因此 Wi-Fi IPv4 DHCP 已从历史 `dhcpcd wlan0 -AL -t 0 &` 改为：
+
+```text
+udhcpc -i wlan0 -s /usr/share/udhcpc/default.script -p /var/run/udhcpc.wlan0.pid -b -q
+```
+
+Wi-Fi IPv6 DNS 使用：
+
+```text
+udhcpc6 -i wlan0 -s <script> -p /var/run/udhcpc6.wlan0.pid -b -q
+```
+
+`RK_wifi_enable()`、WPA connected 事件和手动连接成功路径都会启动 `wlan0` IPv4/IPv6 DHCP；WPA disconnected 和 Wi-Fi disable 路径会停止 `udhcpc6` 并清理 IPv6 地址。由于 `wpa_cli status` 不一定包含 `ip_address`，`RK_wifi_running_getConnectionInfo()` 增加了 `SIOCGIFADDR` fallback，从内核接口状态读取 `wlan0` IPv4 地址。
+
+Wi-Fi 驱动位置：
+
+```text
+当前仓库打包模块:
+packaging/oem_ipc/usr/ko/cfg80211.ko
+packaging/oem_ipc/usr/ko/mac80211.ko
+packaging/oem_ipc/usr/ko/aic8800dl/aic_load_fw.ko
+packaging/oem_ipc/usr/ko/aic8800dl/aic8800_fdrv.ko
+packaging/oem_ipc/usr/ko/aic8800dl/aic8800D80/*.bin
+
+完整 SDK 驱动源码:
+/tmp/lhy_rv1106_sdk/RV1106_IPC_SDK/sysdrv/drv_ko/wifi/aic8800_netdrv/
+/tmp/lhy_rv1106_sdk/RV1106_IPC_SDK/sysdrv/drv_ko/wifi/atbm/
+/tmp/lhy_rv1106_sdk/RV1106_IPC_SDK/sysdrv/drv_ko/wifi/rtl8188ftv/
+```
+
+### 5.6 应用层 socket 宏
+
+业务协议是否使用 IPv6 socket 由编译宏控制：
+
+```text
+RK_ENABLE_IPV6_SOCKET=0  默认，保留 IPv4-only socket 行为
+RK_ENABLE_IPV6_SOCKET=1  关键业务 socket 使用 IPv4/IPv6 双栈能力
+```
+
+启用方式：
+
+```sh
+cmake ... -DRK_ENABLE_IPV6_SOCKET=ON
+```
+
+宏关闭时，GB28181、RTSP、GAT1400 callback listener、NTP、DM/LwM2M 等路径保留原 `AF_INET/sockaddr_in` 分支。宏打开时，新增 `App/Protocol/SocketCompat.h` 作为 C++ 侧公共兼容层，使用：
+
+```text
+getaddrinfo(AF_UNSPEC)
+sockaddr_storage
+IPV6_V6ONLY=0 dual-stack listener
+IPv4-mapped IPv6 地址格式化/比较
+```
+
+当前已覆盖的应用层路径：
+
+```text
+App/Protocol/gb28181/GB28181RtpPsSender.cpp
+App/Protocol/gb28181/GB28181BroadcastBridge.cpp
+App/Protocol/gb28181/GB28181ListenBridge.cpp
+App/Protocol/gb28181/sdk_port/NetSocketSdkShim.cpp
+third_party/platform_sdk_port/CommonLibSrc/GB28181SDK/include/SDP/SdpUtil.cpp
+App/Protocol/ProtocolManager.cpp
+App/Protocol/gat1400/GAT1400ClientService.cpp
+App/RtspServer/src/net/SocketUtil.cpp
+App/RtspServer/src/net/TcpSocket.cpp
+App/RtspServer/src/xop/RtpConnection.cpp
+App/RtspServer/src/xop/MediaSession.cpp
+Middleware/libmpp/rkipc/common/network/ntp.c
+App/DM/DmClientService.cpp
+```
+
+同时处理的协议层地址声明：
+
+- GB28181 广播应答 SDP 在本地地址为 IPv6 时输出 `IN IP6`。
+- GB28181 SDK `CSdpUtil::ToString()` 在本地地址为 IPv6 时输出 `IN IP6`。
+- RTSP SDP 在本地地址为 IPv6 时输出 `IN IP6`。
+
+注意：本轮只补齐当前工程实际接入的 GB SDK SDP 生成路径和业务 socket 路径；更深层的第三方 SIP/eXosip 内部 IPv6 细节没有做无差别重构，后续应以平台联调证据再决定是否继续改。
+
 ## 6. 建议补齐的 DHCPv6 专用脚本
 
 为了避免 DHCPv6 调用 DHCPv4 脚本时执行无意义的 IPv4 配置，建议后续增加：
@@ -316,7 +414,13 @@ bash tools/issue_bot/build_verify.sh /home/jerry/silver/rk_gb
 已通过，最近日志目录：
 
 ```text
-/tmp/rk_gb-build-verify.OD8rui/logs
+/tmp/rk_gb-build-verify.91D0xE/logs
+```
+
+`RK_ENABLE_IPV6_SOCKET=ON` 也已单独完成 Middleware + App 交叉构建验证，构建目录：
+
+```text
+/tmp/rk_gb-ipv6-socket-on.9dWpEd
 ```
 
 构建参数注意：
@@ -403,14 +507,14 @@ Release/linux.bin
 Release/upgrade.bin
 ```
 
-最近本地生成结果（禁用顶层 `-O3` 后）：
+最近本地生成结果（应用层 IPv6 socket 宏收尾后，默认 `RK_ENABLE_IPV6_SOCKET=0`）：
 
 ```text
-Release/raw.bin      128M  md5 174d4c2c78ef9f6fe4d20b597ce642ba
-Release/linux.bin     18M  md5 455dac23ad862f31161950bd219e8e7a
-Release/upgrade.bin   18M  md5 455dac23ad862f31161950bd219e8e7a
-Bin/dgiot                   md5 26c44cab9db95907951cef8c64cccdc2
-packaging/oem_ipc/usr/bin/dgiot md5 0703e6978e1df7788134b7bf9c5fe365
+Release/raw.bin      128M  md5 6123c1ed925d0a99ab4b58e2a2dff9af
+Release/linux.bin     18M  md5 78ac36771b8d1a4d3da2c73dcecca8c1
+Release/upgrade.bin   18M  md5 78ac36771b8d1a4d3da2c73dcecca8c1
+Bin/dgiot                   md5 a4c92b470caf3e7f1d8d96453de1fe00
+packaging/oem_ipc/usr/bin/dgiot md5 eb020035257fc158480b5981fabd4662
 ```
 
 ## 8. 上板验收
@@ -670,9 +774,9 @@ Release/upgrade.bin
 
 ```text
 packaging/image/boot.img = cde6decc2fc07dfd6870bfc877ae411a
-Release/raw.bin          = 3b55b0aeaaafca72e067faba34d53445
-Release/linux.bin        = 8b216faf80e014e013c1362b61fb556a
-Release/upgrade.bin      = 8b216faf80e014e013c1362b61fb556a
+Release/raw.bin          = 6123c1ed925d0a99ab4b58e2a2dff9af
+Release/linux.bin        = 78ac36771b8d1a4d3da2c73dcecca8c1
+Release/upgrade.bin      = 78ac36771b8d1a4d3da2c73dcecca8c1
 ```
 
 ## 12. 后续必须完成
@@ -681,4 +785,4 @@ Release/upgrade.bin      = 8b216faf80e014e013c1362b61fb556a
 2. 抓包确认 DHCPv6 是否满足现场定义的 `SLAAC + DHCPv6 DNS`，特别是 BusyBox 1.27.2 是否发送 IA_NA。
 3. 增加专用 `/usr/share/udhcpc6/default.script`，避免 DHCPv6 复用 DHCPv4 脚本。
 4. 做 IPv4-only、IPv6-only、双栈、拔插网线、重启后的回归。
-5. 确认 Wi-Fi 路线是否也需要 IPv6，若需要，统一 `Rk_wifi.c` 中 `dhcpcd` 和以太网 `udhcpc6` 的策略。
+5. 上板验证 Wi-Fi 路线：`wlan0` 是否能获取 IPv4、SLAAC IPv6、RA 默认路由和 DHCPv6 DNS。

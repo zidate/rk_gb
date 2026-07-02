@@ -3,15 +3,44 @@
 
 #include "SocketUtil.h"
 #include "Socket.h"
+#include "SocketCompat.h"
 #include <iostream>
 
 using namespace xop;
 
 bool SocketUtil::Bind(SOCKET sockfd, std::string ip, uint16_t port)
 {
-    struct sockaddr_in addr = {0};			  
-    addr.sin_family = AF_INET;		  
-    addr.sin_addr.s_addr = inet_addr(ip.c_str()); 
+#if RK_ENABLE_IPV6_SOCKET
+    const int family = protocol::socket_compat::GetSocketFamily(sockfd);
+    protocol::socket_compat::Endpoint endpoint;
+    bool ok = false;
+
+    if ((family == AF_INET6 && protocol::socket_compat::IsIpv4AnyText(ip)) ||
+        ip == "::") {
+        ok = protocol::socket_compat::BuildAnyEndpoint(AF_INET6, port, &endpoint);
+    } else if (protocol::socket_compat::IsIpv4AnyText(ip)) {
+        ok = protocol::socket_compat::BuildAnyEndpoint(AF_INET, port, &endpoint);
+    } else {
+        ok = protocol::socket_compat::ResolveEndpoint(ip, port, SOCK_STREAM, &endpoint);
+        if (ok && family == AF_INET6 && endpoint.family == AF_INET) {
+            protocol::socket_compat::Endpoint mapped;
+            if (protocol::socket_compat::MapIpv4ToIpv6(endpoint, &mapped)) {
+                endpoint = mapped;
+            }
+        }
+    }
+
+    if (!ok || ::bind(sockfd,
+                     protocol::socket_compat::AsSockaddr(endpoint),
+                     endpoint.len) == SOCKET_ERROR) {
+        return false;
+    }
+
+    return true;
+#else
+    struct sockaddr_in addr = {0};
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = inet_addr(ip.c_str());
     addr.sin_port = htons(port);  
 
     if(::bind(sockfd, (struct sockaddr*)&addr, sizeof addr) == SOCKET_ERROR) {      
@@ -19,6 +48,7 @@ bool SocketUtil::Bind(SOCKET sockfd, std::string ip, uint16_t port)
     }
 
     return true;
+#endif
 }
 
 void SocketUtil::SetNonBlock(SOCKET fd)
@@ -105,46 +135,94 @@ void SocketUtil::SetRecvBufSize(SOCKET sockfd, int size)
 
 std::string SocketUtil::GetPeerIp(SOCKET sockfd)
 {
-    struct sockaddr_in addr = { 0 };
-    socklen_t addrlen = sizeof(struct sockaddr_in);
+    struct sockaddr_storage addr = { 0 };
+    socklen_t addrlen = sizeof(addr);
     if (getpeername(sockfd, (struct sockaddr *)&addr, &addrlen) == 0)
     {
-        return inet_ntoa(addr.sin_addr);
+        char ip[INET6_ADDRSTRLEN] = {0};
+        if (protocol::socket_compat::SockaddrToString((struct sockaddr*)&addr,
+                                                      addrlen,
+                                                      ip,
+                                                      sizeof(ip),
+                                                      NULL)) {
+            return ip;
+        }
     }
     return "0.0.0.0";
 }
 
 std::string SocketUtil::GetSocketIp(SOCKET sockfd)
 {
-    struct sockaddr_in addr = {0};
-    char str[INET_ADDRSTRLEN] = "127.0.0.1";
-    if (GetSocketAddr(sockfd, &addr) == 0) {
-        inet_ntop(AF_INET, &addr.sin_addr, str, sizeof(str));
+    struct sockaddr_storage addr = {0};
+    socklen_t addrlen = sizeof(addr);
+    char str[INET6_ADDRSTRLEN] = "127.0.0.1";
+    if (GetSocketAddr(sockfd, &addr, &addrlen) == 0) {
+        protocol::socket_compat::SockaddrToString((struct sockaddr*)&addr,
+                                                  addrlen,
+                                                  str,
+                                                  sizeof(str),
+                                                  NULL);
     }
     return str;
 }
 
 int SocketUtil::GetSocketAddr(SOCKET sockfd, struct sockaddr_in* addr)
 {
-    socklen_t addrlen = sizeof(struct sockaddr_in);
-    return getsockname(sockfd, (struct sockaddr*)addr, &addrlen);
+    struct sockaddr_storage storage;
+    socklen_t addrlen = sizeof(storage);
+    memset(&storage, 0, sizeof(storage));
+    int ret = getsockname(sockfd, (struct sockaddr*)&storage, &addrlen);
+    if (ret != 0 || storage.ss_family != AF_INET) {
+        return -1;
+    }
+    memcpy(addr, &storage, sizeof(*addr));
+    return 0;
+}
+
+int SocketUtil::GetSocketAddr(SOCKET sockfd, struct sockaddr_storage* addr, socklen_t* addrlen)
+{
+    if (addr == NULL || addrlen == NULL) {
+        return -1;
+    }
+
+    *addrlen = sizeof(*addr);
+    memset(addr, 0, sizeof(*addr));
+    return getsockname(sockfd, (struct sockaddr*)addr, addrlen);
 }
 
 uint16_t SocketUtil::GetPeerPort(SOCKET sockfd)
 {
-    struct sockaddr_in addr = { 0 };
-    socklen_t addrlen = sizeof(struct sockaddr_in);
+    struct sockaddr_storage addr = { 0 };
+    socklen_t addrlen = sizeof(addr);
     if (getpeername(sockfd, (struct sockaddr *)&addr, &addrlen) == 0)
     {
-        return ntohs(addr.sin_port);
+        return (uint16_t)protocol::socket_compat::GetPort(addr);
     }
     return 0;
 }
 
 int SocketUtil::GetPeerAddr(SOCKET sockfd, struct sockaddr_in *addr)
 {
-    socklen_t addrlen = sizeof(struct sockaddr_in);
-    return getpeername(sockfd, (struct sockaddr *)addr, &addrlen);
+    struct sockaddr_storage storage;
+    socklen_t addrlen = sizeof(storage);
+    memset(&storage, 0, sizeof(storage));
+    int ret = getpeername(sockfd, (struct sockaddr*)&storage, &addrlen);
+    if (ret != 0 || storage.ss_family != AF_INET) {
+        return -1;
+    }
+    memcpy(addr, &storage, sizeof(*addr));
+    return 0;
+}
+
+int SocketUtil::GetPeerAddr(SOCKET sockfd, struct sockaddr_storage* addr, socklen_t* addrlen)
+{
+    if (addr == NULL || addrlen == NULL) {
+        return -1;
+    }
+
+    *addrlen = sizeof(*addr);
+    memset(addr, 0, sizeof(*addr));
+    return getpeername(sockfd, (struct sockaddr*)addr, addrlen);
 }
 
 void SocketUtil::Close(SOCKET sockfd)
@@ -164,13 +242,40 @@ bool SocketUtil::Connect(SOCKET sockfd, std::string ip, uint16_t port, int timeo
 		SocketUtil::SetNonBlock(sockfd);
 	}
 
-	struct sockaddr_in addr = { 0 };
-	socklen_t addrlen = sizeof(addr);
-	addr.sin_family = AF_INET;
-	addr.sin_port = htons(port);
-	addr.sin_addr.s_addr = inet_addr(ip.c_str());
+#if RK_ENABLE_IPV6_SOCKET
+    protocol::socket_compat::Endpoint endpoint;
+    if (!protocol::socket_compat::ResolveEndpoint(ip, port, SOCK_STREAM, &endpoint)) {
+        if (timeout > 0) {
+            SocketUtil::SetBlock(sockfd);
+        }
+        return false;
+    }
 
-	if (::connect(sockfd, (struct sockaddr*)&addr, addrlen) == SOCKET_ERROR) {		
+    const int family = protocol::socket_compat::GetSocketFamily(sockfd);
+    if (family == AF_INET6 && endpoint.family == AF_INET) {
+        protocol::socket_compat::Endpoint mapped;
+        if (protocol::socket_compat::MapIpv4ToIpv6(endpoint, &mapped)) {
+            endpoint = mapped;
+        }
+    } else if (family != endpoint.family) {
+        if (timeout > 0) {
+            SocketUtil::SetBlock(sockfd);
+        }
+        return false;
+    }
+
+    const struct sockaddr* addr = protocol::socket_compat::AsSockaddr(endpoint);
+    socklen_t addrlen = endpoint.len;
+#else
+	struct sockaddr_in addr_storage = { 0 };
+	socklen_t addrlen = sizeof(addr_storage);
+	addr_storage.sin_family = AF_INET;
+	addr_storage.sin_port = htons(port);
+	addr_storage.sin_addr.s_addr = inet_addr(ip.c_str());
+	const struct sockaddr* addr = (struct sockaddr*)&addr_storage;
+#endif
+
+	if (::connect(sockfd, addr, addrlen) == SOCKET_ERROR) {
 		if (timeout > 0) {
             is_connected = false;
 			fd_set fd_write;

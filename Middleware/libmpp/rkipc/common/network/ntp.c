@@ -12,6 +12,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#ifndef RK_ENABLE_IPV6_SOCKET
+#define RK_ENABLE_IPV6_SOCKET 0
+#endif
+
 #ifdef LOG_TAG
 #undef LOG_TAG
 #endif
@@ -157,11 +161,59 @@ int rkipc_ntp_update(const char *ntp_server_addr) {
 	struct tm *local;
 	char buf[BUFSIZE];
 	size_t nbytes;
-	int sockfd, maxfd1;
-	struct sockaddr_in servaddr;
+	int sockfd = -1, maxfd1;
 	fd_set readfds;
 	struct timeval timeout, recvtv, tv;
 	double offset;
+
+#if RK_ENABLE_IPV6_SOCKET
+	struct sockaddr_storage servaddr;
+	socklen_t servaddr_len = 0;
+	struct addrinfo hints;
+	struct addrinfo *result = NULL;
+	char service[8] = {0};
+
+	snprintf(service, sizeof(service), "%d", NTP_PORT);
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM;
+	hints.ai_flags = AI_NUMERICSERV;
+
+	if (getaddrinfo(ntp_server_addr, service, &hints, &result) != 0 || result == NULL) {
+		LOG_ERROR("resolve ntp server error\n");
+		return -1;
+	}
+
+	for (struct addrinfo *it = result; it != NULL; it = it->ai_next) {
+		if ((it->ai_family != AF_INET && it->ai_family != AF_INET6) ||
+		    it->ai_addr == NULL ||
+		    it->ai_addrlen > sizeof(servaddr)) {
+			continue;
+		}
+
+		sockfd = socket(it->ai_family, SOCK_DGRAM, 0);
+		if (sockfd < 0) {
+			continue;
+		}
+
+		memset(&servaddr, 0, sizeof(servaddr));
+		memcpy(&servaddr, it->ai_addr, it->ai_addrlen);
+		servaddr_len = (socklen_t)it->ai_addrlen;
+		if (connect(sockfd, (struct sockaddr *)&servaddr, servaddr_len) == 0) {
+			break;
+		}
+
+		close(sockfd);
+		sockfd = -1;
+	}
+	freeaddrinfo(result);
+
+	if (sockfd < 0) {
+		LOG_ERROR("connect error\n");
+		return -1;
+	}
+#else
+	struct sockaddr_in servaddr;
 
 	servaddr.sin_family = AF_INET;
 	servaddr.sin_port = htons(NTP_PORT);
@@ -177,6 +229,7 @@ int rkipc_ntp_update(const char *ntp_server_addr) {
 		close(sockfd);
 		return -1;
 	}
+#endif
 	nbytes = BUFSIZE;
 	if (get_ntp_packet(buf, &nbytes) != 0) {
 		LOG_ERROR("construct ntp request error\n");

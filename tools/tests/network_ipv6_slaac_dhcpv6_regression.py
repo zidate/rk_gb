@@ -11,6 +11,7 @@ KERNEL_DEFCONFIGS = [
 ]
 BUSYBOX_CONFIG = ROOT / "driver/busybox/.config"
 NETWORK_SOURCE = ROOT / "Middleware/libmpp/rkipc/common/network/network.c"
+WIFI_SOURCE = ROOT / "Middleware/libmpp/rkipc/common/network/Rk_wifi.c"
 PACKAGED_BUSYBOX = ROOT / "packaging/rootfs_pub/bin/busybox"
 PACKAGED_APPLET_LINKS = [
     ROOT / "packaging/rootfs_pub/bin/ping6",
@@ -82,6 +83,44 @@ def main() -> int:
     require(
         "disable_ipv6" in network and "accept_ra" in network and "autoconf" in network,
         "network.c should enable IPv6 SLAAC sysctls before starting udhcpc6.",
+    )
+
+    wifi = read_text(WIFI_SOURCE)
+    for symbol in (
+        "rk_wifi_dhcpv4_start",
+        "rk_wifi_dhcpv4_stop",
+        "rk_wifi_get_ipv4_address",
+        "rk_wifi_ipv6_enable",
+        "rk_wifi_dhcpv6_start",
+        "rk_wifi_dhcpv6_stop",
+    ):
+        require(
+            symbol in wifi,
+            f"Rk_wifi.c should provide {symbol}() for WLAN SLAAC + DHCPv6 DNS lifecycle.",
+        )
+    require(
+        "udhcpc -i %s" in wifi and "/var/run/udhcpc.%s.pid" in wifi,
+        "Wi-Fi IPv4 DHCP should use packaged BusyBox udhcpc with a wlan0 pid file.",
+    )
+    require(
+        "dhcpcd wlan0" not in wifi,
+        "Wi-Fi code should not depend on dhcpcd because the packaged rootfs does not include it.",
+    )
+    require(
+        "SIOCGIFADDR" in wifi and "rk_wifi_get_ipv4_address(\"wlan0\"" in wifi,
+        "Wi-Fi connection info should fall back to the wlan0 kernel IPv4 address.",
+    )
+    require(
+        "rk_wifi_dhcpv6_start(\"wlan0\");" in wifi,
+        "Wi-Fi connection handling should start DHCPv6 DNS for wlan0.",
+    )
+    require(
+        "rk_wifi_dhcpv6_stop(\"wlan0\");" in wifi,
+        "Wi-Fi disconnect/disable handling should stop DHCPv6 DNS for wlan0.",
+    )
+    require(
+        "ip -6 addr flush dev %s" in wifi,
+        "Rk_wifi.c should flush stale IPv6 addresses when wlan0 disconnects.",
     )
 
     if PACKAGED_BUSYBOX.exists():

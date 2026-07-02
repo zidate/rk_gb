@@ -1,5 +1,6 @@
 #include "GB28181ListenBridge.h"
 #include "ProtocolLog.h"
+#include "SocketCompat.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -150,6 +151,7 @@ namespace protocol
 GB28181ListenBridge::GB28181ListenBridge()
     : m_running(false),
       m_sock(-1),
+      m_remote_addr_len(0),
       m_capture_channel(0),
       m_capture_inited(false),
       m_capture_thread_started(false),
@@ -256,16 +258,36 @@ void GB28181ListenBridge::StopSession()
 int GB28181ListenBridge::OpenTransport()
 {
     memset(&m_remote_addr, 0, sizeof(m_remote_addr));
-    m_remote_addr.sin_family = AF_INET;
-    m_remote_addr.sin_port = htons(static_cast<uint16_t>(m_param.target_port));
+    m_remote_addr_len = 0;
 
-    if (inet_pton(AF_INET, m_param.target_ip.c_str(), &m_remote_addr.sin_addr) != 1) {
+    const int sockType = (m_param.transport == "tcp") ? SOCK_STREAM : SOCK_DGRAM;
+
+#if RK_ENABLE_IPV6_SOCKET
+    protocol::socket_compat::Endpoint remoteEndpoint;
+    if (!protocol::socket_compat::ResolveEndpoint(m_param.target_ip,
+                                                   m_param.target_port,
+                                                   sockType,
+                                                   &remoteEndpoint)) {
         printf("[GB28181][Listen] invalid target_ip=%s\n", m_param.target_ip.c_str());
         return -10;
     }
 
-    const int sockType = (m_param.transport == "tcp") ? SOCK_STREAM : SOCK_DGRAM;
+    memcpy(&m_remote_addr, &remoteEndpoint.addr, sizeof(remoteEndpoint.addr));
+    m_remote_addr_len = remoteEndpoint.len;
+    m_sock = protocol::socket_compat::CreateSocket(remoteEndpoint.family, sockType, false);
+#else
+    struct sockaddr_in* remoteAddr = (struct sockaddr_in*)&m_remote_addr;
+    remoteAddr->sin_family = AF_INET;
+    remoteAddr->sin_port = htons(static_cast<uint16_t>(m_param.target_port));
+
+    if (inet_pton(AF_INET, m_param.target_ip.c_str(), &remoteAddr->sin_addr) != 1) {
+        printf("[GB28181][Listen] invalid target_ip=%s\n", m_param.target_ip.c_str());
+        return -10;
+    }
+
+    m_remote_addr_len = sizeof(struct sockaddr_in);
     m_sock = socket(AF_INET, sockType, 0);
+#endif
     if (m_sock < 0) {
         printf("[GB28181][Listen] create socket failed errno=%d\n", errno);
         return -11;
@@ -280,7 +302,7 @@ int GB28181ListenBridge::OpenTransport()
     }
 
     if (m_param.transport == "tcp") {
-        if (connect(m_sock, (struct sockaddr*)&m_remote_addr, sizeof(m_remote_addr)) != 0) {
+        if (connect(m_sock, (struct sockaddr*)&m_remote_addr, m_remote_addr_len) != 0) {
             printf("[GB28181][Listen] tcp connect failed errno=%d\n", errno);
             CloseTransport();
             return -12;
@@ -512,7 +534,7 @@ int GB28181ListenBridge::SendPacketBuffer(const uint8_t* packet, size_t size)
                              size,
                              0,
                              (struct sockaddr*)&m_remote_addr,
-                             sizeof(m_remote_addr));
+                             m_remote_addr_len);
         if (n != static_cast<int>(size)) {
             return -2;
         }

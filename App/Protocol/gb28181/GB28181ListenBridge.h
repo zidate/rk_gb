@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <sys/socket.h>
 
 #include "ProtocolExternalConfig.h"
 
@@ -59,7 +60,8 @@ private:
     bool m_running;
 
     int m_sock;
-    struct sockaddr_in m_remote_addr;
+    struct sockaddr_storage m_remote_addr;
+    socklen_t m_remote_addr_len;
 
     int m_capture_channel;
     bool m_capture_inited;

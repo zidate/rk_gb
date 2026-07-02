@@ -135,6 +135,113 @@ static void format_wifiinfo(int flag, char *info);
 static int get_pid(const char Name[]);
 static void *RK_wifi_start_monitor(void *arg);
 
+static void rk_wifi_dhcpv4_stop(const char *ifname) {
+	char cmd[256] = {0};
+
+	snprintf(cmd, sizeof(cmd),
+	         "if [ -f /var/run/udhcpc.%s.pid ]; then kill $(cat /var/run/udhcpc.%s.pid) "
+	         "2>/dev/null; rm -f /var/run/udhcpc.%s.pid; fi",
+	         ifname, ifname, ifname);
+	pr_info("[RKWIFI] dhcp_cmd:%s\n", cmd);
+	exec_command_system(cmd);
+}
+
+static void rk_wifi_dhcpv4_start(const char *ifname) {
+	char cmd[512] = {0};
+
+	rk_wifi_dhcpv4_stop(ifname);
+	snprintf(cmd, sizeof(cmd),
+	         "mkdir -p /var/run; "
+	         "script=/usr/share/udhcpc/default.script; "
+	         "if command -v udhcpc >/dev/null 2>&1; then "
+	         "udhcpc -i %s -s \"$script\" -p /var/run/udhcpc.%s.pid -b -q; "
+	         "else busybox udhcpc -i %s -s \"$script\" -p /var/run/udhcpc.%s.pid -b -q; fi",
+	         ifname, ifname, ifname, ifname);
+	pr_info("[RKWIFI] dhcp_cmd:%s\n", cmd);
+	exec_command_system(cmd);
+}
+
+static int rk_wifi_get_ipv4_address(const char *ifname, char *addr, size_t addr_len) {
+	int fd;
+	struct ifreq ifr;
+	struct sockaddr_in *sin;
+
+	if (!ifname || !addr || addr_len == 0)
+		return -1;
+
+	fd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (fd < 0)
+		return -1;
+
+	memset(&ifr, 0, sizeof(ifr));
+	strncpy(ifr.ifr_name, ifname, sizeof(ifr.ifr_name) - 1);
+	if (ioctl(fd, SIOCGIFADDR, &ifr) < 0) {
+		close(fd);
+		return -1;
+	}
+	close(fd);
+
+	sin = (struct sockaddr_in *)&ifr.ifr_addr;
+	snprintf(addr, addr_len, "%s", inet_ntoa(sin->sin_addr));
+	return 0;
+}
+
+static void rk_wifi_ipv6_conf_set(const char *ifname, const char *key, const char *value) {
+	char cmd[256] = {0};
+
+	snprintf(cmd, sizeof(cmd),
+	         "if [ -e /proc/sys/net/ipv6/conf/%s/%s ]; then echo %s > "
+	         "/proc/sys/net/ipv6/conf/%s/%s; fi",
+	         ifname, key, value, ifname, key);
+	pr_info("[RKWIFI] ipv6_cmd:%s\n", cmd);
+	exec_command_system(cmd);
+}
+
+static void rk_wifi_ipv6_enable(const char *ifname) {
+	rk_wifi_ipv6_conf_set(ifname, "disable_ipv6", "0");
+	rk_wifi_ipv6_conf_set(ifname, "forwarding", "0");
+	rk_wifi_ipv6_conf_set(ifname, "accept_ra", "1");
+	rk_wifi_ipv6_conf_set(ifname, "autoconf", "1");
+}
+
+static void rk_wifi_ipv6_flush(const char *ifname) {
+	char cmd[256] = {0};
+
+	snprintf(cmd, sizeof(cmd),
+	         "if command -v ip >/dev/null 2>&1; then ip -6 addr flush dev %s 2>/dev/null; fi",
+	         ifname);
+	pr_info("[RKWIFI] ipv6_cmd:%s\n", cmd);
+	exec_command_system(cmd);
+}
+
+static void rk_wifi_dhcpv6_stop(const char *ifname) {
+	char cmd[256] = {0};
+
+	snprintf(cmd, sizeof(cmd),
+	         "if [ -f /var/run/udhcpc6.%s.pid ]; then kill $(cat /var/run/udhcpc6.%s.pid) "
+	         "2>/dev/null; rm -f /var/run/udhcpc6.%s.pid; fi",
+	         ifname, ifname, ifname);
+	pr_info("[RKWIFI] ipv6_cmd:%s\n", cmd);
+	exec_command_system(cmd);
+}
+
+static void rk_wifi_dhcpv6_start(const char *ifname) {
+	char cmd[512] = {0};
+
+	rk_wifi_dhcpv6_stop(ifname);
+	rk_wifi_ipv6_enable(ifname);
+	snprintf(cmd, sizeof(cmd),
+	         "mkdir -p /var/run; "
+	         "script=/usr/share/udhcpc6/default.script; "
+	         "[ -x \"$script\" ] || script=/usr/share/udhcpc/default.script; "
+	         "if command -v udhcpc6 >/dev/null 2>&1; then "
+	         "udhcpc6 -i %s -s \"$script\" -p /var/run/udhcpc6.%s.pid -b -q; "
+	         "else busybox udhcpc6 -i %s -s \"$script\" -p /var/run/udhcpc6.%s.pid -b -q; fi",
+	         ifname, ifname, ifname, ifname);
+	pr_info("[RKWIFI] ipv6_cmd:%s\n", cmd);
+	exec_command_system(cmd);
+}
+
 static char *wifi_state[] = {
     "RK_WIFI_State_IDLE",          "RK_WIFI_State_CONNECTING",
     "RK_WIFI_State_CONNECTFAILED", "RK_WIFI_State_CONNECTFAILED_WRONG_KEY",
@@ -582,6 +689,8 @@ int RK_wifi_running_getConnectionInfo(RK_WIFI_INFO_Connection_s *pInfo) {
 		}
 	}
 	fclose(fp);
+	if (strlen(pInfo->ip_address) == 0)
+		rk_wifi_get_ipv4_address("wlan0", pInfo->ip_address, sizeof(pInfo->ip_address));
 	return 0;
 }
 
@@ -617,7 +726,10 @@ int RK_wifi_enable(int enable) {
 			// exec_command_system("ifconfig wlan0 down");
 			exec_command_system("ifconfig wlan0 up");
 			exec_command_system("ifconfig wlan0 0.0.0.0");
-			exec_command_system("killall dhcpcd");
+			rk_wifi_dhcpv4_stop("wlan0");
+			rk_wifi_dhcpv6_stop("wlan0");
+			rk_wifi_ipv6_flush("wlan0");
+			rk_wifi_ipv6_enable("wlan0");
 			exec_command_system("killall dnsmasq");
 
 			if (get_pid("wpa_supplicant") > 0) {
@@ -627,8 +739,8 @@ int RK_wifi_enable(int enable) {
 			}
 			exec_command_system("wpa_supplicant -B -i wlan0 -c /data/cfg/wpa_supplicant.conf -d");
 			usleep(100000);
-			// exec_command_system("udhcpc -i wlan0 -t 5 &");
-			exec_command_system("dhcpcd wlan0 -AL -t 0 &");
+			rk_wifi_dhcpv4_start("wlan0");
+			rk_wifi_dhcpv6_start("wlan0");
 
 			gstate = RK_WIFI_State_OPEN;
 			wifi_state_send(gstate, NULL);
@@ -640,6 +752,9 @@ int RK_wifi_enable(int enable) {
 		}
 	} else {
 		if (is_wifi_enable()) {
+			rk_wifi_dhcpv4_stop("wlan0");
+			rk_wifi_dhcpv6_stop("wlan0");
+			rk_wifi_ipv6_flush("wlan0");
 			exec_command_system("ifconfig wlan0 down");
 			exec_command_system("killall wpa_supplicant");
 			// exec_command_system("killall udhcpc");
@@ -947,6 +1062,7 @@ static bool check_wifi_isconnected(void) {
 			if ((strlen(wifiinfo.ip_address) != 0) &&
 			    strncmp(wifiinfo.ip_address, "127.0.0.1", 9) != 0) {
 				isWifiConnected = true;
+				rk_wifi_dhcpv6_start("wlan0");
 				pr_info("wifi is connected.\n");
 				break;
 			} else {
@@ -955,9 +1071,8 @@ static bool check_wifi_isconnected(void) {
 					// exec_command_system("killall udhcpc");
 					// usleep(300000);
 					// exec_command_system("udhcpc -i wlan0 -t 10 &");
-					exec_command_system("killall dhcpcd");
-					usleep(300000);
-					exec_command_system("dhcpcd wlan0 -AL -t 0 &");
+					rk_wifi_dhcpv4_start("wlan0");
+					rk_wifi_dhcpv6_start("wlan0");
 				}
 			}
 		}
@@ -1744,12 +1859,17 @@ static int dispatch_event(char *event) {
 
 	if (str_starts_with(event, (char *)WPA_EVENT_DISCONNECTED)) {
 		pr_info("%s: wifi is disconnect\n", __FUNCTION__);
+		rk_wifi_dhcpv4_stop("wlan0");
+		rk_wifi_dhcpv6_stop("wlan0");
+		rk_wifi_ipv6_flush("wlan0");
 		exec_command_system("ip addr flush dev wlan0");
 		get_wifi_info_by_event(event, RK_WIFI_State_DISCONNECTED, &info);
 		wifi_state_send(RK_WIFI_State_DISCONNECTED, &info);
 		exec_command_system("wpa_cli -i wlan0 reconnect");
 	} else if (str_starts_with(event, (char *)WPA_EVENT_CONNECTED)) {
 		pr_info("%s: wifi is connected\n", __func__);
+		rk_wifi_dhcpv4_start("wlan0");
+		rk_wifi_dhcpv6_start("wlan0");
 		get_valid_connect_info(&info);
 		wifi_state_send(RK_WIFI_State_CONNECTED, &info);
 	} else if (str_starts_with(event, (char *)WPA_EVENT_SCAN_RESULTS)) {

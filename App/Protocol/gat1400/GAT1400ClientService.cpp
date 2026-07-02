@@ -1,6 +1,7 @@
 ﻿#include "GAT1400ClientService.h"
 #include "ProtocolManager.h"
 #include "ProtocolLog.h"
+#include "SocketCompat.h"
 #include <algorithm>
 #include <arpa/inet.h>
 #include <cerrno>
@@ -1464,7 +1465,11 @@ int GAT1400ClientService::StartServerLocked()
         return 0;
     }
 
+#if RK_ENABLE_IPV6_SOCKET
+    const int fd = protocol::socket_compat::CreateDualStackSocket(SOCK_STREAM);
+#else
     const int fd = socket(AF_INET, SOCK_STREAM, 0);
+#endif
     if (fd < 0) {
         return -1;
     }
@@ -1472,6 +1477,14 @@ int GAT1400ClientService::StartServerLocked()
     int reuse = 1;
     setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
 
+#if RK_ENABLE_IPV6_SOCKET
+    protocol::socket_compat::Endpoint addr;
+    if (!protocol::socket_compat::BuildAnyEndpoint(AF_INET6, m_cfg.gat_register.listen_port, &addr) ||
+        bind(fd, protocol::socket_compat::AsSockaddr(addr), addr.len) != 0) {
+        close(fd);
+        return -2;
+    }
+#else
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
@@ -1482,6 +1495,7 @@ int GAT1400ClientService::StartServerLocked()
         close(fd);
         return -2;
     }
+#endif
     if (listen(fd, 8) != 0) {
         close(fd);
         return -3;
@@ -3160,4 +3174,3 @@ int GAT1400ClientService::PostFiles(const std::list<GAT_1400_FileSet>& fileList)
 }
 
 }  // namespace protocol
-

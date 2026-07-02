@@ -9,6 +9,7 @@
 #include <forward_list>
 #include "net/Logger.h"
 #include "net/SocketUtil.h"
+#include "SocketCompat.h"
 
 using namespace xop;
 using namespace std;
@@ -139,13 +140,18 @@ std::string MediaSession::GetSdpMessage(std::string ip, std::string session_name
 	}
 
 	char buf[2048] = {0};
+#if RK_ENABLE_IPV6_SOCKET
+	const char* sdpAddressFamily = protocol::socket_compat::IsIpv6Text(ip) ? "IN IP6" : "IN IP4";
+#else
+	const char* sdpAddressFamily = "IN IP4";
+#endif
 
 	snprintf(buf, sizeof(buf),
 			"v=0\r\n"
-			"o=- 9%ld 1 IN IP4 %s\r\n"
+			"o=- 9%ld 1 %s %s\r\n"
 			"t=0 0\r\n"
 			"a=control:*\r\n" ,
-			(long)std::time(NULL), ip.c_str()); 
+			(long)std::time(NULL), sdpAddressFamily, ip.c_str());
 
 	if(session_name != "") {
 		snprintf(buf+strlen(buf), sizeof(buf)-strlen(buf), 

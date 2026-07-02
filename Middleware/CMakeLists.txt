@@ -3,7 +3,8 @@ project(dgiot)
 
 #add_definitions(-Werror)
 #add_definitions(-Wno-error=deprecated-declarations)
-add_definitions(-o3)
+# GCC parses lowercase -o3 as "-o 3", so keep this legacy marker disabled.
+#add_definitions(-o3)
 
 #add_definitions(-Wall -o3)
 add_definitions(-w -Wno-psabi)
@@ -18,6 +19,13 @@ option(RC0240V20 "compile for RC0240V20 Board" OFF)
 
 option(ATBM6052 "compile for ATBM6052" OFF)
 option(ATBM6012B "compile for ATBM6012B" OFF)
+option(RK_ENABLE_IPV6_SOCKET "enable IPv6-capable application sockets" OFF)
+
+if(RK_ENABLE_IPV6_SOCKET)
+	add_definitions(-DRK_ENABLE_IPV6_SOCKET=1)
+else()
+	add_definitions(-DRK_ENABLE_IPV6_SOCKET=0)
+endif()
 
 #系统
 SET(CMAKE_SYSTEM_NAME Linux)
@@ -40,5 +48,3 @@ SET(CMAKE_CXX_COMPILER "arm-rockchip830-linux-uclibcgnueabihf-g++")
 
 # 添加子目录
 add_subdirectory(libmpp)
-
-

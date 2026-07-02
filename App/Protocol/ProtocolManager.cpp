@@ -1,6 +1,7 @@
 #include "ProtocolManager.h"
 #include "gat1400/GAT1400ClientService.h"
 #include "ProtocolLog.h"
+#include "SocketCompat.h"
 #include "GB28181ClientSDK.h"
 
 
@@ -2066,9 +2067,17 @@ static bool ResolveGbResponseLocalIp(const std::string& remoteIp,
 
     }
 
+#if RK_ENABLE_IPV6_SOCKET
+    protocol::socket_compat::Endpoint remoteEndpoint;
+    if (!protocol::socket_compat::ResolveEndpoint(remoteIp, remotePort, SOCK_DGRAM, &remoteEndpoint)) {
+        return false;
+    }
 
+    int sockfd = protocol::socket_compat::CreateSocket(remoteEndpoint.family, SOCK_DGRAM, false);
+#else
 
     int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+#endif
 
     if (sockfd < 0) {
 
@@ -2077,6 +2086,14 @@ static bool ResolveGbResponseLocalIp(const std::string& remoteIp,
     }
 
 
+#if RK_ENABLE_IPV6_SOCKET
+    if (connect(sockfd,
+                protocol::socket_compat::AsSockaddr(remoteEndpoint),
+                remoteEndpoint.len) != 0) {
+        close(sockfd);
+        return false;
+    }
+#else
 
     sockaddr_in remoteAddr;
 
@@ -2104,9 +2121,9 @@ static bool ResolveGbResponseLocalIp(const std::string& remoteIp,
 
     }
 
+#endif
 
-
-    sockaddr_in localAddr;
+    sockaddr_storage localAddr;
 
     memset(&localAddr, 0, sizeof(localAddr));
 
@@ -2122,13 +2139,19 @@ static bool ResolveGbResponseLocalIp(const std::string& remoteIp,
 
 
 
-    char ipbuf[INET_ADDRSTRLEN] = {0};
-
-    const char* ipstr = inet_ntop(AF_INET, &localAddr.sin_addr, ipbuf, sizeof(ipbuf));
+    char ipbuf[INET6_ADDRSTRLEN] = {0};
+    if (!protocol::socket_compat::SockaddrToString((sockaddr*)&localAddr,
+                                                   localAddrLen,
+                                                   ipbuf,
+                                                   sizeof(ipbuf),
+                                                   NULL)) {
+        close(sockfd);
+        return false;
+    }
 
     close(sockfd);
 
-    if (ipstr == NULL || ipstr[0] == '\0' || strcmp(ipstr, "0.0.0.0") == 0) {
+    if (ipbuf[0] == '\0' || strcmp(ipbuf, "0.0.0.0") == 0 || strcmp(ipbuf, "::") == 0) {
 
         return false;
 
@@ -2136,7 +2159,7 @@ static bool ResolveGbResponseLocalIp(const std::string& remoteIp,
 
 
 
-    localIp = ipstr;
+    localIp = ipbuf;
 
     return true;
 
