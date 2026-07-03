@@ -6,6 +6,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 TOP_CMAKE = ROOT / "CMakeLists.txt"
 MIDDLEWARE_CMAKE = ROOT / "Middleware/CMakeLists.txt"
+BUILD_SH = ROOT / "build.sh"
 SOCKET_COMPAT = ROOT / "App/Protocol/SocketCompat.h"
 GB_RTP = ROOT / "App/Protocol/gb28181/GB28181RtpPsSender.cpp"
 GB_BROADCAST = ROOT / "App/Protocol/gb28181/GB28181BroadcastBridge.cpp"
@@ -15,6 +16,7 @@ GB_NET_SHIM = ROOT / "App/Protocol/gb28181/sdk_port/NetSocketSdkShim.cpp"
 GB_SDP_UTIL = ROOT / "third_party/platform_sdk_port/CommonLibSrc/GB28181SDK/include/SDP/SdpUtil.cpp"
 PROTOCOL_MANAGER = ROOT / "App/Protocol/ProtocolManager.cpp"
 DM_CLIENT = ROOT / "App/DM/DmClientService.cpp"
+WAKAAMA_UDP = ROOT / "third_party/wakaama/transport/udp/connection.c"
 RTSP_SOCKET_UTIL_H = ROOT / "App/RtspServer/src/net/SocketUtil.h"
 RTSP_SOCKET_UTIL = ROOT / "App/RtspServer/src/net/SocketUtil.cpp"
 RTSP_TCP_SOCKET = ROOT / "App/RtspServer/src/net/TcpSocket.cpp"
@@ -45,6 +47,16 @@ def main() -> int:
             "-DRK_ENABLE_IPV6_SOCKET=" in text,
             f"{rel} should pass RK_ENABLE_IPV6_SOCKET to C/C++ sources.",
         )
+        require(
+            'option(RK_ENABLE_IPV6_SOCKET "enable IPv6-capable application sockets" ON)' in text,
+            f"{rel} should default to one dual-stack firmware build.",
+        )
+
+    build_sh = read_text(BUILD_SH)
+    require(
+        "-DRK_ENABLE_IPV6_SOCKET=ON" in build_sh,
+        "build.sh should explicitly enable dual-stack application sockets for release firmware.",
+    )
 
     compat = read_text(SOCKET_COMPAT)
     for token in (
@@ -142,16 +154,26 @@ def main() -> int:
     dm_client = read_text(DM_CLIENT)
     for token in (
         "RK_ENABLE_IPV6_SOCKET",
-        "ResolveDmAddressFamily",
-        "hints.ai_family = AF_UNSPEC",
-        "int family = AF_INET",
-        "data.addressFamily = ResolveDmAddressFamily",
+        "GetDmAddressFamilyPreference",
+        "return AF_UNSPEC;",
+        "data.addressFamily = GetDmAddressFamilyPreference",
     ):
         require(token in dm_client, f"DM/LwM2M client should use {token}.")
     require(
-        "return AF_UNSPEC;" not in dm_client,
-        "DM/LwM2M client should resolve to a concrete address family before creating the Wakaama socket.",
+        "ResolveDmAddressFamily" not in dm_client,
+        "DM/LwM2M client should not lock one concrete DNS address family before connect fallback.",
     )
+
+    wakaama_udp = read_text(WAKAAMA_UDP)
+    for token in (
+        "create_dual_stack_socket",
+        "IPV6_V6ONLY",
+        "addressFamily == AF_UNSPEC",
+        "map_ipv4_to_ipv6",
+        "remote_family_matches_socket",
+        "gai_strerror",
+    ):
+        require(token in wakaama_udp, f"Wakaama UDP transport should provide {token}.")
 
     socket_util_h = read_text(RTSP_SOCKET_UTIL_H)
     require(

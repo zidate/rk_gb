@@ -16,7 +16,7 @@ option(ATBM6052 "compile for ATBM6052" OFF)
 option(ATBM6012B "compile for ATBM6012B" OFF)
 option(ATBM6132 "compile for ATBM6132" OFF)
 option(AIC8800DL "compile for AIC8800DL" OFF)
-option(RK_ENABLE_IPV6_SOCKET "enable IPv6-capable application sockets" OFF)
+option(RK_ENABLE_IPV6_SOCKET "enable IPv6-capable application sockets" ON)
 
 if(RK_ENABLE_IPV6_SOCKET)
 	add_definitions(-DRK_ENABLE_IPV6_SOCKET=1)

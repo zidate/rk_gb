@@ -81,40 +81,11 @@ std::string LocalPortToString(int localPort)
     return buffer;
 }
 
-int ResolveDmAddressFamily(const std::string& serverUri)
+int GetDmAddressFamilyPreference()
 {
 #if RK_ENABLE_IPV6_SOCKET
-    std::vector<char> uri(serverUri.begin(), serverUri.end());
-    uri.push_back('\0');
-
-    char* host = NULL;
-    char* port = NULL;
-    if (!ParseCoapUri(&uri[0], &host, &port)) {
-        return AF_INET;
-    }
-
-    struct addrinfo hints;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_DGRAM;
-    hints.ai_flags = AI_NUMERICSERV;
-
-    struct addrinfo* result = NULL;
-    if (getaddrinfo(host, port, &hints, &result) != 0 || result == NULL) {
-        return AF_INET;
-    }
-
-    int family = AF_INET;
-    for (struct addrinfo* it = result; it != NULL; it = it->ai_next) {
-        if (it->ai_family == AF_INET || it->ai_family == AF_INET6) {
-            family = it->ai_family;
-            break;
-        }
-    }
-    freeaddrinfo(result);
-    return family;
+    return AF_UNSPEC;
 #else
-    (void)serverUri;
     return AF_INET;
 #endif
 }
@@ -337,7 +308,7 @@ int DmClientService::RunLwm2mClientOnce()
     state.config = cfg;
 
     DmWakaamaClientData data;
-    data.addressFamily = ResolveDmAddressFamily(cfg.server_uri);
+    data.addressFamily = GetDmAddressFamilyPreference();
     const std::string localPort = LocalPortToString(cfg.local_port);
     data.sock = lwm2m_create_socket(localPort.c_str(), data.addressFamily);
     if (data.sock < 0) {

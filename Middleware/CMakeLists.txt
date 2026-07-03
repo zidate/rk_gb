@@ -19,7 +19,7 @@ option(RC0240V20 "compile for RC0240V20 Board" OFF)
 
 option(ATBM6052 "compile for ATBM6052" OFF)
 option(ATBM6012B "compile for ATBM6012B" OFF)
-option(RK_ENABLE_IPV6_SOCKET "enable IPv6-capable application sockets" OFF)
+option(RK_ENABLE_IPV6_SOCKET "enable IPv6-capable application sockets" ON)
 
 if(RK_ENABLE_IPV6_SOCKET)
 	add_definitions(-DRK_ENABLE_IPV6_SOCKET=1)

@@ -68,7 +68,7 @@ function make_mid()
 		mkdir $BUILD_MID_DIR
 	fi
 	cd $BUILD_MID_DIR
-	cmake .. -D$CHIP_TYPE=ON -D$BOARD_TYPE=ON -D$DMODE=ON
+	cmake .. -D$CHIP_TYPE=ON -D$BOARD_TYPE=ON -D$DMODE=ON -DRK_ENABLE_IPV6_SOCKET=ON
 	make -j4
 	cd $ROOT
 }
@@ -88,7 +88,7 @@ function make_app()
 		mkdir $BUILD_DIR
 	fi
 	cd $BUILD_DIR
-	cmake .. -D$CHIP_TYPE=ON -D$BOARD_TYPE=ON -D$BLE_TYPE=ON -D$DMODE=ON
+	cmake .. -D$CHIP_TYPE=ON -D$BOARD_TYPE=ON -D$BLE_TYPE=ON -D$DMODE=ON -DRK_ENABLE_IPV6_SOCKET=ON
 	make -j4
 	cd $ROOT
 	daemon

@@ -19,6 +19,7 @@
 #include "udp/connection.h"
 #include "commandline.h"
 #include <ctype.h>
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -26,11 +27,26 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 
-static int find_and_bind_to_address(struct addrinfo *res) {
+static int set_dual_stack(int s) {
+#ifdef IPV6_V6ONLY
+    const int off = 0;
+    return setsockopt(s, IPPROTO_IPV6, IPV6_V6ONLY, &off, sizeof(off));
+#else
+    (void)s;
+    return 0;
+#endif
+}
+
+static int find_and_bind_to_address(struct addrinfo *res, int dualStack) {
     int s = -1;
     for (struct addrinfo *p = res; p != NULL && s == -1; p = p->ai_next) {
         s = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
         if (s >= 0) {
+            if (dualStack && p->ai_family == AF_INET6 && set_dual_stack(s) == -1) {
+                close(s);
+                s = -1;
+                continue;
+            }
             if (-1 == bind(s, p->ai_addr, p->ai_addrlen)) {
                 close(s);
                 s = -1;
@@ -40,23 +56,7 @@ static int find_and_bind_to_address(struct addrinfo *res) {
     return s;
 }
 
-static int find_and_connect_to_address(struct addrinfo *servinfo, struct sockaddr **sa, socklen_t *sl) {
-    int s = -1;
-    for (struct addrinfo *p = servinfo; p != NULL && s == -1; p = p->ai_next) {
-        s = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
-        if (s >= 0) {
-            (*sa) = p->ai_addr;
-            (*sl) = p->ai_addrlen;
-            if (-1 == connect(s, p->ai_addr, p->ai_addrlen)) {
-                close(s);
-                s = -1;
-            }
-        }
-    }
-    return s;
-}
-
-int lwm2m_create_socket(const char *portStr, int addressFamily) {
+static int create_bound_socket(const char *portStr, int addressFamily, int dualStack) {
     int s = -1;
     struct addrinfo hints;
     struct addrinfo *res;
@@ -66,15 +66,88 @@ int lwm2m_create_socket(const char *portStr, int addressFamily) {
     hints.ai_socktype = SOCK_DGRAM;
     hints.ai_flags = AI_PASSIVE;
 
-    if (0 != getaddrinfo(NULL, portStr, &hints, &res)) {
+    const int ret = getaddrinfo(NULL, portStr, &hints, &res);
+    if (ret != 0) {
+        fprintf(stderr, "[DM] local getaddrinfo failed port=%s family=%d ret=%d %s\n",
+                portStr, addressFamily, ret, gai_strerror(ret));
         return -1;
     }
 
-    s = find_and_bind_to_address(res);
+    s = find_and_bind_to_address(res, dualStack);
 
     freeaddrinfo(res);
 
     return s;
+}
+
+static int create_dual_stack_socket(const char *portStr) {
+    return create_bound_socket(portStr, AF_INET6, 1);
+}
+
+int lwm2m_create_socket(const char *portStr, int addressFamily) {
+    if (addressFamily == AF_UNSPEC) {
+        int s = create_dual_stack_socket(portStr);
+        if (s >= 0) {
+            return s;
+        }
+        return create_bound_socket(portStr, AF_INET, 0);
+    }
+
+    const int dualStack = (addressFamily == AF_INET6);
+    return create_bound_socket(portStr, addressFamily, dualStack);
+}
+
+static int get_socket_family(int sock) {
+    struct sockaddr_storage addr;
+    socklen_t len = sizeof(addr);
+    memset(&addr, 0, sizeof(addr));
+    if (getsockname(sock, (struct sockaddr *)&addr, &len) == -1) {
+        return AF_UNSPEC;
+    }
+    return addr.ss_family;
+}
+
+static int remote_family_matches_socket(int socketFamily, int remoteFamily) {
+    if (socketFamily == AF_INET6) {
+        return remoteFamily == AF_INET || remoteFamily == AF_INET6;
+    }
+    return socketFamily == remoteFamily;
+}
+
+static void map_ipv4_to_ipv6(const struct sockaddr_in *src, struct sockaddr_in6 *dst) {
+    memset(dst, 0, sizeof(*dst));
+    dst->sin6_family = AF_INET6;
+    dst->sin6_port = src->sin_port;
+    dst->sin6_addr.s6_addr[10] = 0xff;
+    dst->sin6_addr.s6_addr[11] = 0xff;
+    memcpy(&dst->sin6_addr.s6_addr[12], &src->sin_addr, sizeof(src->sin_addr));
+}
+
+static int copy_remote_for_socket(int socketFamily,
+                                  const struct sockaddr *remote,
+                                  socklen_t remoteLen,
+                                  struct sockaddr_storage *out,
+                                  socklen_t *outLen) {
+    memset(out, 0, sizeof(*out));
+    if (socketFamily == AF_INET && remote->sa_family == AF_INET) {
+        memcpy(out, remote, remoteLen);
+        *outLen = remoteLen;
+        return 0;
+    }
+
+    if (socketFamily == AF_INET6 && remote->sa_family == AF_INET6) {
+        memcpy(out, remote, remoteLen);
+        *outLen = remoteLen;
+        return 0;
+    }
+
+    if (socketFamily == AF_INET6 && remote->sa_family == AF_INET) {
+        map_ipv4_to_ipv6((const struct sockaddr_in *)remote, (struct sockaddr_in6 *)out);
+        *outLen = sizeof(struct sockaddr_in6);
+        return 0;
+    }
+
+    return -1;
 }
 
 lwm2m_connection_t *lwm2m_connection_find(lwm2m_connection_t *connList, struct sockaddr_storage *addr, size_t addrLen) {
@@ -110,22 +183,42 @@ lwm2m_connection_t *lwm2m_connection_create(lwm2m_connection_t *connList, int so
                                             int addressFamily) {
     struct addrinfo hints;
     struct addrinfo *servinfo = NULL;
-    int s;
-    struct sockaddr *sa;
-    socklen_t sl;
     lwm2m_connection_t *connP = NULL;
+    const int socketFamily = get_socket_family(sock);
 
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = addressFamily;
     hints.ai_socktype = SOCK_DGRAM;
 
-    if (0 != getaddrinfo(host, port, &hints, &servinfo) || servinfo == NULL)
+    const int ret = getaddrinfo(host, port, &hints, &servinfo);
+    if (ret != 0 || servinfo == NULL) {
+        fprintf(stderr, "[DM] remote getaddrinfo failed host=%s port=%s family=%d ret=%d %s\n",
+                host, port, addressFamily, ret, gai_strerror(ret));
         return NULL;
+    }
 
-    // we test the various addresses
-    s = find_and_connect_to_address(servinfo, &sa, &sl);
-    if (s >= 0) {
-        connP = lwm2m_connection_new_incoming(connList, sock, sa, sl);
+    for (struct addrinfo *p = servinfo; p != NULL && connP == NULL; p = p->ai_next) {
+        if (!remote_family_matches_socket(socketFamily, p->ai_family)) {
+            continue;
+        }
+
+        int s = socket(p->ai_family, p->ai_socktype, p->ai_protocol);
+        if (s < 0) {
+            continue;
+        }
+
+        if (connect(s, p->ai_addr, p->ai_addrlen) == -1) {
+            fprintf(stderr, "[DM] probe connect failed host=%s port=%s family=%d errno=%d %s\n",
+                    host, port, p->ai_family, errno, strerror(errno));
+            close(s);
+            continue;
+        }
+
+        struct sockaddr_storage remote;
+        socklen_t remoteLen = 0;
+        if (copy_remote_for_socket(socketFamily, p->ai_addr, p->ai_addrlen, &remote, &remoteLen) == 0) {
+            connP = lwm2m_connection_new_incoming(connList, sock, (struct sockaddr *)&remote, remoteLen);
+        }
         close(s);
     }
     if (NULL != servinfo) {
