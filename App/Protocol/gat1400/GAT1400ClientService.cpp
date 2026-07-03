@@ -548,6 +548,80 @@ std::string BuildRequestPath(const std::string& basePath, const std::string& pat
     return (normalizedPath == "/") ? normalizedBase : (normalizedBase + normalizedPath);
 }
 
+std::string StripIpv6LiteralBrackets(const std::string& host)
+{
+    if (host.size() >= 2 && host[0] == '[' && host[host.size() - 1] == ']') {
+        return host.substr(1, host.size() - 2);
+    }
+    return host;
+}
+
+bool ParsePortText(const std::string& portText, int& port)
+{
+    if (portText.empty()) {
+        return false;
+    }
+
+    char* end = NULL;
+    const long value = strtol(portText.c_str(), &end, 10);
+    if (end == portText.c_str() || *end != '\0' || value <= 0 || value > 65535) {
+        return false;
+    }
+
+    port = static_cast<int>(value);
+    return true;
+}
+
+bool ParseHostPort(const std::string& hostPort, const std::string& scheme, std::string& host, int& port)
+{
+    if (hostPort.empty()) {
+        return false;
+    }
+
+    port = (scheme == "https") ? 443 : 80;
+    if (hostPort[0] == '[') {
+        const std::string::size_type close = hostPort.find(']');
+        if (close == std::string::npos || close <= 1) {
+            return false;
+        }
+
+        host = hostPort.substr(1, close - 1);
+        if (close + 1 == hostPort.size()) {
+            return true;
+        }
+        if (hostPort[close + 1] != ':') {
+            return false;
+        }
+        return ParsePortText(hostPort.substr(close + 2), port);
+    }
+
+    const std::string::size_type firstColon = hostPort.find(':');
+    const std::string::size_type lastColon = hostPort.rfind(':');
+    if (firstColon != std::string::npos && firstColon == lastColon) {
+        host = hostPort.substr(0, firstColon);
+        if (host.empty()) {
+            return false;
+        }
+        return ParsePortText(hostPort.substr(firstColon + 1), port);
+    }
+
+    host = hostPort;
+    return !host.empty();
+}
+
+std::string FormatHttpHost(const std::string& host, int port)
+{
+    const std::string normalizedHost = StripIpv6LiteralBrackets(host);
+    std::ostringstream oss;
+    if (protocol::socket_compat::IsIpv6Text(host)) {
+        oss << '[' << normalizedHost << ']';
+    } else {
+        oss << normalizedHost;
+    }
+    oss << ':' << port;
+    return oss.str();
+}
+
 bool ParseRequestUrl(const std::string& url, RequestTarget& out)
 {
     const std::string::size_type schemeEnd = url.find("://");
@@ -564,25 +638,16 @@ bool ParseRequestUrl(const std::string& url, RequestTarget& out)
         return false;
     }
 
-    out.port = (out.scheme == "https") ? 443 : 80;
-    std::string::size_type colon = hostPort.rfind(':');
-    if (colon != std::string::npos) {
-        out.host = hostPort.substr(0, colon);
-        const std::string portText = hostPort.substr(colon + 1);
-        if (out.host.empty() || portText.empty()) {
-            return false;
-        }
-        out.port = atoi(portText.c_str());
-    } else {
-        out.host = hostPort;
+    if (!ParseHostPort(hostPort, out.scheme, out.host, out.port)) {
+        return false;
     }
     return !out.host.empty() && out.port > 0;
 }
 
-std::string BuildRequestUrl(const RequestTarget& target)
+std::string FormatRequestUrl(const RequestTarget& target)
 {
     std::ostringstream oss;
-    oss << target.scheme << "://" << target.host << ":" << target.port << target.request_path;
+    oss << target.scheme << "://" << FormatHttpHost(target.host, target.port) << target.request_path;
     return oss.str();
 }
 
@@ -592,7 +657,7 @@ bool BuildRequestTarget(const ProtocolExternalConfig& cfg,
                         RequestTarget& out)
 {
     out.scheme = ToLowerCopy(cfg.gat_register.scheme.empty() ? "http" : cfg.gat_register.scheme);
-    out.host = cfg.gat_register.server_ip;
+    out.host = StripIpv6LiteralBrackets(cfg.gat_register.server_ip);
     out.port = cfg.gat_register.server_port;
     out.timeout_ms = cfg.gat_register.request_timeout_ms > 0 ? cfg.gat_register.request_timeout_ms : kHttpTimeoutMs;
     out.request_path = BuildRequestPath(cfg.gat_register.base_path, path);
@@ -1841,7 +1906,7 @@ int GAT1400ClientService::ExecuteRequest(const ProtocolExternalConfig& cfg,
 
         std::ostringstream request;
         request << method << ' ' << target.request_path << " HTTP/1.1\r\n";
-        request << "Host: " << target.host << ':' << target.port << "\r\n";
+        request << "Host: " << FormatHttpHost(target.host, target.port) << "\r\n";
         request << "User-Identify: " << deviceId << "\r\n";
         request << "Content-Type: " << (contentType.empty() ? kJsonContentType : contentType) << "\r\n";
         request << "Connection: close\r\n";
@@ -1874,7 +1939,7 @@ int GAT1400ClientService::ExecuteRequest(const ProtocolExternalConfig& cfg,
     if (response.status_code == 401 && !cfg.gat_register.username.empty()) {
         std::map<std::string, std::string>::const_iterator authIt = response.headers.find("www-authenticate");
         if (authIt != response.headers.end()) {
-            CHttpAuth auth(BuildRequestUrl(target), method, cfg.gat_register.username, cfg.gat_register.password);
+            CHttpAuth auth(FormatRequestUrl(target), method, cfg.gat_register.username, cfg.gat_register.password);
             std::string authHeader;
             auth.HttpAuthParse(authIt->second, authHeader);
             response = HttpResponse();

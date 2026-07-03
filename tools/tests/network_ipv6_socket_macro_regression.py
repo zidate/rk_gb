@@ -16,6 +16,7 @@ GB_NET_SHIM = ROOT / "App/Protocol/gb28181/sdk_port/NetSocketSdkShim.cpp"
 GB_SDP_UTIL = ROOT / "third_party/platform_sdk_port/CommonLibSrc/GB28181SDK/include/SDP/SdpUtil.cpp"
 GB_SIP_EVENT_MANAGER = ROOT / "third_party/platform_sdk_port/CommonLibSrc/SipSDK/common/SipEventManager.cpp"
 PROTOCOL_MANAGER = ROOT / "App/Protocol/ProtocolManager.cpp"
+GAT_CLIENT = ROOT / "App/Protocol/gat1400/GAT1400ClientService.cpp"
 DM_CLIENT = ROOT / "App/DM/DmClientService.cpp"
 WAKAAMA_UDP = ROOT / "third_party/wakaama/transport/udp/connection.c"
 RTSP_SOCKET_UTIL_H = ROOT / "App/RtspServer/src/net/SocketUtil.h"
@@ -193,6 +194,26 @@ def main() -> int:
         "SockaddrToString",
     ):
         require(token in protocol_manager, f"ProtocolManager local IP resolution should use {token}.")
+
+    gat_client = read_text(GAT_CLIENT)
+    for token in (
+        "RK_ENABLE_IPV6_SOCKET",
+        "hints.ai_family = AF_UNSPEC;",
+        "CreateDualStackSocket(SOCK_STREAM)",
+        "BuildAnyEndpoint(AF_INET6",
+        "ParseHostPort",
+        "FormatHttpHost",
+        "FormatRequestUrl",
+    ):
+        require(token in gat_client, f"GAT1400 client should use {token} for IPv6-capable HTTP.")
+    require(
+        "hostPort[0] == '['" in gat_client and "hostPort.find(']')" in gat_client,
+        "GAT1400 absolute URL parsing should accept bracketed IPv6 literals.",
+    )
+    require(
+        "protocol::socket_compat::IsIpv6Text(host)" in gat_client,
+        "GAT1400 HTTP Host/URL formatting should bracket IPv6 literal hosts.",
+    )
 
     dm_client = read_text(DM_CLIENT)
     for token in (
