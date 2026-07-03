@@ -10,6 +10,11 @@ namespace dm
 static const char* const kDmConfigFile = "/userdata/conf/Config/DM/dm.ini";
 static const char* const kDmDefaultAdaptServerUri = "coap://b.fxltsbl.com:5683";
 static const char* const kDmDefaultCommercialServerUri = "coap://m.fxltsbl.com:5683";
+static const char* const kDmDefaultBrand = "cmiot";
+static const char* const kDmDefaultModel = "C4611";
+static const char* const kDmDefaultAppkey = "M100000052";
+static const char* const kDmDefaultSecret = "n525A97z0M7Vyh91b0508l7j0U5g2g9Y";
+static const char* const kDmDefaultTemplateId = "TY000127";
 static const char* const kDmDefaultApiVersion = "4.0.1";
 static const char* const kDmDefaultApiType = "I";
 static const char* const kDmNoValue = "***";

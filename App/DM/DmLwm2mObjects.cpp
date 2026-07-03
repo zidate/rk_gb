@@ -358,10 +358,10 @@ uint8_t DmInfoRead(lwm2m_context_t* contextP,
 }
 
 DmRuleConfig::DmRuleConfig()
-    : report_time_min(1440),
+    : report_time_min(360),
       report_num(8),
-      heartbeat_time_min(1440),
-      retry_interval_min(10),
+      heartbeat_time_min(10),
+      retry_interval_min(5),
       retry_num(3)
 {
 }
@@ -435,16 +435,16 @@ DmRuleConfig ParseDmRuleConfig(const std::string& ruleConfig)
     cfg.retry_interval_min = JsonIntValue(ruleConfig, "retryInterval", cfg.retry_interval_min);
     cfg.retry_num = JsonIntValue(ruleConfig, "retryNum", cfg.retry_num);
     if (cfg.report_time_min <= 0) {
-        cfg.report_time_min = 1440;
+        cfg.report_time_min = 10;
     }
     if (cfg.report_num <= 0) {
         cfg.report_num = 8;
     }
     if (cfg.heartbeat_time_min <= 0) {
-        cfg.heartbeat_time_min = 1440;
+        cfg.heartbeat_time_min = 10;
     }
     if (cfg.retry_interval_min <= 0) {
-        cfg.retry_interval_min = 10;
+        cfg.retry_interval_min = 5;
     }
     if (cfg.retry_num <= 0) {
         cfg.retry_num = 3;
@@ -518,8 +518,6 @@ bool DmReportAllowed(DmObjectState& state, time_t now)
         return false;
     }
 
-    ++state.reportsInWindow;
-    state.lastReportTime = now;
     return true;
 }
 
