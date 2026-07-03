@@ -2067,7 +2067,7 @@ static bool ResolveGbResponseLocalIp(const std::string& remoteIp,
 
     }
 
-#if RK_ENABLE_IPV6_SOCKET
+#if RK_ENABLE_GB_IPV6_SOCKET
     protocol::socket_compat::Endpoint remoteEndpoint;
     if (!protocol::socket_compat::ResolveEndpoint(remoteIp, remotePort, SOCK_DGRAM, &remoteEndpoint)) {
         return false;
@@ -2086,7 +2086,7 @@ static bool ResolveGbResponseLocalIp(const std::string& remoteIp,
     }
 
 
-#if RK_ENABLE_IPV6_SOCKET
+#if RK_ENABLE_GB_IPV6_SOCKET
     if (connect(sockfd,
                 protocol::socket_compat::AsSockaddr(remoteEndpoint),
                 remoteEndpoint.len) != 0) {

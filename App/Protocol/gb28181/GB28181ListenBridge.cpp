@@ -262,7 +262,7 @@ int GB28181ListenBridge::OpenTransport()
 
     const int sockType = (m_param.transport == "tcp") ? SOCK_STREAM : SOCK_DGRAM;
 
-#if RK_ENABLE_IPV6_SOCKET
+#if RK_ENABLE_GB_IPV6_SOCKET
     protocol::socket_compat::Endpoint remoteEndpoint;
     if (!protocol::socket_compat::ResolveEndpoint(m_param.target_ip,
                                                    m_param.target_port,

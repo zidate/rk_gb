@@ -5,8 +5,8 @@
 #include <string.h>
 #include <string>
 
-#ifndef RK_ENABLE_IPV6_SOCKET
-#define RK_ENABLE_IPV6_SOCKET 0
+#ifndef RK_ENABLE_GB_IPV6_SOCKET
+#define RK_ENABLE_GB_IPV6_SOCKET 0
 #endif
 
 static StreamRequestType  String2Enum( const std::string& str   )
@@ -49,7 +49,7 @@ static bool IsDownstreamMediaRequest(StreamRequestType type)
 
 static const char* ResolveSdpAddrType(const char* ip)
 {
-#if RK_ENABLE_IPV6_SOCKET
+#if RK_ENABLE_GB_IPV6_SOCKET
       if (ip && strchr(ip, ':')) {
            return "IP6";
       }

@@ -407,7 +407,7 @@ int GB28181BroadcastBridge::SetupRecvSocket()
     int family = AF_INET;
     protocol::socket_compat::Endpoint remoteEndpoint;
 
-#if RK_ENABLE_IPV6_SOCKET
+#if RK_ENABLE_GB_IPV6_SOCKET
     if (m_transport_type == kRtpOverTcpActive) {
         if (m_remote_ip.empty() || m_remote_port <= 0) {
             printf("[GB28181][Broadcast] tcp active missing remote endpoint=%s:%d\n",
@@ -442,7 +442,7 @@ int GB28181BroadcastBridge::SetupRecvSocket()
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
     SetSocketRecvTimeout(sockfd, 200);
 
-#if RK_ENABLE_IPV6_SOCKET
+#if RK_ENABLE_GB_IPV6_SOCKET
     protocol::socket_compat::Endpoint localEndpoint;
     if (!protocol::socket_compat::BuildAnyEndpoint(family, m_param.recv_port, &localEndpoint) ||
         bind(sockfd, protocol::socket_compat::AsSockaddr(localEndpoint), localEndpoint.len) != 0) {
@@ -484,7 +484,7 @@ int GB28181BroadcastBridge::SetupRecvSocket()
             return -13;
         }
 
-#if RK_ENABLE_IPV6_SOCKET
+#if RK_ENABLE_GB_IPV6_SOCKET
         struct sockaddr_storage remote_addr;
         memset(&remote_addr, 0, sizeof(remote_addr));
         memcpy(&remote_addr, &remoteEndpoint.addr, sizeof(remoteEndpoint.addr));
@@ -1059,7 +1059,7 @@ int GB28181BroadcastBridge::ApplyTransportHint(const std::string& remoteIp,
 std::string GB28181BroadcastBridge::BuildLocalAnswerSdp(const std::string& localIp) const
 {
     std::string ip = localIp.empty() ? "0.0.0.0" : localIp;
-#if RK_ENABLE_IPV6_SOCKET
+#if RK_ENABLE_GB_IPV6_SOCKET
     const char* sdpAddressFamily = protocol::socket_compat::IsIpv6Text(ip) ? "IN IP6" : "IN IP4";
 #else
     const char* sdpAddressFamily = "IN IP4";

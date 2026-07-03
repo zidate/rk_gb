@@ -17,11 +17,18 @@ option(ATBM6012B "compile for ATBM6012B" OFF)
 option(ATBM6132 "compile for ATBM6132" OFF)
 option(AIC8800DL "compile for AIC8800DL" OFF)
 option(RK_ENABLE_IPV6_SOCKET "enable IPv6-capable application sockets" ON)
+option(RK_ENABLE_GB_IPV6_SOCKET "enable IPv6-capable GB28181 sockets" OFF)
 
 if(RK_ENABLE_IPV6_SOCKET)
 	add_definitions(-DRK_ENABLE_IPV6_SOCKET=1)
 else()
 	add_definitions(-DRK_ENABLE_IPV6_SOCKET=0)
+endif()
+
+if(RK_ENABLE_GB_IPV6_SOCKET)
+	add_definitions(-DRK_ENABLE_GB_IPV6_SOCKET=1)
+else()
+	add_definitions(-DRK_ENABLE_GB_IPV6_SOCKET=0)
 endif()
 
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ffunction-sections -fdata-sections")

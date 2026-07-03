@@ -14,6 +14,7 @@ GB_LISTEN_H = ROOT / "App/Protocol/gb28181/GB28181ListenBridge.h"
 GB_LISTEN = ROOT / "App/Protocol/gb28181/GB28181ListenBridge.cpp"
 GB_NET_SHIM = ROOT / "App/Protocol/gb28181/sdk_port/NetSocketSdkShim.cpp"
 GB_SDP_UTIL = ROOT / "third_party/platform_sdk_port/CommonLibSrc/GB28181SDK/include/SDP/SdpUtil.cpp"
+GB_SIP_EVENT_MANAGER = ROOT / "third_party/platform_sdk_port/CommonLibSrc/SipSDK/common/SipEventManager.cpp"
 PROTOCOL_MANAGER = ROOT / "App/Protocol/ProtocolManager.cpp"
 DM_CLIENT = ROOT / "App/DM/DmClientService.cpp"
 WAKAAMA_UDP = ROOT / "third_party/wakaama/transport/udp/connection.c"
@@ -52,10 +53,24 @@ def main() -> int:
             f"{rel} should default to one dual-stack firmware build.",
         )
 
+    top_cmake = read_text(TOP_CMAKE)
+    require(
+        'option(RK_ENABLE_GB_IPV6_SOCKET "enable IPv6-capable GB28181 sockets" OFF)' in top_cmake,
+        "Top-level CMake should keep GB28181 IPv6 socket support disabled by default.",
+    )
+    require(
+        "-DRK_ENABLE_GB_IPV6_SOCKET=" in top_cmake,
+        "Top-level CMake should pass RK_ENABLE_GB_IPV6_SOCKET to GB sources.",
+    )
+
     build_sh = read_text(BUILD_SH)
     require(
         "-DRK_ENABLE_IPV6_SOCKET=ON" in build_sh,
         "build.sh should explicitly enable dual-stack application sockets for release firmware.",
+    )
+    require(
+        "-DRK_ENABLE_GB_IPV6_SOCKET=OFF" in build_sh,
+        "build.sh should keep GB28181 IPv4-only while enabling DM dual-stack sockets.",
     )
 
     compat = read_text(SOCKET_COMPAT)
@@ -73,7 +88,7 @@ def main() -> int:
 
     gb_rtp = read_text(GB_RTP)
     for token in (
-        "RK_ENABLE_IPV6_SOCKET",
+        "RK_ENABLE_GB_IPV6_SOCKET",
         "SocketCompat.h",
         "sockaddr_storage remote_addr",
         "remote_addr_len",
@@ -85,12 +100,16 @@ def main() -> int:
         require(token in gb_rtp, f"GB28181 RTP/PS sender should use {token}.")
     require(
         "socket(AF_INET, sockType, 0)" in gb_rtp,
-        "GB28181 RTP/PS sender should keep an IPv4-only branch when RK_ENABLE_IPV6_SOCKET=0.",
+        "GB28181 RTP/PS sender should keep an IPv4-only branch when RK_ENABLE_GB_IPV6_SOCKET=0.",
+    )
+    require(
+        "RK_ENABLE_IPV6_SOCKET" not in gb_rtp,
+        "GB28181 RTP/PS sender should not follow the global IPv6 socket switch.",
     )
 
     gb_broadcast = read_text(GB_BROADCAST)
     for token in (
-        "RK_ENABLE_IPV6_SOCKET",
+        "RK_ENABLE_GB_IPV6_SOCKET",
         "SocketCompat.h",
         "sockaddr_storage remote_addr",
         "ResolveEndpoint",
@@ -101,7 +120,11 @@ def main() -> int:
         require(token in gb_broadcast, f"GB28181 broadcast bridge should use {token}.")
     require(
         "socket(AF_INET, sockType, 0)" in gb_broadcast,
-        "GB28181 broadcast bridge should keep an IPv4-only branch when RK_ENABLE_IPV6_SOCKET=0.",
+        "GB28181 broadcast bridge should keep an IPv4-only branch when RK_ENABLE_GB_IPV6_SOCKET=0.",
+    )
+    require(
+        "RK_ENABLE_IPV6_SOCKET" not in gb_broadcast,
+        "GB28181 broadcast bridge should not follow the global IPv6 socket switch.",
     )
 
     gb_listen_h = read_text(GB_LISTEN_H)
@@ -112,7 +135,7 @@ def main() -> int:
 
     gb_listen = read_text(GB_LISTEN)
     for token in (
-        "RK_ENABLE_IPV6_SOCKET",
+        "RK_ENABLE_GB_IPV6_SOCKET",
         "SocketCompat.h",
         "ResolveEndpoint",
         "CreateSocket",
@@ -121,31 +144,51 @@ def main() -> int:
         require(token in gb_listen, f"GB28181 listen bridge should use {token}.")
     require(
         "socket(AF_INET, sockType, 0)" in gb_listen,
-        "GB28181 listen bridge should keep an IPv4-only branch when RK_ENABLE_IPV6_SOCKET=0.",
+        "GB28181 listen bridge should keep an IPv4-only branch when RK_ENABLE_GB_IPV6_SOCKET=0.",
+    )
+    require(
+        "RK_ENABLE_IPV6_SOCKET" not in gb_listen,
+        "GB28181 listen bridge should not follow the global IPv6 socket switch.",
     )
 
     gb_net_shim = read_text(GB_NET_SHIM)
-    for token in ("RK_ENABLE_IPV6_SOCKET", "SocketCompat.h", "ResolveEndpoint", "CreateSocket"):
+    for token in ("RK_ENABLE_GB_IPV6_SOCKET", "SocketCompat.h", "ResolveEndpoint", "CreateSocket"):
         require(token in gb_net_shim, f"GB socket shim should use {token}.")
     require(
         "socket(AF_INET, SOCK_STREAM, 0)" in gb_net_shim,
-        "GB socket shim should keep an IPv4-only branch when RK_ENABLE_IPV6_SOCKET=0.",
+        "GB socket shim should keep an IPv4-only branch when RK_ENABLE_GB_IPV6_SOCKET=0.",
+    )
+    require(
+        "RK_ENABLE_IPV6_SOCKET" not in gb_net_shim,
+        "GB socket shim should not follow the global IPv6 socket switch.",
     )
 
     gb_sdp = read_text(GB_SDP_UTIL)
     for token in (
-        "RK_ENABLE_IPV6_SOCKET",
+        "RK_ENABLE_GB_IPV6_SOCKET",
         "ResolveSdpAddrType",
         "\"IP6\"",
         "sdp.SetOrigin",
         "conn.SetAddrType",
     ):
         require(token in gb_sdp, f"GB SDK SDP generation should use {token}.")
+    require(
+        "RK_ENABLE_IPV6_SOCKET" not in gb_sdp,
+        "GB SDK SDP generation should not follow the global IPv6 socket switch.",
+    )
+
+    gb_sip = read_text(GB_SIP_EVENT_MANAGER)
+    for token in (
+        "socket(AF_INET, SOCK_DGRAM, 0)",
+        "eXosip_listen_addr(m_sip_context, proco, NULL , actualLocalPort , AF_INET, 0)",
+        "eXosip_guess_localip(m_sip_context, AF_INET",
+    ):
+        require(token in gb_sip, f"GB SIP control path should remain IPv4-only via {token}.")
 
     protocol_manager = read_text(PROTOCOL_MANAGER)
     for token in (
         "SocketCompat.h",
-        "RK_ENABLE_IPV6_SOCKET",
+        "RK_ENABLE_GB_IPV6_SOCKET",
         "ResolveEndpoint",
         "SockaddrToString",
     ):

@@ -50,7 +50,7 @@ tint32 NET_SOCKET_AddConnect(tuint32 localIP, const char* pStrServerIP, tuint16 
         return -1;
     }
 
-#if RK_ENABLE_IPV6_SOCKET
+#if RK_ENABLE_GB_IPV6_SOCKET
     protocol::socket_compat::Endpoint endpoint;
     if (!protocol::socket_compat::ResolveEndpoint(pStrServerIP,
                                                    netPort,

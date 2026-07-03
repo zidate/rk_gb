@@ -453,7 +453,7 @@ int GB28181RtpPsSender::OpenTransportSocket()
     int family = AF_INET;
     protocol::socket_compat::Endpoint remoteEndpoint;
 
-#if RK_ENABLE_IPV6_SOCKET
+#if RK_ENABLE_GB_IPV6_SOCKET
     if (!m_param.target_ip.empty()) {
         if (!protocol::socket_compat::ResolveEndpoint(m_param.target_ip,
                                                        m_param.target_port,
@@ -481,7 +481,7 @@ int GB28181RtpPsSender::OpenTransportSocket()
     }
 
     if (isTcpPassive || m_param.local_port > 0) {
-#if RK_ENABLE_IPV6_SOCKET
+#if RK_ENABLE_GB_IPV6_SOCKET
         protocol::socket_compat::Endpoint localEndpoint;
         if (!protocol::socket_compat::BuildAnyEndpoint(family,
                                                         (m_param.local_port > 0) ? m_param.local_port : 0,
@@ -514,7 +514,7 @@ int GB28181RtpPsSender::OpenTransportSocket()
     memset(&m_state->remote_addr, 0, sizeof(m_state->remote_addr));
     m_state->remote_addr_len = 0;
     if (!m_param.target_ip.empty()) {
-#if RK_ENABLE_IPV6_SOCKET
+#if RK_ENABLE_GB_IPV6_SOCKET
         memcpy(&m_state->remote_addr, &remoteEndpoint.addr, sizeof(remoteEndpoint.addr));
         m_state->remote_addr_len = remoteEndpoint.len;
 #else
