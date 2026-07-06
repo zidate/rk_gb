@@ -9,6 +9,7 @@
 ### 修复
 - 修复 GB28181 与 GAT1400 启动耦合问题：`ProtocolManager::Start()/ReloadExternalConfig()/RestartGbRegisterService()` 现按 `gb_register.enabled` 门控 GB live/replay RTP/PS sender、广播、对讲、listen 和 GB client lifecycle；关闭 GB28181 时不再影响 GAT1400 独立启动。
 - 修复 GAT1400 对上连接缺少明确连接超时和双栈回退的问题：对上请求目标会按配置优先尝试 IPv6，失败后回退 IPv4，TCP 连接阶段使用非阻塞 `connect + select + SO_ERROR` 按 `request_timeout_ms` 超时退出。
+- 修复 GAT1400 双栈接入可能串平台 endpoint 的问题：注册成功后记录实际成功的 IPv4/IPv6 endpoint，后续保活、注销、上报和补传固定走该 endpoint，直到注销、心跳失败或重新注册。
 - 修正 RK830 构建优化参数基线：`Middleware/CMakeLists.txt` 的小写 `-o3` 保持禁用，避免 GCC 将其解析为输出参数；顶层 `CMakeLists.txt` 的大写 `-O3` 也保持禁用，因为现场反馈该构建虽能通过但编码启动会宕机。新增的构建参数回归检查同时拒绝主工程和 Middleware 中的 `-o3/-O3`。
 - 修复 GB28181 录像回放跨文件继续播放时平台侧缺少明确结束通知的问题：Storage 回放线程在单个 MP4 文件读到 EOF 后立即通过 NULL 回调触发协议层 `MediaStatus 121/eos`，并用 `bEosNotified` 防止最终结束块重复释放回放上下文。
 - 修复 GB28181 回放/下载混合 H264/H265 录像时编码协商与 PS 封装不一致的问题：回放建链先探测实际 MP4 录像 codec，200 OK SDP 的 `f=` 按录像 codec 改写，发送录像视频帧时按 `Mp4DemuxerFrameInfo_s::iCodeType` 选择 H264/H265 PS stream id，避免 H264 录像被当作 H265 或沿用平台请求编码导致播放失败。

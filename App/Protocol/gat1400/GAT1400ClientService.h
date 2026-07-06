@@ -126,7 +126,11 @@ private:
                        const std::string& contentType,
                        const std::string& body,
                        HttpResponse& response,
-                       const std::string* overrideUrl = NULL) const;
+                       const std::string* overrideUrl = NULL,
+                       bool useActiveEndpoint = true,
+                       std::string* selectedEndpointScheme = NULL,
+                       std::string* selectedEndpointHost = NULL,
+                       int* selectedEndpointPort = NULL) const;
 
     int PostJsonWithResponseStatus(const char* action,
                                    const char* path,
@@ -163,6 +167,10 @@ private:
     ProtocolExternalConfig m_cfg;
     bool m_started;
     bool m_registered;
+    bool m_active_endpoint_valid;
+    std::string m_active_endpoint_scheme;
+    std::string m_active_endpoint_host;
+    int m_active_endpoint_port;
     regist_state m_regist_state;
     int m_listen_fd;
     std::thread m_server_thread;
