@@ -50,6 +50,9 @@ static const int kKeepaliveDemoPanoramaWidth = 1920;
 static const int kKeepaliveDemoPanoramaHeight = 1080;
 static const int kKeepaliveDemoDefaultFaceWidth = 320;
 static const int kKeepaliveDemoDefaultFaceHeight = 320;
+static const int kEndpointUnspecified = 0;
+static const int kEndpointIpv4 = 4;
+static const int kEndpointIpv6 = 6;
 
 struct RequestTarget
 {
@@ -674,10 +677,7 @@ bool AddRequestTarget(std::vector<RequestTarget>& targets, const RequestTarget& 
 bool BuildRequestTargets(const ProtocolExternalConfig& cfg,
                          const std::string& path,
                          const std::string* overrideUrl,
-                         bool activeEndpointValid,
-                         const std::string& activeEndpointScheme,
-                         const std::string& activeEndpointHost,
-                         int activeEndpointPort,
+                         int activeEndpointFamily,
                          std::vector<RequestTarget>& out)
 {
     out.clear();
@@ -703,12 +703,19 @@ bool BuildRequestTargets(const ProtocolExternalConfig& cfg,
         relative.request_path = BuildRequestPath(cfg.gat_register.base_path, trimmed);
     }
 
-    if (activeEndpointValid) {
-        RequestTarget active = relative;
-        active.scheme = ToLowerCopy(activeEndpointScheme.empty() ? relative.scheme : activeEndpointScheme);
-        active.host = StripIpv6LiteralBrackets(activeEndpointHost);
-        active.port = activeEndpointPort;
-        AddRequestTarget(out, active);
+    if (activeEndpointFamily == kEndpointIpv6) {
+        RequestTarget ipv6 = relative;
+        ipv6.host = StripIpv6LiteralBrackets(cfg.gat_register.server_ipv6);
+        ipv6.port = cfg.gat_register.server_ipv6_port;
+        AddRequestTarget(out, ipv6);
+        return !out.empty();
+    }
+
+    if (activeEndpointFamily == kEndpointIpv4) {
+        RequestTarget ipv4 = relative;
+        ipv4.host = StripIpv6LiteralBrackets(cfg.gat_register.server_ip);
+        ipv4.port = cfg.gat_register.server_port;
+        AddRequestTarget(out, ipv4);
         return !out.empty();
     }
 
@@ -1401,8 +1408,7 @@ std::list<T> SliceBatch(typename std::list<T>::const_iterator& begin,
 GAT1400ClientService::GAT1400ClientService()
     : m_started(false),
       m_registered(false),
-      m_active_endpoint_valid(false),
-      m_active_endpoint_port(0),
+      m_active_endpoint_family(kEndpointUnspecified),
       m_regist_state(EM_REGIST_OFF),
       m_listen_fd(-1),
       m_server_running(false),
@@ -1977,38 +1983,16 @@ int GAT1400ClientService::ExecuteRequest(const ProtocolExternalConfig& cfg,
                                          const std::string& contentType,
                                          const std::string& body,
                                          HttpResponse& response,
-                                         const std::string* overrideUrl,
-                                         bool useActiveEndpoint,
-                                         std::string* selectedEndpointScheme,
-                                         std::string* selectedEndpointHost,
-                                         int* selectedEndpointPort) const
+                                         const std::string* overrideUrl) const
 {
-    if (selectedEndpointScheme != NULL) {
-        selectedEndpointScheme->clear();
-    }
-    if (selectedEndpointHost != NULL) {
-        selectedEndpointHost->clear();
-    }
-    if (selectedEndpointPort != NULL) {
-        *selectedEndpointPort = 0;
-    }
-
-    bool activeEndpointValid = false;
-    std::string activeEndpointScheme;
-    std::string activeEndpointHost;
-    int activeEndpointPort = 0;
+    int activeEndpointFamily = kEndpointUnspecified;
     const std::string overrideText = (overrideUrl == NULL) ? "" : TrimCopy(*overrideUrl);
     const bool absoluteOverride = !overrideText.empty() && overrideText.find("://") != std::string::npos;
-    if (useActiveEndpoint && !absoluteOverride) {
+    const bool isRegisterRequest = path == "/VIID/System/Register";
+    if (!absoluteOverride && !isRegisterRequest) {
         std::lock_guard<std::mutex> lock(m_state_mutex);
-        activeEndpointValid = m_registered &&
-                              m_active_endpoint_valid &&
-                              !m_active_endpoint_host.empty() &&
-                              m_active_endpoint_port > 0;
-        if (activeEndpointValid) {
-            activeEndpointScheme = m_active_endpoint_scheme;
-            activeEndpointHost = m_active_endpoint_host;
-            activeEndpointPort = m_active_endpoint_port;
+        if (m_registered) {
+            activeEndpointFamily = m_active_endpoint_family;
         }
     }
 
@@ -2016,10 +2000,7 @@ int GAT1400ClientService::ExecuteRequest(const ProtocolExternalConfig& cfg,
     if (!BuildRequestTargets(cfg,
                              path,
                              overrideUrl,
-                             activeEndpointValid,
-                             activeEndpointScheme,
-                             activeEndpointHost,
-                             activeEndpointPort,
+                             activeEndpointFamily,
                              targets)) {
         return -1;
     }
@@ -2098,15 +2079,7 @@ int GAT1400ClientService::ExecuteRequest(const ProtocolExternalConfig& cfg,
         }
 
         if (ret == 0) {
-            if (selectedEndpointScheme != NULL) {
-                *selectedEndpointScheme = target.scheme;
-            }
-            if (selectedEndpointHost != NULL) {
-                *selectedEndpointHost = target.host;
-            }
-            if (selectedEndpointPort != NULL) {
-                *selectedEndpointPort = target.port;
-            }
+            response.endpoint_family = protocol::socket_compat::IsIpv6Text(target.host) ? kEndpointIpv6 : kEndpointIpv4;
             return 0;
         }
 
@@ -2750,9 +2723,6 @@ int GAT1400ClientService::RegisterNow()
     }
 
     HttpResponse response;
-    std::string selectedEndpointScheme;
-    std::string selectedEndpointHost;
-    int selectedEndpointPort = 0;
     const int reqRet = ExecuteRequest(cfg,
                                       deviceId,
                                       "POST",
@@ -2760,16 +2730,12 @@ int GAT1400ClientService::RegisterNow()
                                       kJsonContentType,
                                       GAT1400Json::PackRegisterJson(deviceId.c_str()),
                                       response,
-                                      NULL,
-                                      false,
-                                      &selectedEndpointScheme,
-                                      &selectedEndpointHost,
-                                      &selectedEndpointPort);
+                                      NULL);
     if (reqRet != 0) {
         {
             std::lock_guard<std::mutex> lock(m_state_mutex);
             m_registered = false;
-            m_active_endpoint_valid = false;
+            m_active_endpoint_family = kEndpointUnspecified;
         }
         UpdateRegistState(EM_REGIST_OFF);
         return reqRet;
@@ -2780,30 +2746,28 @@ int GAT1400ClientService::RegisterNow()
         {
             std::lock_guard<std::mutex> lock(m_state_mutex);
             m_registered = false;
-            m_active_endpoint_valid = false;
+            m_active_endpoint_family = kEndpointUnspecified;
         }
         UpdateRegistState(EM_REGIST_OFF);
         return -2;
     }
 
+    int endpointFamily = kEndpointUnspecified;
     {
         std::lock_guard<std::mutex> lock(m_state_mutex);
         m_registered = true;
-        if (!selectedEndpointHost.empty() && selectedEndpointPort > 0) {
-            m_active_endpoint_valid = true;
-            m_active_endpoint_scheme = selectedEndpointScheme;
-            m_active_endpoint_host = selectedEndpointHost;
-            m_active_endpoint_port = selectedEndpointPort;
-        } else {
-            m_active_endpoint_valid = false;
-            m_active_endpoint_scheme.clear();
-            m_active_endpoint_host.clear();
-            m_active_endpoint_port = 0;
-        }
+        m_active_endpoint_family = response.endpoint_family;
+        endpointFamily = m_active_endpoint_family;
     }
     UpdateRegistState(EM_REGIST_ON);
+    std::string endpointText("unknown");
+    if (endpointFamily == kEndpointIpv6) {
+        endpointText = FormatHttpHost(cfg.gat_register.server_ipv6, cfg.gat_register.server_ipv6_port);
+    } else if (endpointFamily == kEndpointIpv4) {
+        endpointText = FormatHttpHost(cfg.gat_register.server_ip, cfg.gat_register.server_port);
+    }
     printf("[GAT1400] module=gat1400 event=register trace=client error=0 endpoint=%s device=%s listen=%d\n",
-           FormatHttpHost(selectedEndpointHost, selectedEndpointPort).c_str(),
+           endpointText.c_str(),
            deviceId.c_str(),
            cfg.gat_register.listen_port);
     ReplayPendingUploads();
@@ -2833,7 +2797,7 @@ int GAT1400ClientService::UnregisterNow()
     {
         std::lock_guard<std::mutex> lock(m_state_mutex);
         m_registered = false;
-        m_active_endpoint_valid = false;
+        m_active_endpoint_family = kEndpointUnspecified;
     }
     UpdateRegistState(EM_REGIST_OFF);
     if (reqRet != 0) {
@@ -3078,7 +3042,7 @@ void GAT1400ClientService::HeartbeatLoop()
         {
             std::lock_guard<std::mutex> lock(m_state_mutex);
             m_registered = false;
-            m_active_endpoint_valid = false;
+            m_active_endpoint_family = kEndpointUnspecified;
         }
         UpdateRegistState(EM_REGIST_OFF);
     }
@@ -3093,7 +3057,7 @@ int GAT1400ClientService::Start(const ProtocolExternalConfig& cfg, const GbRegis
         m_cfg = cfg;
         m_started = false;
         m_registered = false;
-        m_active_endpoint_valid = false;
+        m_active_endpoint_family = kEndpointUnspecified;
         m_regist_state = EM_REGIST_OFF;
         return 0;
     }
@@ -3109,7 +3073,7 @@ int GAT1400ClientService::Start(const ProtocolExternalConfig& cfg, const GbRegis
         m_cfg = cfg;
         m_started = true;
         m_registered = false;
-        m_active_endpoint_valid = false;
+        m_active_endpoint_family = kEndpointUnspecified;
         m_regist_state = EM_REGIST_OFF;
         if (StartServerLocked() != 0) {
             m_started = false;
@@ -3185,7 +3149,7 @@ void GAT1400ClientService::Stop()
         std::lock_guard<std::mutex> lock(m_state_mutex);
         StopServerLocked();
         m_registered = false;
-        m_active_endpoint_valid = false;
+        m_active_endpoint_family = kEndpointUnspecified;
         (void)shouldStop;
     }
 

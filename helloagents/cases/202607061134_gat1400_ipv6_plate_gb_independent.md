@@ -24,7 +24,7 @@
 
 - Add `gat1400.ini` fields `server_ipv6/server_ipv6_port`, expose them through `GatRegisterParam`, Web config state, config validation, config logs, and reload diff.
 - Build request targets as IPv6 first and IPv4 second during registration; absolute override URLs remain single-target by design.
-- Store the actual endpoint selected by successful registration and pin keepalive, unregister, normal uploads, and replayed uploads to that endpoint until unregister, keepalive failure, stop, or a new registration selection.
+- Store the IPv4/IPv6 family selected by successful registration and send keepalive, unregister, normal uploads, and replayed uploads to the corresponding configured endpoint until unregister, keepalive failure, stop, or a new registration selection.
 - Implement nonblocking `ConnectWithTimeout()` using `O_NONBLOCK`, `select(fd + 1, ...)`, and `SO_ERROR`, then restore original fd flags.
 - Add `NotifyGatPlateDetections()` and `LOWER_1400_NOTIFY_PLATEDETECTIONS()` by reusing `GAT_1400_Motor` and posting to `/VIID/MotorVehicles` through the same async queue policy as vehicle detection.
 - Extract `StartGbRuntimeServices()`, `StopGbRuntimeServices()`, and `RestartGbRuntimeServices()`. Gate GB runtime startup/reload/restart by `gb_register.enabled`, while allowing the GAT1400 start path to continue when GB is disabled.
