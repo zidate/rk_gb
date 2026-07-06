@@ -7,6 +7,8 @@
 ## [Unreleased]
 
 ### 修复
+- 修复 GB28181 与 GAT1400 启动耦合问题：`ProtocolManager::Start()/ReloadExternalConfig()/RestartGbRegisterService()` 现按 `gb_register.enabled` 门控 GB live/replay RTP/PS sender、广播、对讲、listen 和 GB client lifecycle；关闭 GB28181 时不再影响 GAT1400 独立启动。
+- 修复 GAT1400 对上连接缺少明确连接超时和双栈回退的问题：对上请求目标会按配置优先尝试 IPv6，失败后回退 IPv4，TCP 连接阶段使用非阻塞 `connect + select + SO_ERROR` 按 `request_timeout_ms` 超时退出。
 - 修正 RK830 构建优化参数基线：`Middleware/CMakeLists.txt` 的小写 `-o3` 保持禁用，避免 GCC 将其解析为输出参数；顶层 `CMakeLists.txt` 的大写 `-O3` 也保持禁用，因为现场反馈该构建虽能通过但编码启动会宕机。新增的构建参数回归检查同时拒绝主工程和 Middleware 中的 `-o3/-O3`。
 - 修复 GB28181 录像回放跨文件继续播放时平台侧缺少明确结束通知的问题：Storage 回放线程在单个 MP4 文件读到 EOF 后立即通过 NULL 回调触发协议层 `MediaStatus 121/eos`，并用 `bEosNotified` 防止最终结束块重复释放回放上下文。
 - 修复 GB28181 回放/下载混合 H264/H265 录像时编码协商与 PS 封装不一致的问题：回放建链先探测实际 MP4 录像 codec，200 OK SDP 的 `f=` 按录像 codec 改写，发送录像视频帧时按 `Mp4DemuxerFrameInfo_s::iCodeType` 选择 H264/H265 PS stream id，避免 H264 录像被当作 H265 或沿用平台请求编码导致播放失败。
@@ -29,6 +31,8 @@
 - 为恢复该分支的交叉编译验证能力，禁用根目录与 `Middleware` 的全局 `-o3/-O3` 参数，并重新跑通 `tools/issue_bot/build_verify.sh`。
 
 ### 新增
+- 新增 GAT1400 注册配置 `server_ipv6/server_ipv6_port`，本地 INI、Web 配置桥、配置 diff/reload 和请求目标构造均已接入。
+- 新增 GAT1400 车牌检测异步上报入口 `ProtocolManager::NotifyGatPlateDetections()`、`GAT1400ClientService::NotifyPlateDetections()` 与 `LOWER_1400_NOTIFY_PLATEDETECTIONS()`，复用 `GAT_1400_Motor` 车牌字段和 `/VIID/MotorVehicles` 资源。
 - 新增 `RK_ENABLE_IPV6_SOCKET` 应用层 socket 宏，默认关闭保持 IPv4-only 行为；开启后 GB28181 RTP/PS、广播/对讲、GB socket shim、GB SDK SDP 地址族、RTSP TCP/UDP RTP、GAT1400 callback listener、NTP UDP connect 和 DM/LwM2M UDP 等关键路径改用 IPv4/IPv6 兼容 socket。
 - 新增 `helloagents/wiki/modules/rk_soc_ipc_platform.md`、`rk_media_pipeline.md`、`rk_debug_playbook.md`，沉淀 RK SoC IPC 平台身份、PAL/DMC 媒体链路、录像/回放 codec 边界和常用排查路径；同时更新 overview 模块索引。
 - 新增 `helloagents/wiki/modules/external_module_demos.md`，给外部模块开发提供 GB 标准注册配置、零配置串码/MAC、GAT1400 注册配置、在线状态查询和 1400 结构化对象上报的文档型 C++ demo；不新增编译目标，也不改 Makefile/CMake。

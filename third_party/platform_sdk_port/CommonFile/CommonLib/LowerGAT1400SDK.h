@@ -25,6 +25,7 @@ EXPORT_GAT1400_SDK int LOWER_1400_GET_TIME(std::string& strTime);//获取时间
 EXPORT_GAT1400_SDK int LOWER_1400_POST_FACES(const std::list<GAT_1400_Face>& FaceList);//上报人脸
 EXPORT_GAT1400_SDK int LOWER_1400_POST_PERSONS(const std::list<GAT_1400_Person>& PersonList);//上报人
 EXPORT_GAT1400_SDK int LOWER_1400_POST_MOTORVEHICLES(const std::list<GAT_1400_Motor>& MotorVehicleList);//上报机动车
+EXPORT_GAT1400_SDK int LOWER_1400_NOTIFY_PLATEDETECTIONS(const std::list<GAT_1400_Motor>& MotorVehicleList);//异步上报车牌检测
 EXPORT_GAT1400_SDK int LOWER_1400_POST_NONMOTORVEHICLES(const std::list<GAT_1400_NonMotor>& NonmotorVehicleList);//上报非机动车
 EXPORT_GAT1400_SDK int LOWER_1400_POST_THINGS(const std::list<GAT_1400_Thing>& ThingList);//上报物品
 EXPORT_GAT1400_SDK int LOWER_1400_POST_SCENES(const std::list<GAT_1400_Scene>& SceneList);//上报场景

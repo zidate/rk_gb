@@ -107,7 +107,7 @@ std::string BuildConfigLogSummary(const protocol::ProtocolExternalConfig& cfg)
     char buffer[768] = {0};
     snprintf(buffer,
              sizeof(buffer),
-             "version=%s gb_enable=%d gb_mode=%s gb=%s:%d gb_id=%s string=%s redirect=%s/%s live=%s/%s:%d flip=%s gat=%s://%s:%d%s listen=%d timeout=%d queue=%s apes_post_compat=%d talk=%s/%d/%d broadcast=%s/%d listen=%s/%s:%d",
+             "version=%s gb_enable=%d gb_mode=%s gb=%s:%d gb_id=%s string=%s redirect=%s/%s live=%s/%s:%d flip=%s gat=%s://%s:%d ipv6=%s:%d%s listen=%d timeout=%d queue=%s apes_post_compat=%d talk=%s/%d/%d broadcast=%s/%d listen=%s/%s:%d",
              cfg.version.c_str(),
              cfg.gb_register.enabled,
              protocol::NormalizeGbRegisterMode(cfg.gb_register.register_mode).c_str(),
@@ -124,6 +124,8 @@ std::string BuildConfigLogSummary(const protocol::ProtocolExternalConfig& cfg)
              cfg.gat_register.scheme.c_str(),
              cfg.gat_register.server_ip.c_str(),
              cfg.gat_register.server_port,
+             cfg.gat_register.server_ipv6.c_str(),
+             cfg.gat_register.server_ipv6_port,
              cfg.gat_register.base_path.c_str(),
              cfg.gat_register.listen_port,
              cfg.gat_register.request_timeout_ms,
@@ -142,14 +144,16 @@ std::string BuildConfigLogSummary(const protocol::ProtocolExternalConfig& cfg)
 
 void LogConfigValidateFail(const protocol::ProtocolExternalConfig& cfg, int errorCode, const char* reason)
 {
-    printf("[Protocol][Config] module=config event=config_validate_fail trace=provider error=%d reason=%s version=%s gb=%s:%d gat=%s:%d\n",
+    printf("[Protocol][Config] module=config event=config_validate_fail trace=provider error=%d reason=%s version=%s gb=%s:%d gat=%s:%d gat_ipv6=%s:%d\n",
            errorCode,
            reason != NULL ? reason : "unknown",
            cfg.version.c_str(),
            cfg.gb_register.server_ip.c_str(),
            cfg.gb_register.server_port,
            cfg.gat_register.server_ip.c_str(),
-           cfg.gat_register.server_port);
+           cfg.gat_register.server_port,
+           cfg.gat_register.server_ipv6.c_str(),
+           cfg.gat_register.server_ipv6_port);
 }
 
 bool EnsureDirectoryExists(const char* dir)
@@ -296,6 +300,10 @@ int ValidateGatRegisterEditableFields(const protocol::GatRegisterParam& param)
         return -1;
     }
 
+    if (!param.server_ipv6.empty() && param.server_ipv6_port <= 0) {
+        return -5;
+    }
+
     if (param.listen_port <= 0) {
         return -2;
     }
@@ -406,6 +414,8 @@ bool LoadGatRegisterConfigFromFile(const char* path, protocol::GatRegisterParam&
     ReadIniString(ini, kLocalGatConfigSection, "scheme", path, out.scheme);
     ReadIniString(ini, kLocalGatConfigSection, "server_ip", path, out.server_ip);
     ReadIniInt(ini, kLocalGatConfigSection, "server_port", path, out.server_port);
+    ReadIniString(ini, kLocalGatConfigSection, "server_ipv6", path, out.server_ipv6);
+    ReadIniInt(ini, kLocalGatConfigSection, "server_ipv6_port", path, out.server_ipv6_port);
     ReadIniString(ini, kLocalGatConfigSection, "base_path", path, out.base_path);
     ReadIniString(ini, kLocalGatConfigSection, "device_id", path, out.device_id);
     ReadIniString(ini, kLocalGatConfigSection, "username", path, out.username);
@@ -504,6 +514,8 @@ int SaveLocalGatConfigFile(const protocol::GatRegisterParam& param)
     fprintf(fp, "scheme=%s\n", param.scheme.c_str());
     fprintf(fp, "server_ip=%s\n", param.server_ip.c_str());
     fprintf(fp, "server_port=%d\n", param.server_port);
+    fprintf(fp, "server_ipv6=%s\n", param.server_ipv6.c_str());
+    fprintf(fp, "server_ipv6_port=%d\n", param.server_ipv6_port);
     fprintf(fp, "base_path=%s\n", param.base_path.c_str());
     fprintf(fp, "device_id=%s\n", param.device_id.c_str());
     fprintf(fp, "username=%s\n", param.username.c_str());
@@ -902,6 +914,11 @@ int LocalConfigProvider::Validate(const ProtocolExternalConfig& cfg)
         cfg.gat_register.server_ip.empty() || cfg.gat_register.server_port <= 0) {
         LogConfigValidateFail(cfg, -7, "gat_register_endpoint");
         return -7;
+    }
+
+    if (!cfg.gat_register.server_ipv6.empty() && cfg.gat_register.server_ipv6_port <= 0) {
+        LogConfigValidateFail(cfg, -31, "gat_register_ipv6_endpoint");
+        return -31;
     }
 
     if (cfg.gat_register.listen_port <= 0) {

@@ -91,6 +91,7 @@ public:
     int PostApes(const std::list<GAT_1400_Ape>& apeList);
     int NotifyFaces(const std::list<GAT_1400_Face>& faceList);
     int NotifyMotorVehicles(const std::list<GAT_1400_Motor>& motorList);
+    int NotifyPlateDetections(const std::list<GAT_1400_Motor>& motorList);
     int NotifyNonMotorVehicles(const std::list<GAT_1400_NonMotor>& nonMotorList);
     std::list<GAT_1400_Subscribe> GetSubscriptions() const;
     int PostJsonWithResponseList(const char* action,
@@ -190,4 +191,3 @@ private:
 }
 
 #endif
-

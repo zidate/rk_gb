@@ -267,6 +267,8 @@ struct GatRegisterParam
     std::string scheme;
     std::string server_ip;
     int server_port;
+    std::string server_ipv6;
+    int server_ipv6_port;
     std::string base_path;
     std::string device_id;
     std::string username;
@@ -283,6 +285,7 @@ struct GatRegisterParam
         : enabled(1),
           scheme("http"),
           server_port(0),
+          server_ipv6_port(0),
           base_path(""),
           auth_method("digest"),
           listen_port(18080),

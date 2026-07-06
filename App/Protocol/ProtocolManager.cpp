@@ -4157,6 +4157,10 @@ static std::string BuildConfigDiffSummary(const protocol::ProtocolExternalConfig
 
     AppendConfigDiff(diff, "gat.register.server_port", before.gat_register.server_port, after.gat_register.server_port);
 
+    AppendConfigDiff(diff, "gat.register.server_ipv6", before.gat_register.server_ipv6, after.gat_register.server_ipv6);
+
+    AppendConfigDiff(diff, "gat.register.server_ipv6_port", before.gat_register.server_ipv6_port, after.gat_register.server_ipv6_port);
+
     AppendConfigDiff(diff, "gat.register.base_path", before.gat_register.base_path, after.gat_register.base_path);
 
     AppendConfigDiff(diff, "gat.register.device_id", before.gat_register.device_id, after.gat_register.device_id);
@@ -5055,94 +5059,12 @@ int ProtocolManager::Start()
 
 
 
-    int ret = m_gb_live_media_runtime.sender.Init(m_cfg.gb_live);
-
-    if (ret != 0) {
-
-        printf("[ProtocolManager] init live RTP/PS sender failed: %d\n", ret);
-
-        return ret;
-
-    }
-
-    ret = m_gb_live_media_runtime.sender.OpenSession();
-
-    if (ret != 0) {
-
-        printf("[ProtocolManager] open live RTP/PS session failed: %d\n", ret);
-
-        return ret;
-
-    }
-
-    ret = m_gb_replay_media_runtime.sender.Init(m_cfg.gb_live);
-
-    if (ret != 0) {
-
-        printf("[ProtocolManager] init replay RTP/PS sender failed: %d\n", ret);
-
-        m_gb_live_media_runtime.sender.CloseSession();
-
-        return ret;
-
-    }
-
-
-
-    ret = m_broadcast.StartSession(m_cfg.gb_broadcast);
-
-    if (ret != 0) {
-
-        printf("[ProtocolManager] start broadcast session failed: %d\n", ret);
-
-        m_gb_live_media_runtime.sender.CloseSession();
-        m_gb_replay_media_runtime.sender.CloseSession();
-
-        return ret;
-
-    }
-
-    ret = m_talk_broadcast.StartSession(BuildGbTalkBridgeParam(m_cfg));
-
-    if (ret != 0) {
-
-        printf("[ProtocolManager] start talk session failed: %d\n", ret);
-
-        m_broadcast.StopSession();
-
-        m_gb_live_media_runtime.sender.CloseSession();
-        m_gb_replay_media_runtime.sender.CloseSession();
-
-        return ret;
-
-    }
-
-
-
-    if (ShouldAutoStartGbListen(m_cfg.gb_listen)) {
-        ret = m_listen.StartSession(m_cfg.gb_listen);
-
-        if (ret != 0) {
-
-            printf("[ProtocolManager] start listen session failed: %d\n", ret);
-
-            m_talk_broadcast.StopSession();
-
-            m_broadcast.StopSession();
-
-            m_gb_live_media_runtime.sender.CloseSession();
-            m_gb_replay_media_runtime.sender.CloseSession();
-
-            return ret;
-
-        }
-    } else {
-        printf("[ProtocolManager] skip listen session auto start target=%s:%d\n",
-               m_cfg.gb_listen.target_ip.c_str(),
-               m_cfg.gb_listen.target_port);
-    }
-
     if (m_cfg.gb_register.enabled != 0) {
+        int ret = StartGbRuntimeServices();
+        if (ret != 0) {
+            return ret;
+        }
+
         BindGbClientSdk();
         ret = StartGbClientLifecycle();
 
@@ -5150,33 +5072,23 @@ int ProtocolManager::Start()
 
             printf("[ProtocolManager] start gb client lifecycle failed: %d\n", ret);
 
-            m_listen.StopSession();
-
-            m_talk_broadcast.StopSession();
-
-            m_broadcast.StopSession();
-
-            m_gb_live_media_runtime.sender.CloseSession();
-            m_gb_replay_media_runtime.sender.CloseSession();
+            StopGbRuntimeServices();
 
             return ret;
 
         }
     } else {
+        printf("[ProtocolManager] skip gb runtime services because config disabled\n");
         printf("[ProtocolManager] skip gb client lifecycle because config disabled\n");
     }
 
     if (m_gat_client.get() != NULL) {
         if (m_cfg.gat_register.enabled != 0) {
-            ret = m_gat_client->Start(m_cfg, m_cfg.gb_register);
+            int ret = m_gat_client->Start(m_cfg, m_cfg.gb_register);
             if (ret != 0) {
                 printf("[ProtocolManager] start gat1400 client failed: %d\n", ret);
                 StopGbClientLifecycle();
-                m_talk_broadcast.StopSession();
-                m_listen.StopSession();
-                m_broadcast.StopSession();
-                m_gb_live_media_runtime.sender.CloseSession();
-                m_gb_replay_media_runtime.sender.CloseSession();
+                StopGbRuntimeServices();
                 return ret;
             }
         } else {
@@ -5211,7 +5123,7 @@ void ProtocolManager::Stop()
 
     if (!m_started) {
 
-        StopGbLiveCapture();
+        StopGbRuntimeServices();
 
         return;
 
@@ -5219,16 +5131,7 @@ void ProtocolManager::Stop()
 
 
 
-    StopGbLiveCapture();
-
-    m_talk_broadcast.StopSession();
-
-    m_listen.StopSession();
-
-    m_broadcast.StopSession();
-
-    m_gb_live_media_runtime.sender.CloseSession();
-    m_gb_replay_media_runtime.sender.CloseSession();
+    StopGbRuntimeServices();
 
 
 
@@ -5363,6 +5266,10 @@ int ProtocolManager::ReloadExternalConfig()
 
                            (m_cfg.gat_register.server_port != latest.gat_register.server_port) ||
 
+                           (m_cfg.gat_register.server_ipv6 != latest.gat_register.server_ipv6) ||
+
+                           (m_cfg.gat_register.server_ipv6_port != latest.gat_register.server_ipv6_port) ||
+
                            (m_cfg.gat_register.base_path != latest.gat_register.base_path) ||
 
                            (m_cfg.gat_register.device_id != latest.gat_register.device_id) ||
@@ -5407,6 +5314,8 @@ int ProtocolManager::ReloadExternalConfig()
 
                            (m_cfg.gat_capture.concurrent_limit != latest.gat_capture.concurrent_limit);
 
+    const bool wasGbRegisterEnabled = (m_cfg.gb_register.enabled != 0);
+
 
 
     const std::string diffSummary = BuildConfigDiffSummary(m_cfg, latest);
@@ -5434,87 +5343,128 @@ int ProtocolManager::ReloadExternalConfig()
 
     if (m_started) {
 
-        if (restartBroadcast) {
+        bool gbClientStoppedForDisable = false;
 
-            const int broadcastRet = m_broadcast.StartSession(m_cfg.gb_broadcast);
+        if (m_cfg.gb_register.enabled != 0) {
 
-            if (broadcastRet != 0) {
+            if (!wasGbRegisterEnabled) {
 
-                printf("[ProtocolManager] module=config event=config_apply_fail trace=manager error=%d stage=gb_broadcast_restart version=%s\n",
+                const int runtimeRet = RestartGbRuntimeServices("config_enable");
 
-                       broadcastRet,
+                if (runtimeRet != 0) {
 
-                       m_cfg.version.c_str());
+                    printf("[ProtocolManager] module=config event=config_apply_fail trace=manager error=%d stage=gb_runtime_restart version=%s\n",
 
-                return broadcastRet;
-
-            }
-
-
-
-            printf("[ProtocolManager] module=config event=config_apply_success trace=manager error=0 stage=gb_broadcast_restart version=%s\n",
-
-                   m_cfg.version.c_str());
-
-        }
-
-        if (restartTalk) {
-
-            const int talkRet = RestartGbTalkBridge("config_reload");
-
-            if (talkRet != 0) {
-
-                printf("[ProtocolManager] module=config event=config_apply_fail trace=manager error=%d stage=gb_talk_restart version=%s\n",
-
-                       talkRet,
-
-                       m_cfg.version.c_str());
-
-                return talkRet;
-
-            }
-
-            printf("[ProtocolManager] module=config event=config_apply_success trace=manager error=0 stage=gb_talk_restart version=%s\n",
-
-                   m_cfg.version.c_str());
-
-        }
-
-
-
-        if (restartListen) {
-
-            if (ShouldAutoStartGbListen(m_cfg.gb_listen)) {
-                const int listenRet = m_listen.StartSession(m_cfg.gb_listen);
-
-                if (listenRet != 0) {
-
-                    printf("[ProtocolManager] module=config event=config_apply_fail trace=manager error=%d stage=gb_listen_restart version=%s\n",
-
-                           listenRet,
+                           runtimeRet,
 
                            m_cfg.version.c_str());
 
-                    return listenRet;
+                    return runtimeRet;
 
                 }
 
-                printf("[ProtocolManager] module=config event=config_apply_success trace=manager error=0 stage=gb_listen_restart version=%s\n",
+                printf("[ProtocolManager] module=config event=config_apply_success trace=manager error=0 stage=gb_runtime_restart version=%s\n",
 
                        m_cfg.version.c_str());
+
             } else {
-                m_listen.StopSession();
-                printf("[ProtocolManager] module=config event=config_apply_success trace=manager error=0 stage=gb_listen_skip version=%s target=%s:%d\n",
-                       m_cfg.version.c_str(),
-                       m_cfg.gb_listen.target_ip.c_str(),
-                       m_cfg.gb_listen.target_port);
+
+                if (restartBroadcast) {
+
+                    const int broadcastRet = m_broadcast.StartSession(m_cfg.gb_broadcast);
+
+                    if (broadcastRet != 0) {
+
+                        printf("[ProtocolManager] module=config event=config_apply_fail trace=manager error=%d stage=gb_broadcast_restart version=%s\n",
+
+                               broadcastRet,
+
+                               m_cfg.version.c_str());
+
+                        return broadcastRet;
+
+                    }
+
+
+
+                    printf("[ProtocolManager] module=config event=config_apply_success trace=manager error=0 stage=gb_broadcast_restart version=%s\n",
+
+                           m_cfg.version.c_str());
+
+                }
+
+                if (restartTalk) {
+
+                    const int talkRet = RestartGbTalkBridge("config_reload");
+
+                    if (talkRet != 0) {
+
+                        printf("[ProtocolManager] module=config event=config_apply_fail trace=manager error=%d stage=gb_talk_restart version=%s\n",
+
+                               talkRet,
+
+                               m_cfg.version.c_str());
+
+                        return talkRet;
+
+                    }
+
+                    printf("[ProtocolManager] module=config event=config_apply_success trace=manager error=0 stage=gb_talk_restart version=%s\n",
+
+                           m_cfg.version.c_str());
+
+                }
+
+
+
+                if (restartListen) {
+
+                    if (ShouldAutoStartGbListen(m_cfg.gb_listen)) {
+                        const int listenRet = m_listen.StartSession(m_cfg.gb_listen);
+
+                        if (listenRet != 0) {
+
+                            printf("[ProtocolManager] module=config event=config_apply_fail trace=manager error=%d stage=gb_listen_restart version=%s\n",
+
+                                   listenRet,
+
+                                   m_cfg.version.c_str());
+
+                            return listenRet;
+
+                        }
+
+                        printf("[ProtocolManager] module=config event=config_apply_success trace=manager error=0 stage=gb_listen_restart version=%s\n",
+
+                               m_cfg.version.c_str());
+                    } else {
+                        m_listen.StopSession();
+                        printf("[ProtocolManager] module=config event=config_apply_success trace=manager error=0 stage=gb_listen_skip version=%s target=%s:%d\n",
+                               m_cfg.version.c_str(),
+                               m_cfg.gb_listen.target_ip.c_str(),
+                               m_cfg.gb_listen.target_port);
+                    }
+
+                }
+
             }
+
+        } else {
+
+            StopGbClientLifecycle();
+            gbClientStoppedForDisable = true;
+            StopGbRuntimeServices();
+            printf("[ProtocolManager] module=config event=config_apply_success trace=manager error=0 stage=gb_runtime_skip version=%s reason=disabled\n",
+                   m_cfg.version.c_str());
 
         }
 
         if (reloadGbLifecycle) {
-            StopGbClientLifecycle();
+            if (!gbClientStoppedForDisable) {
+                StopGbClientLifecycle();
+            }
             if (m_cfg.gb_register.enabled != 0) {
+                BindGbClientSdk();
                 const int regRet = StartGbClientLifecycle();
 
                 if (regRet != 0) {
@@ -5586,6 +5536,138 @@ int ProtocolManager::ReloadExternalConfig()
 
 
     return 0;
+
+}
+
+
+
+int ProtocolManager::StartGbRuntimeServices()
+
+{
+
+    int ret = m_gb_live_media_runtime.sender.Init(m_cfg.gb_live);
+
+    if (ret != 0) {
+
+        printf("[ProtocolManager] init live RTP/PS sender failed: %d\n", ret);
+
+        return ret;
+
+    }
+
+    ret = m_gb_live_media_runtime.sender.OpenSession();
+
+    if (ret != 0) {
+
+        printf("[ProtocolManager] open live RTP/PS session failed: %d\n", ret);
+
+        m_gb_live_media_runtime.sender.CloseSession();
+
+        return ret;
+
+    }
+
+    ret = m_gb_replay_media_runtime.sender.Init(m_cfg.gb_live);
+
+    if (ret != 0) {
+
+        printf("[ProtocolManager] init replay RTP/PS sender failed: %d\n", ret);
+
+        m_gb_live_media_runtime.sender.CloseSession();
+
+        return ret;
+
+    }
+
+
+
+    ret = m_broadcast.StartSession(m_cfg.gb_broadcast);
+
+    if (ret != 0) {
+
+        printf("[ProtocolManager] start broadcast session failed: %d\n", ret);
+
+        m_gb_live_media_runtime.sender.CloseSession();
+        m_gb_replay_media_runtime.sender.CloseSession();
+
+        return ret;
+
+    }
+
+    ret = m_talk_broadcast.StartSession(BuildGbTalkBridgeParam(m_cfg));
+
+    if (ret != 0) {
+
+        printf("[ProtocolManager] start talk session failed: %d\n", ret);
+
+        m_broadcast.StopSession();
+
+        m_gb_live_media_runtime.sender.CloseSession();
+        m_gb_replay_media_runtime.sender.CloseSession();
+
+        return ret;
+
+    }
+
+
+
+    if (ShouldAutoStartGbListen(m_cfg.gb_listen)) {
+        ret = m_listen.StartSession(m_cfg.gb_listen);
+
+        if (ret != 0) {
+
+            printf("[ProtocolManager] start listen session failed: %d\n", ret);
+
+            m_talk_broadcast.StopSession();
+
+            m_broadcast.StopSession();
+
+            m_gb_live_media_runtime.sender.CloseSession();
+            m_gb_replay_media_runtime.sender.CloseSession();
+
+            return ret;
+
+        }
+    } else {
+        printf("[ProtocolManager] skip listen session auto start target=%s:%d\n",
+               m_cfg.gb_listen.target_ip.c_str(),
+               m_cfg.gb_listen.target_port);
+    }
+
+    return 0;
+
+}
+
+
+
+void ProtocolManager::StopGbRuntimeServices()
+
+{
+
+    StopGbLiveCapture();
+
+    m_talk_broadcast.StopSession();
+
+    m_listen.StopSession();
+
+    m_broadcast.StopSession();
+
+    m_gb_live_media_runtime.sender.CloseSession();
+    m_gb_replay_media_runtime.sender.CloseSession();
+
+}
+
+
+
+int ProtocolManager::RestartGbRuntimeServices(const char* reason)
+
+{
+
+    printf("[ProtocolManager] restart gb runtime services reason=%s\n", reason != NULL ? reason : "");
+
+    StopGbRuntimeServices();
+
+    return StartGbRuntimeServices();
 
 }
 
@@ -6491,6 +6573,7 @@ int ProtocolManager::RestartGbRegisterService()
     }
 
     const bool wasLifecycleRunning = m_gb_heartbeat_running.load() || m_gb_client_started || m_gb_client_registered;
+    const bool wasGbRegisterEnabled = (m_cfg.gb_register.enabled != 0);
 
     m_cfg.gb_register = latest;
     m_gb_device_name = m_cfg.gb_register.device_name;
@@ -6508,6 +6591,9 @@ int ProtocolManager::RestartGbRegisterService()
     }
 
     if (m_cfg.gb_register.enabled == 0) {
+        if (wasGbRegisterEnabled) {
+            StopGbRuntimeServices();
+        }
         printf("[ProtocolManager] module=config event=gb_register_restart_success trace=manager error=0 stage=%s started=1 enabled=0 gb=%s:%d\n",
                wasLifecycleRunning ? "gb_disable" : "gb_skip",
                m_cfg.gb_register.server_ip.c_str(),
@@ -6515,8 +6601,23 @@ int ProtocolManager::RestartGbRegisterService()
         return 0;
     }
 
+    if (!wasGbRegisterEnabled) {
+        const int runtimeRet = RestartGbRuntimeServices("gb_register_restart_enable");
+        if (runtimeRet != 0) {
+            printf("[ProtocolManager] module=config event=gb_register_restart_fail trace=manager error=%d stage=gb_runtime_start started=1 enabled=1 gb=%s:%d\n",
+                   runtimeRet,
+                   m_cfg.gb_register.server_ip.c_str(),
+                   m_cfg.gb_register.server_port);
+            return runtimeRet;
+        }
+    }
+
+    BindGbClientSdk();
     const int startRet = StartGbClientLifecycle();
     if (startRet != 0) {
+        if (!wasGbRegisterEnabled) {
+            StopGbRuntimeServices();
+        }
         printf("[ProtocolManager] module=config event=gb_register_restart_fail trace=manager error=%d stage=%s started=1 enabled=1 gb=%s:%d\n",
                startRet,
                wasLifecycleRunning ? "gb_restart" : "gb_start",
@@ -6547,13 +6648,15 @@ int ProtocolManager::SetGatRegisterConfig(const GatRegisterParam& param)
 
     GatRegisterParam latest = LocalConfigProvider::BuildDefaultGatRegisterConfig();
     const int loadRet = LocalConfigProvider::LoadOrCreateGatRegisterConfig(latest);
-    printf("[ProtocolManager] module=config event=gat_register_set_success trace=manager error=%d stage=persist started=%d enabled=%d gat=%s://%s:%d listen=%d\n",
+    printf("[ProtocolManager] module=config event=gat_register_set_success trace=manager error=%d stage=persist started=%d enabled=%d gat=%s://%s:%d gat_ipv6=%s:%d listen=%d\n",
            loadRet,
            m_started ? 1 : 0,
            latest.enabled != 0 ? 1 : 0,
            latest.scheme.c_str(),
            latest.server_ip.c_str(),
            latest.server_port,
+           latest.server_ipv6.c_str(),
+           latest.server_ipv6_port,
            latest.listen_port);
     return 0;
 }
@@ -6587,33 +6690,39 @@ int ProtocolManager::RestartGatRegisterService()
     m_cfg.gat_register = latest;
 
     if (!m_started || m_gat_client.get() == NULL) {
-        printf("[ProtocolManager] module=config event=gat_register_restart_success trace=manager error=0 stage=cache_only started=%d enabled=%d gat=%s://%s:%d listen=%d\n",
+        printf("[ProtocolManager] module=config event=gat_register_restart_success trace=manager error=0 stage=cache_only started=%d enabled=%d gat=%s://%s:%d gat_ipv6=%s:%d listen=%d\n",
                m_started ? 1 : 0,
                m_cfg.gat_register.enabled != 0 ? 1 : 0,
                m_cfg.gat_register.scheme.c_str(),
                m_cfg.gat_register.server_ip.c_str(),
                m_cfg.gat_register.server_port,
+               m_cfg.gat_register.server_ipv6.c_str(),
+               m_cfg.gat_register.server_ipv6_port,
                m_cfg.gat_register.listen_port);
         return 0;
     }
 
     const int reloadRet = m_gat_client->Reload(m_cfg, m_cfg.gb_register);
     if (reloadRet != 0) {
-        printf("[ProtocolManager] module=config event=gat_register_restart_fail trace=manager error=%d stage=gat_reload started=1 enabled=%d gat=%s://%s:%d listen=%d\n",
+        printf("[ProtocolManager] module=config event=gat_register_restart_fail trace=manager error=%d stage=gat_reload started=1 enabled=%d gat=%s://%s:%d gat_ipv6=%s:%d listen=%d\n",
                reloadRet,
                m_cfg.gat_register.enabled != 0 ? 1 : 0,
                m_cfg.gat_register.scheme.c_str(),
                m_cfg.gat_register.server_ip.c_str(),
                m_cfg.gat_register.server_port,
+               m_cfg.gat_register.server_ipv6.c_str(),
+               m_cfg.gat_register.server_ipv6_port,
                m_cfg.gat_register.listen_port);
         return reloadRet;
     }
 
-    printf("[ProtocolManager] module=config event=gat_register_restart_success trace=manager error=0 stage=gat_reload started=1 enabled=%d gat=%s://%s:%d listen=%d\n",
+    printf("[ProtocolManager] module=config event=gat_register_restart_success trace=manager error=0 stage=gat_reload started=1 enabled=%d gat=%s://%s:%d gat_ipv6=%s:%d listen=%d\n",
            m_cfg.gat_register.enabled != 0 ? 1 : 0,
            m_cfg.gat_register.scheme.c_str(),
            m_cfg.gat_register.server_ip.c_str(),
            m_cfg.gat_register.server_port,
+           m_cfg.gat_register.server_ipv6.c_str(),
+           m_cfg.gat_register.server_ipv6_port,
            m_cfg.gat_register.listen_port);
     return 0;
 }
@@ -9774,6 +9883,19 @@ int ProtocolManager::NotifyGatMotorVehicles(const std::list<GAT_1400_Motor>& mot
 
     const int ret = m_gat_client->NotifyMotorVehicles(motorList);
     printf("[ProtocolManager] module=gat1400 event=post_motor trace=manager error=%d count=%zu\n",
+           ret,
+           motorList.size());
+    return ret;
+}
+
+int ProtocolManager::NotifyGatPlateDetections(const std::list<GAT_1400_Motor>& motorList)
+{
+    if (m_gat_client.get() == NULL) {
+        return -94;
+    }
+
+    const int ret = m_gat_client->NotifyPlateDetections(motorList);
+    printf("[ProtocolManager] module=gat1400 event=post_plate trace=manager error=%d count=%zu\n",
            ret,
            motorList.size());
     return ret;

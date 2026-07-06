@@ -97,6 +97,8 @@ int UpdateGat1400RegisterDemo(bool enable)
     cfg.scheme = "http";
     cfg.server_ip = "192.0.2.20";
     cfg.server_port = 8080;
+    cfg.server_ipv6 = "2001:db8::20";
+    cfg.server_ipv6_port = 8080;
     cfg.base_path = "";
     cfg.device_id = "34020000001190000001";
     cfg.username = "gat-user";
@@ -120,6 +122,7 @@ int UpdateGat1400RegisterDemo(bool enable)
 
 注意：
 - `enabled=0` 会保存停服态配置；协议栈运行中再调用 `RestartGatRegisterService()` 会注销并停止 1400 服务。
+- `server_ipv6/server_ipv6_port` 可不填；同时配置 IPv6 和 IPv4 时，GAT1400 对上请求先尝试 IPv6，失败后回退 IPv4。
 - 配置模型允许 `scheme=https`，但当前发送实现仍只真正支持 HTTP；平台要求 HTTPS 时需要补 TLS 链路。
 
 ## 4. 查询 GB28181 / GAT1400 在线状态
@@ -183,6 +186,27 @@ int NotifyGatMotorVehicleDemo()
 
     return protocol::ProtocolManager::Instance().NotifyGatMotorVehicles(motors);
 }
+
+int NotifyGatPlateDetectionDemo()
+{
+    GAT_1400_Motor motor;
+    CopyField(motor.MotorVehicleID, "plate-20260706-0001");
+    CopyField(motor.SourceID, "image-source-20260706-0001");
+    CopyField(motor.DeviceID, "34020000001190000001");
+    motor.InfoKind = 1;
+    motor.LeftTopX = 140;
+    motor.LeftTopY = 180;
+    motor.RightBtmX = 460;
+    motor.RightBtmY = 360;
+    motor.HasPlate = true;
+    motor.PlateColor = COLOR_BLUE;
+    CopyField(motor.PlateNo, "TEST12345");
+
+    std::list<GAT_1400_Motor> motors;
+    motors.push_back(motor);
+
+    return protocol::ProtocolManager::Instance().NotifyGatPlateDetections(motors);
+}
 ```
 
 人脸和非机动车入口类似：
@@ -226,9 +250,10 @@ int NotifyGatNonMotorDemo()
 ```
 
 注意：
-- `NotifyGatFaces()`、`NotifyGatMotorVehicles()`、`NotifyGatNonMotorVehicles()` 会快速返回；返回 `0` 表示协议模块已接收并完成入队。
+- `NotifyGatFaces()`、`NotifyGatMotorVehicles()`、`NotifyGatPlateDetections()`、`NotifyGatNonMotorVehicles()` 会快速返回；返回 `0` 表示协议模块已接收并完成入队。
+- 车牌检测不新增 `GAT_1400_Plate` 对象，直接使用 `GAT_1400_Motor` 的 `HasPlate/PlateNo/PlateColor` 等字段，资源仍是 `/VIID/MotorVehicles`。
 - 若 1400 已注册，会立即唤醒后台发送；若未注册，则等待注册恢复后回放。
-- 当前这 3 个入口单条最多总发送 2 次，即首次发送加 1 次重发。
+- 当前这些入口单条最多总发送 2 次，即首次发送加 1 次重发。
 - 这些入口只上报结构化对象本体，不会自动补图像、视频或文件。调用方如需上传图片 / 视频 / 文件，需继续走 `LOWER_1400_POST_IMAGES()`、`LOWER_1400_POST_VIDEOSLICES()`、`LOWER_1400_POST_FILES()` 或对应 `Post*` 链路自行编排。
 
 ## 6. 使用 LowerGAT1400SDK 兼容导出面
@@ -244,11 +269,17 @@ int LowerSdkPostMotorVehicleDemo(const std::list<GAT_1400_Motor>& motors)
 {
     return LOWER_1400_POST_MOTORVEHICLES(motors);
 }
+
+int LowerSdkNotifyPlateDetectionDemo(const std::list<GAT_1400_Motor>& motors)
+{
+    return LOWER_1400_NOTIFY_PLATEDETECTIONS(motors);
+}
 ```
 
 注意：
 - `LOWER_1400_POST_*` 直接进入当前进程内 `GAT1400ClientService::Post*` 主链路。
-- 如果只是人脸、机动车、非机动车结构化对象上报，优先使用 `ProtocolManager::NotifyGat*()`，因为它们已经收口为非阻塞异步入队语义。
+- 如果只是人脸、机动车、车牌检测、非机动车结构化对象上报，优先使用 `ProtocolManager::NotifyGat*()`，因为它们已经收口为非阻塞异步入队语义。
+- 兼容 Lower SDK 调用面新增 `LOWER_1400_NOTIFY_PLATEDETECTIONS()`，语义与 `NotifyGatPlateDetections()` 一致。
 - `LOWER_1400_GET_TIME()` 当前为 no-op，不再真正访问 `/VIID/System/Time`。
 
 ## 常见错误

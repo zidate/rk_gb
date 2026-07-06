@@ -91,6 +91,8 @@ static int my_config_handler(const device_state_t *state) {
     printf("gat1400_enable    : %d\n", state->gat1400_enable);
     printf("gat1400_ip        : %s\n", state->gat1400_ip);
     printf("gat1400_port      : %s\n", state->gat1400_port);
+    printf("gat1400_ipv6      : %s\n", state->gat1400_ipv6);
+    printf("gat1400_ipv6_port : %s\n", state->gat1400_ipv6_port);
     printf("gat1400_user      : %s\n", state->gat1400_user);
     printf("gat1400_device_id : %s\n", state->gat1400_device_id);
     printf("gat1400_password  : %s\n", state->gat1400_password);
@@ -238,6 +240,8 @@ static int my_config_handler(const device_state_t *state) {
     gatParam.enabled = state->gat1400_enable;
     gatParam.server_ip = state->gat1400_ip;
     gatParam.server_port = atoi(state->gat1400_port);
+    gatParam.server_ipv6 = state->gat1400_ipv6;
+    gatParam.server_ipv6_port = atoi(state->gat1400_ipv6_port);
     gatParam.device_id = state->gat1400_device_id;
     gatParam.username = state->gat1400_user;
     gatParam.password = state->gat1400_password;
@@ -440,10 +444,12 @@ static void *thread_web_server(void *args)
 		snprintf(verify_status.gb_device_id, sizeof(verify_status.gb_device_id), gbParam.device_id.c_str()); //设备编码
 		snprintf(verify_status.gb_password, sizeof(verify_status.gb_password), gbParam.password.c_str());				 //设备密码
 
-		verify_status.gat1400_enable = gatParam.enabled;
-		snprintf(verify_status.gat1400_ip, sizeof(verify_status.gat1400_ip), gatParam.server_ip.c_str());		//接入IP
-		snprintf(verify_status.gat1400_port, sizeof(verify_status.gat1400_port), "%d", gatParam.server_port);					//接入端口号
-		snprintf(verify_status.gat1400_user, sizeof(verify_status.gat1400_user), gatParam.username.c_str());		//设备用户
+			verify_status.gat1400_enable = gatParam.enabled;
+			snprintf(verify_status.gat1400_ip, sizeof(verify_status.gat1400_ip), gatParam.server_ip.c_str());		//接入IP
+			snprintf(verify_status.gat1400_port, sizeof(verify_status.gat1400_port), "%d", gatParam.server_port);					//接入端口号
+			snprintf(verify_status.gat1400_ipv6, sizeof(verify_status.gat1400_ipv6), "%s", gatParam.server_ipv6.c_str());		//IPv6接入IP
+			snprintf(verify_status.gat1400_ipv6_port, sizeof(verify_status.gat1400_ipv6_port), "%d", gatParam.server_ipv6_port);	//IPv6接入端口号
+			snprintf(verify_status.gat1400_user, sizeof(verify_status.gat1400_user), gatParam.username.c_str());		//设备用户
 		snprintf(verify_status.gat1400_device_id, sizeof(verify_status.gat1400_device_id), gatParam.device_id.c_str()); //设备编码
 		snprintf(verify_status.gat1400_password, sizeof(verify_status.gat1400_password), gatParam.password.c_str());				 //设备密码
 		
@@ -455,6 +461,8 @@ static void *thread_web_server(void *args)
 		printf("gb_password  : %s\n", verify_status.gb_password);
 		printf("gat1400_ip		  : %s\n", verify_status.gat1400_ip);
 		printf("gat1400_port	  : %s\n", verify_status.gat1400_port);
+		printf("gat1400_ipv6	  : %s\n", verify_status.gat1400_ipv6);
+		printf("gat1400_ipv6_port: %s\n", verify_status.gat1400_ipv6_port);
 		printf("gat1400_user	  : %s\n", verify_status.gat1400_user);
 		printf("gat1400_device_id : %s\n", verify_status.gat1400_device_id);
 		printf("gat1400_password  : %s\n", verify_status.gat1400_password);

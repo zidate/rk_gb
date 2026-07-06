@@ -165,6 +165,7 @@ public:
     int NotifyGbAlarm(AlarmNotifyInfo* info);
     int NotifyGatFaces(const std::list<GAT_1400_Face>& faceList);
     int NotifyGatMotorVehicles(const std::list<GAT_1400_Motor>& motorList);
+    int NotifyGatPlateDetections(const std::list<GAT_1400_Motor>& motorList);
     int NotifyGatNonMotorVehicles(const std::list<GAT_1400_NonMotor>& nonMotorList);
 
     int NotifyGbMobilePosition(const MobilePositionInfo* info);
@@ -561,6 +562,12 @@ private:
 
                             RtpMap& outMap) const;
 
+    int StartGbRuntimeServices();
+
+    void StopGbRuntimeServices();
+
+    int RestartGbRuntimeServices(const char* reason);
+
     int StartGbClientLifecycle();
 
     void StopGbClientLifecycle();
@@ -750,8 +757,6 @@ private:
 
 
 #endif
-
-
 
 
 

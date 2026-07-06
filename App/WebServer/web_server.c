@@ -1,5 +1,6 @@
 #include "web_server.h"
 #include "mongoose.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,6 +52,8 @@ static device_state_t current_state = {
     .gat1400_enable = 0,
     .gat1400_ip = "183.252.186.166",
     .gat1400_port = "33855",
+    .gat1400_ipv6 = "",
+    .gat1400_ipv6_port = "0",
     .gat1400_user = "admin",
     .gat1400_device_id = "30510200001190000010",
     .gat1400_password = "Dz8h6kM9",
@@ -546,8 +549,10 @@ static char* get_config_page(const device_state_t *state) {
         "连接状态：<span id='gat1400_status_text'>检查中...</span>"
         "</div>"
         "</div>"
-        "<label>接入IP：<input type='text' name='gat1400_ip' value='%s'></label>"
-        "<label>接入端口：<input type='text' name='gat1400_port' value='%s'></label>"
+        "<label>IPv4接入IP：<input type='text' name='gat1400_ip' value='%s'></label>"
+        "<label>IPv4接入端口：<input type='text' name='gat1400_port' value='%s'></label>"
+        "<label>IPv6接入地址：<input type='text' name='gat1400_ipv6' value='%s'></label>"
+        "<label>IPv6接入端口：<input type='text' name='gat1400_ipv6_port' value='%s'></label>"
         "<label>设备用户：<input type='text' name='gat1400_user' value='%s'></label>"
         "<label>设备编码：<input type='text' name='gat1400_device_id' value='%s'></label>"
         "<label>设备密码：<input type='text' name='gat1400_password' value='%s'></label>"
@@ -717,7 +722,9 @@ static char* get_config_page(const device_state_t *state) {
                  strlen(state->gb_device_id) + strlen(state->gb_password) +
                  strlen(main_codec_str) + strlen(sub_codec_str) +
                  strlen(audio_codec_str) + strlen(night_mode_str) +
-                 strlen(state->gat1400_ip) + strlen(state->gat1400_port) + strlen(state->gat1400_user) +
+                 strlen(state->gat1400_ip) + strlen(state->gat1400_port) +
+                 strlen(state->gat1400_ipv6) + strlen(state->gat1400_ipv6_port) +
+                 strlen(state->gat1400_user) +
                  strlen(state->gat1400_device_id) + strlen(state->gat1400_password) + 512;
     char *html = malloc(len);
     if (!html) return NULL;
@@ -737,7 +744,9 @@ static char* get_config_page(const device_state_t *state) {
              state->gb_code, state->gb_domain, state->gb_ip, state->gb_port,
              state->gb_device_id, state->gb_user_id, state->gb_password, state->gb_channel_code,
              gat1400_enable_checked,
-             state->gat1400_ip, state->gat1400_port, state->gat1400_user,
+             state->gat1400_ip, state->gat1400_port,
+             state->gat1400_ipv6, state->gat1400_ipv6_port,
+             state->gat1400_user,
              state->gat1400_device_id, state->gat1400_password);
     return html;
 }
@@ -818,6 +827,44 @@ static char* get_session_from_cookie(struct mg_http_message *hm) {
 }
 
 // ================== POST 数据解析 ==================
+static int HexValue(char ch) {
+    if (ch >= '0' && ch <= '9') return ch - '0';
+    if (ch >= 'a' && ch <= 'f') return ch - 'a' + 10;
+    if (ch >= 'A' && ch <= 'F') return ch - 'A' + 10;
+    return -1;
+}
+
+static void UrlDecodeInPlace(char *text) {
+    if (text == NULL) return;
+
+    char *src = text;
+    char *dst = text;
+    while (*src != '\0') {
+        if (*src == '%' && isxdigit((unsigned char)src[1]) && isxdigit((unsigned char)src[2])) {
+            int high = HexValue(src[1]);
+            int low = HexValue(src[2]);
+            *dst++ = (char)((high << 4) | low);
+            src += 3;
+            continue;
+        }
+        if (*src == '+') {
+            *dst++ = ' ';
+            ++src;
+            continue;
+        }
+        *dst++ = *src++;
+    }
+    *dst = '\0';
+}
+
+static void CopyDecodedFormValue(char *dst, size_t dst_size, char *value) {
+    if (dst == NULL || dst_size == 0 || value == NULL) return;
+
+    UrlDecodeInPlace(value);
+    strncpy(dst, value, dst_size - 1);
+    dst[dst_size - 1] = '\0';
+}
+
 static void parse_form_data(struct mg_str body, device_state_t *state) {
     char *buf = malloc(body.len + 1);
     memcpy(buf, body.buf, body.len);
@@ -991,35 +1038,49 @@ static void parse_form_data(struct mg_str body, device_state_t *state) {
         val += strlen("gat1400_ip=");
         char *end = strchr(val, '&');
         if (end) *end = '\0';
-        strncpy(state->gat1400_ip, val, sizeof(state->gat1400_ip)-1);
+        CopyDecodedFormValue(state->gat1400_ip, sizeof(state->gat1400_ip), val);
         if (end) *end = '&';
     }
     if ((val = strstr(buf, "gat1400_port="))) {
         val += strlen("gat1400_port=");
         char *end = strchr(val, '&');
         if (end) *end = '\0';
-        strncpy(state->gat1400_port, val, sizeof(state->gat1400_port)-1);
+        CopyDecodedFormValue(state->gat1400_port, sizeof(state->gat1400_port), val);
+        if (end) *end = '&';
+    }
+    if ((val = strstr(buf, "gat1400_ipv6="))) {
+        val += strlen("gat1400_ipv6=");
+        char *end = strchr(val, '&');
+        if (end) *end = '\0';
+        CopyDecodedFormValue(state->gat1400_ipv6, sizeof(state->gat1400_ipv6), val);
+        if (end) *end = '&';
+    }
+    if ((val = strstr(buf, "gat1400_ipv6_port="))) {
+        val += strlen("gat1400_ipv6_port=");
+        char *end = strchr(val, '&');
+        if (end) *end = '\0';
+        CopyDecodedFormValue(state->gat1400_ipv6_port, sizeof(state->gat1400_ipv6_port), val);
         if (end) *end = '&';
     }
     if ((val = strstr(buf, "gat1400_user="))) {
         val += strlen("gat1400_user=");
         char *end = strchr(val, '&');
         if (end) *end = '\0';
-        strncpy(state->gat1400_user, val, sizeof(state->gat1400_user)-1);
+        CopyDecodedFormValue(state->gat1400_user, sizeof(state->gat1400_user), val);
         if (end) *end = '&';
     }
     if ((val = strstr(buf, "gat1400_device_id="))) {
         val += strlen("gat1400_device_id=");
         char *end = strchr(val, '&');
         if (end) *end = '\0';
-        strncpy(state->gat1400_device_id, val, sizeof(state->gat1400_device_id)-1);
+        CopyDecodedFormValue(state->gat1400_device_id, sizeof(state->gat1400_device_id), val);
         if (end) *end = '&';
     }
     if ((val = strstr(buf, "gat1400_password="))) {
         val += strlen("gat1400_password=");
         char *end = strchr(val, '&');
         if (end) *end = '\0';
-        strncpy(state->gat1400_password, val, sizeof(state->gat1400_password)-1);
+        CopyDecodedFormValue(state->gat1400_password, sizeof(state->gat1400_password), val);
         if (end) *end = '&';
     }
 
@@ -1086,6 +1147,8 @@ void set_device_state(const device_state_t *state) {
         current_state.gb_channel_code[sizeof(current_state.gb_channel_code)-1] = '\0';
         current_state.gat1400_ip[sizeof(current_state.gat1400_ip)-1] = '\0';
         current_state.gat1400_port[sizeof(current_state.gat1400_port)-1] = '\0';
+        current_state.gat1400_ipv6[sizeof(current_state.gat1400_ipv6)-1] = '\0';
+        current_state.gat1400_ipv6_port[sizeof(current_state.gat1400_ipv6_port)-1] = '\0';
         current_state.gat1400_user[sizeof(current_state.gat1400_user)-1] = '\0';
         current_state.gat1400_device_id[sizeof(current_state.gat1400_device_id)-1] = '\0';
         current_state.gat1400_password[sizeof(current_state.gat1400_password)-1] = '\0';
@@ -1154,6 +1217,8 @@ static void print_1400_config(const device_state_t *state) {
     printf("  Need Config: %s\n", state->gat1400_enable ? "YES" : "NO");
     printf("  IP: %s\n", state->gat1400_ip);
     printf("  Port: %s\n", state->gat1400_port);
+    printf("  IPv6: %s\n", state->gat1400_ipv6);
+    printf("  IPv6 Port: %s\n", state->gat1400_ipv6_port);
     printf("  User: %s\n", state->gat1400_user);
     printf("  Device ID: %s\n", state->gat1400_device_id);
     printf("  Password: %s\n", state->gat1400_password);

@@ -91,8 +91,10 @@ typedef struct {
     night_mode_t night_mode;          // 夜视模式枚举
     // 1400参数
     int gat1400_enable;               // 是否启用1400配置 (0:不启用, 1:启用)
-    char gat1400_ip[16];              // 1400接入IP
+    char gat1400_ip[16];              // 1400接入IPv4
     char gat1400_port[8];            // 1400接入端口
+    char gat1400_ipv6[64];            // 1400接入IPv6
+    char gat1400_ipv6_port[8];        // 1400接入IPv6端口
     char gat1400_user[32];            // 1400设备用户
     char gat1400_device_id[64];       // 1400设备编码
     char gat1400_password[32];        // 1400设备密码

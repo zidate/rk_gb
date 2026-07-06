@@ -136,6 +136,13 @@ int LOWER_1400_POST_MOTORVEHICLES(const std::list<GAT_1400_Motor>& MotorVehicleL
     return InvokeWithGatService([&](protocol::GAT1400ClientService& service) { return service.PostMotorVehicles(MotorVehicleList); });
 }
 
+int LOWER_1400_NOTIFY_PLATEDETECTIONS(const std::list<GAT_1400_Motor>& MotorVehicleList)
+{
+    return InvokeWithGatService([&](protocol::GAT1400ClientService& service) {
+        return service.NotifyPlateDetections(MotorVehicleList);
+    });
+}
+
 int LOWER_1400_POST_NONMOTORVEHICLES(const std::list<GAT_1400_NonMotor>& NonmotorVehicleList)
 {
     return InvokeWithGatService([&](protocol::GAT1400ClientService& service) { return service.PostNonMotorVehicles(NonmotorVehicleList); });

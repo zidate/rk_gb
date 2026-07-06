@@ -11,6 +11,7 @@
 #include <cstring>
 #include <ctime>
 #include <dirent.h>
+#include <fcntl.h>
 #include <functional>
 #include <iterator>
 #include <netdb.h>
@@ -651,35 +652,80 @@ std::string FormatRequestUrl(const RequestTarget& target)
     return oss.str();
 }
 
-bool BuildRequestTarget(const ProtocolExternalConfig& cfg,
-                        const std::string& path,
-                        const std::string* overrideUrl,
-                        RequestTarget& out)
+bool AddRequestTarget(std::vector<RequestTarget>& targets, const RequestTarget& target)
 {
-    out.scheme = ToLowerCopy(cfg.gat_register.scheme.empty() ? "http" : cfg.gat_register.scheme);
-    out.host = StripIpv6LiteralBrackets(cfg.gat_register.server_ip);
-    out.port = cfg.gat_register.server_port;
-    out.timeout_ms = cfg.gat_register.request_timeout_ms > 0 ? cfg.gat_register.request_timeout_ms : kHttpTimeoutMs;
-    out.request_path = BuildRequestPath(cfg.gat_register.base_path, path);
+    if (target.host.empty() || target.port <= 0) {
+        return false;
+    }
+
+    for (std::vector<RequestTarget>::const_iterator it = targets.begin(); it != targets.end(); ++it) {
+        if (it->scheme == target.scheme &&
+            it->host == target.host &&
+            it->port == target.port &&
+            it->request_path == target.request_path) {
+            return false;
+        }
+    }
+
+    targets.push_back(target);
+    return true;
+}
+
+bool BuildRequestTargets(const ProtocolExternalConfig& cfg,
+                         const std::string& path,
+                         const std::string* overrideUrl,
+                         std::vector<RequestTarget>& out)
+{
+    out.clear();
+
+    RequestTarget base;
+    base.scheme = ToLowerCopy(cfg.gat_register.scheme.empty() ? "http" : cfg.gat_register.scheme);
+    base.timeout_ms = cfg.gat_register.request_timeout_ms > 0 ? cfg.gat_register.request_timeout_ms : kHttpTimeoutMs;
+    base.request_path = BuildRequestPath(cfg.gat_register.base_path, path);
 
     if (overrideUrl == NULL || overrideUrl->empty()) {
-        return !out.host.empty() && out.port > 0;
+        if (!cfg.gat_register.server_ipv6.empty()) {
+            RequestTarget ipv6 = base;
+            ipv6.host = StripIpv6LiteralBrackets(cfg.gat_register.server_ipv6);
+            ipv6.port = cfg.gat_register.server_ipv6_port;
+            AddRequestTarget(out, ipv6);
+        }
+
+        RequestTarget ipv4 = base;
+        ipv4.host = StripIpv6LiteralBrackets(cfg.gat_register.server_ip);
+        ipv4.port = cfg.gat_register.server_port;
+        AddRequestTarget(out, ipv4);
+        return !out.empty();
     }
 
     const std::string trimmed = TrimCopy(*overrideUrl);
-    if (trimmed.empty()) {
-        return !out.host.empty() && out.port > 0;
-    }
-    if (trimmed.find("://") != std::string::npos) {
-        if (!ParseRequestUrl(trimmed, out)) {
+    if (!trimmed.empty() && trimmed.find("://") != std::string::npos) {
+        RequestTarget absolute;
+        if (!ParseRequestUrl(trimmed, absolute)) {
             return false;
         }
-        out.timeout_ms = cfg.gat_register.request_timeout_ms > 0 ? cfg.gat_register.request_timeout_ms : kHttpTimeoutMs;
-        return true;
+        absolute.timeout_ms = base.timeout_ms;
+        AddRequestTarget(out, absolute);
+        return !out.empty();
     }
 
-    out.request_path = BuildRequestPath(cfg.gat_register.base_path, trimmed);
-    return !out.host.empty() && out.port > 0;
+    RequestTarget relative = base;
+    if (!trimmed.empty()) {
+        relative.request_path = BuildRequestPath(cfg.gat_register.base_path, trimmed);
+    }
+
+    if (!cfg.gat_register.server_ipv6.empty()) {
+        RequestTarget ipv6 = relative;
+        ipv6.host = StripIpv6LiteralBrackets(cfg.gat_register.server_ipv6);
+        ipv6.port = cfg.gat_register.server_ipv6_port;
+        AddRequestTarget(out, ipv6);
+    }
+
+    RequestTarget ipv4 = relative;
+    ipv4.host = StripIpv6LiteralBrackets(cfg.gat_register.server_ip);
+    ipv4.port = cfg.gat_register.server_port;
+    AddRequestTarget(out, ipv4);
+    return !out.empty();
 }
 
 std::string JoinFilePath(const std::string& dir, const std::string& fileName)
@@ -1088,6 +1134,85 @@ bool ShouldPersistFailedUpload(int errorCode)
     return errorCode != kClientErrorUnsupportedUri && errorCode != kClientErrorApePostCompatDisabled;
 }
 
+int ConnectWithTimeout(int fd, const struct sockaddr* addr, socklen_t addrLen, int timeoutMs)
+{
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0) {
+        flags = 0;
+    }
+
+    if (fcntl(fd, F_SETFL, flags | O_NONBLOCK) != 0) {
+        return -1;
+    }
+
+    if (connect(fd, addr, addrLen) == 0) {
+        fcntl(fd, F_SETFL, flags);
+        return 0;
+    }
+
+    if (errno != EINPROGRESS) {
+        fcntl(fd, F_SETFL, flags);
+        return -1;
+    }
+
+    fd_set writeSet;
+    FD_ZERO(&writeSet);
+    FD_SET(fd, &writeSet);
+
+    struct timeval tv;
+    tv.tv_sec = timeoutMs / 1000;
+    tv.tv_usec = static_cast<suseconds_t>((timeoutMs % 1000) * 1000);
+    const int selectRet = select(fd + 1, NULL, &writeSet, NULL, &tv);
+    if (selectRet <= 0) {
+        if (selectRet == 0) {
+            errno = ETIMEDOUT;
+        }
+        fcntl(fd, F_SETFL, flags);
+        return -1;
+    }
+
+    int error = 0;
+    socklen_t errorLen = sizeof(error);
+    if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &errorLen) != 0 || error != 0) {
+        if (error != 0) {
+            errno = error;
+        }
+        fcntl(fd, F_SETFL, flags);
+        return -1;
+    }
+
+    fcntl(fd, F_SETFL, flags);
+    return 0;
+}
+
+int ConnectAddrinfoList(struct addrinfo* result, int preferredFamily, int timeoutMs)
+{
+    for (struct addrinfo* it = result; it != NULL; it = it->ai_next) {
+        if (it->ai_family != preferredFamily) {
+            continue;
+        }
+
+        const int fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
+        if (fd < 0) {
+            continue;
+        }
+
+        struct timeval tv;
+        tv.tv_sec = timeoutMs / 1000;
+        tv.tv_usec = static_cast<suseconds_t>((timeoutMs % 1000) * 1000);
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
+        if (ConnectWithTimeout(fd, it->ai_addr, static_cast<socklen_t>(it->ai_addrlen), timeoutMs) == 0) {
+            return fd;
+        }
+
+        close(fd);
+    }
+
+    return -1;
+}
+
 int ConnectTcp(const std::string& host, int port, int timeoutMs)
 {
     char portText[16] = {0};
@@ -1103,25 +1228,9 @@ int ConnectTcp(const std::string& host, int port, int timeoutMs)
         return -1;
     }
 
-    int fd = -1;
-    for (struct addrinfo* it = result; it != NULL; it = it->ai_next) {
-        fd = socket(it->ai_family, it->ai_socktype, it->ai_protocol);
-        if (fd < 0) {
-            continue;
-        }
-
-        struct timeval tv;
-        tv.tv_sec = timeoutMs / 1000;
-        tv.tv_usec = static_cast<suseconds_t>((timeoutMs % 1000) * 1000);
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-
-        if (connect(fd, it->ai_addr, it->ai_addrlen) == 0) {
-            break;
-        }
-
-        close(fd);
-        fd = -1;
+    int fd = ConnectAddrinfoList(result, AF_INET6, timeoutMs);
+    if (fd < 0) {
+        fd = ConnectAddrinfoList(result, AF_INET, timeoutMs);
     }
 
     freeaddrinfo(result);
@@ -1870,87 +1979,98 @@ int GAT1400ClientService::ExecuteRequest(const ProtocolExternalConfig& cfg,
                                          HttpResponse& response,
                                          const std::string* overrideUrl) const
 {
-    RequestTarget target;
-    if (!BuildRequestTarget(cfg, path, overrideUrl, target)) {
+    std::vector<RequestTarget> targets;
+    if (!BuildRequestTargets(cfg, path, overrideUrl, targets)) {
         return -1;
     }
 
-    if (IsViasRequestPath(target.request_path)) {
-        printf("[GAT1400] module=gat1400 event=request trace=client error=%d method=%s path=%s note=vias_not_supported\n",
-               kClientErrorUnsupportedUri,
-               method.c_str(),
-               target.request_path.c_str());
-        return kClientErrorUnsupportedUri;
-    }
+    int finalRet = -1;
+    for (std::vector<RequestTarget>::const_iterator targetIt = targets.begin(); targetIt != targets.end(); ++targetIt) {
+        const RequestTarget& target = *targetIt;
+        response = HttpResponse();
 
-    if (method == "POST" && IsApeCompatPostPath(target.request_path) && cfg.gat_upload.enable_apes_post_compat == 0) {
-        printf("[GAT1400] module=gat1400 event=request trace=client error=%d method=%s path=%s note=post_apes_compat_disabled\n",
-               kClientErrorApePostCompatDisabled,
-               method.c_str(),
-               target.request_path.c_str());
-        return kClientErrorApePostCompatDisabled;
-    }
-
-    if (target.scheme != "http") {
-        printf("[GAT1400] module=gat1400 event=request trace=client error=-5 scheme=%s path=%s note=scheme_not_supported\n",
-               target.scheme.c_str(),
-               target.request_path.c_str());
-        return -5;
-    }
-
-    const auto doRequest = [&](const std::string* authHeader) -> int {
-        const int fd = ConnectTcp(target.host, target.port, target.timeout_ms);
-        if (fd < 0) {
-            return -2;
+        if (IsViasRequestPath(target.request_path)) {
+            printf("[GAT1400] module=gat1400 event=request trace=client error=%d method=%s path=%s note=vias_not_supported\n",
+                   kClientErrorUnsupportedUri,
+                   method.c_str(),
+                   target.request_path.c_str());
+            return kClientErrorUnsupportedUri;
         }
 
-        std::ostringstream request;
-        request << method << ' ' << target.request_path << " HTTP/1.1\r\n";
-        request << "Host: " << FormatHttpHost(target.host, target.port) << "\r\n";
-        request << "User-Identify: " << deviceId << "\r\n";
-        request << "Content-Type: " << (contentType.empty() ? kJsonContentType : contentType) << "\r\n";
-        request << "Connection: close\r\n";
-        if (authHeader != NULL && !authHeader->empty()) {
-            request << *authHeader << "\r\n";
+        if (method == "POST" && IsApeCompatPostPath(target.request_path) && cfg.gat_upload.enable_apes_post_compat == 0) {
+            printf("[GAT1400] module=gat1400 event=request trace=client error=%d method=%s path=%s note=post_apes_compat_disabled\n",
+                   kClientErrorApePostCompatDisabled,
+                   method.c_str(),
+                   target.request_path.c_str());
+            return kClientErrorApePostCompatDisabled;
         }
-        request << "Content-Length: " << body.size() << "\r\n\r\n";
 
-        std::string rawRequest = request.str();
-        rawRequest.append(body);
-
-        std::string rawResponse;
-        const bool sendOk = SendAll(fd, rawRequest);
-        const bool recvOk = sendOk && RecvAll(fd, rawResponse);
-        close(fd);
-        if (!recvOk) {
-            return -3;
+        if (target.scheme != "http") {
+            printf("[GAT1400] module=gat1400 event=request trace=client error=-5 scheme=%s path=%s note=scheme_not_supported\n",
+                   target.scheme.c_str(),
+                   target.request_path.c_str());
+            return -5;
         }
-        if (!ParseHttpResponseText(rawResponse, response)) {
-            return -4;
-        }
-        return 0;
-    };
 
-    int ret = doRequest(NULL);
-    if (ret != 0) {
-        return ret;
-    }
+        const auto doRequest = [&](const std::string* authHeader) -> int {
+            const int fd = ConnectTcp(target.host, target.port, target.timeout_ms);
+            if (fd < 0) {
+                return -2;
+            }
 
-    if (response.status_code == 401 && !cfg.gat_register.username.empty()) {
-        std::map<std::string, std::string>::const_iterator authIt = response.headers.find("www-authenticate");
-        if (authIt != response.headers.end()) {
-            CHttpAuth auth(FormatRequestUrl(target), method, cfg.gat_register.username, cfg.gat_register.password);
-            std::string authHeader;
-            auth.HttpAuthParse(authIt->second, authHeader);
-            response = HttpResponse();
-            ret = doRequest(&authHeader);
-            if (ret != 0) {
-                return ret;
+            std::ostringstream request;
+            request << method << ' ' << target.request_path << " HTTP/1.1\r\n";
+            request << "Host: " << FormatHttpHost(target.host, target.port) << "\r\n";
+            request << "User-Identify: " << deviceId << "\r\n";
+            request << "Content-Type: " << (contentType.empty() ? kJsonContentType : contentType) << "\r\n";
+            request << "Connection: close\r\n";
+            if (authHeader != NULL && !authHeader->empty()) {
+                request << *authHeader << "\r\n";
+            }
+            request << "Content-Length: " << body.size() << "\r\n\r\n";
+
+            std::string rawRequest = request.str();
+            rawRequest.append(body);
+
+            std::string rawResponse;
+            const bool sendOk = SendAll(fd, rawRequest);
+            const bool recvOk = sendOk && RecvAll(fd, rawResponse);
+            close(fd);
+            if (!recvOk) {
+                return -3;
+            }
+            if (!ParseHttpResponseText(rawResponse, response)) {
+                return -4;
+            }
+            return 0;
+        };
+
+        int ret = doRequest(NULL);
+        if (ret == 0 && response.status_code == 401 && !cfg.gat_register.username.empty()) {
+            std::map<std::string, std::string>::const_iterator authIt = response.headers.find("www-authenticate");
+            if (authIt != response.headers.end()) {
+                CHttpAuth auth(FormatRequestUrl(target), method, cfg.gat_register.username, cfg.gat_register.password);
+                std::string authHeader;
+                auth.HttpAuthParse(authIt->second, authHeader);
+                response = HttpResponse();
+                ret = doRequest(&authHeader);
             }
         }
+
+        if (ret == 0) {
+            return 0;
+        }
+
+        finalRet = ret;
+        if (targetIt + 1 != targets.end()) {
+            printf("[GAT1400] module=gat1400 event=request trace=client error=%d target=%s path=%s note=try_next_endpoint\n",
+                   ret,
+                   FormatHttpHost(target.host, target.port).c_str(),
+                   target.request_path.c_str());
+        }
     }
 
-    return 0;
+    return finalRet;
 }
 
 int GAT1400ClientService::EnqueuePendingUpload(const char* action,
@@ -2385,6 +2505,38 @@ int GAT1400ClientService::NotifyMotorVehicles(const std::list<GAT_1400_Motor>& m
         RequestPendingReplay();
     }
     printf("[GAT1400] module=gat1400 event=notify_motor trace=bridge error=%d mode=%s count=%zu\n",
+           ret,
+           readyToUpload ? "async_queue" : "queue_only",
+           motorList.size());
+    return ret;
+}
+
+
+int GAT1400ClientService::NotifyPlateDetections(const std::list<GAT_1400_Motor>& motorList)
+{
+    if (motorList.empty()) {
+        return 0;
+    }
+
+    bool readyToUpload = false;
+    {
+        std::lock_guard<std::mutex> lock(m_state_mutex);
+        readyToUpload = m_started && m_registered;
+    }
+
+    const int ret = EnqueuePendingUpload("notify_plate",
+                                         "POST",
+                                         "/VIID/MotorVehicles",
+                                         kJsonContentType,
+                                         kResponseKindList,
+                                         GAT1400Json::PackMotorVehicleListJson(motorList),
+                                         "",
+                                         readyToUpload ? "ret=async" : "ret=not_ready",
+                                         kNotifyAsyncMaxAttemptCount);
+    if (ret == 0 && readyToUpload) {
+        RequestPendingReplay();
+    }
+    printf("[GAT1400] module=gat1400 event=notify_plate trace=bridge error=%d mode=%s count=%zu\n",
            ret,
            readyToUpload ? "async_queue" : "queue_only",
            motorList.size());
@@ -2983,6 +3135,8 @@ int GAT1400ClientService::Reload(const ProtocolExternalConfig& cfg, const GbRegi
         restartRequired = (currentEnabled != nextEnabled) ||
                           (m_cfg.gat_register.server_ip != cfg.gat_register.server_ip) ||
                           (m_cfg.gat_register.server_port != cfg.gat_register.server_port) ||
+                          (m_cfg.gat_register.server_ipv6 != cfg.gat_register.server_ipv6) ||
+                          (m_cfg.gat_register.server_ipv6_port != cfg.gat_register.server_ipv6_port) ||
                           (m_cfg.gat_register.listen_port != cfg.gat_register.listen_port) ||
                           (m_cfg.gat_register.username != cfg.gat_register.username) ||
                           (m_cfg.gat_register.password != cfg.gat_register.password) ||
