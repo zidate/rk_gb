@@ -2,8 +2,10 @@
 
 
 extern "C" {
-int gb_rkipc_osd_time_set(int date_type, int time_type, int x, int y, int show);
-int gb_rkipc_osd_text_set(int index, const char *text, int x, int y, int show);
+int gb_rkipc_osd_common_set(int font_size, const char *font_color_mode, const char *font_color);
+int gb_rkipc_osd_time_set(int date_type, int time_type, int display_week_enabled,
+						  int x, int y, int show, int alignment);
+int gb_rkipc_osd_text_set(int index, const char *text, int x, int y, int show, int alignment);
 }
 
 std::string strToHexAscii(const string &input);
@@ -60,7 +62,16 @@ void CAVManager::onConfigOSDTime(const CConfigTable &table, int &ret)
 	OSDTimeConf_S OSDTimeConfig;
     TExchangeAL<OSDTimeConf_S>::getConfig(table, OSDTimeConfig);
 
-	gb_rkipc_osd_time_set(OSDTimeConfig.date_type, OSDTimeConfig.time_type, OSDTimeConfig.x, OSDTimeConfig.y, OSDTimeConfig.show);
+	gb_rkipc_osd_common_set(OSDTimeConfig.font_size,
+							OSDTimeConfig.font_color_mode.c_str(),
+							OSDTimeConfig.font_color.c_str());
+	gb_rkipc_osd_time_set(OSDTimeConfig.date_type,
+						  OSDTimeConfig.time_type,
+						  OSDTimeConfig.display_week_enabled,
+						  OSDTimeConfig.x,
+						  OSDTimeConfig.y,
+						  OSDTimeConfig.show,
+						  OSDTimeConfig.alignment);
 	m_OSDTimeConf = OSDTimeConfig;
 }
 
@@ -71,14 +82,20 @@ void CAVManager::onConfigOSDText(const CConfigTable &table, int &ret)
 
 	for (int i = 0; i < OSD_TEXT_MAX; i++)
 	{
-		if (OSDTextAllConfig.osd_text[i].text != m_OSDTextAllConf.osd_text[i].text || 
-			OSDTextAllConfig.osd_text[i].x != m_OSDTextAllConf.osd_text[i].x || 
-			OSDTextAllConfig.osd_text[i].y != m_OSDTextAllConf.osd_text[i].y || 
-			OSDTextAllConfig.osd_text[i].show != m_OSDTextAllConf.osd_text[i].show)
+		if (OSDTextAllConfig.osd_text[i].text != m_OSDTextAllConf.osd_text[i].text ||
+			OSDTextAllConfig.osd_text[i].x != m_OSDTextAllConf.osd_text[i].x ||
+			OSDTextAllConfig.osd_text[i].y != m_OSDTextAllConf.osd_text[i].y ||
+			OSDTextAllConfig.osd_text[i].show != m_OSDTextAllConf.osd_text[i].show ||
+			OSDTextAllConfig.osd_text[i].alignment != m_OSDTextAllConf.osd_text[i].alignment)
 		{
 			printf("onConfigOSDText -> [%s]\n", OSDTextAllConfig.osd_text[i].text.c_str());
 			std::string src_str = hexToStr(OSDTextAllConfig.osd_text[i].text);
-			gb_rkipc_osd_text_set(i, src_str.c_str(), OSDTextAllConfig.osd_text[i].x, OSDTextAllConfig.osd_text[i].y, OSDTextAllConfig.osd_text[i].show);
+			gb_rkipc_osd_text_set(i,
+								  src_str.c_str(),
+								  OSDTextAllConfig.osd_text[i].x,
+								  OSDTextAllConfig.osd_text[i].y,
+								  OSDTextAllConfig.osd_text[i].show,
+								  OSDTextAllConfig.osd_text[i].alignment);
 		}
 	}
 	m_OSDTextAllConf = OSDTextAllConfig;
@@ -101,8 +118,17 @@ bool CAVManager::VideoParamInit()
 	g_configManager.getConfig(getConfigName(CFG_OSD_TIME), table);
     TExchangeAL<OSDTimeConf_S>::getConfig(table, m_OSDTimeConf);
 	g_configManager.attach(getConfigName(CFG_OSD_TIME), IConfigManager::Proc(&CAVManager::onConfigOSDTime, this));
-	
-	gb_rkipc_osd_time_set(m_OSDTimeConf.date_type, m_OSDTimeConf.time_type, m_OSDTimeConf.x, m_OSDTimeConf.y, m_OSDTimeConf.show);
+
+	gb_rkipc_osd_common_set(m_OSDTimeConf.font_size,
+							m_OSDTimeConf.font_color_mode.c_str(),
+							m_OSDTimeConf.font_color.c_str());
+	gb_rkipc_osd_time_set(m_OSDTimeConf.date_type,
+						  m_OSDTimeConf.time_type,
+						  m_OSDTimeConf.display_week_enabled,
+						  m_OSDTimeConf.x,
+						  m_OSDTimeConf.y,
+						  m_OSDTimeConf.show,
+						  m_OSDTimeConf.alignment);
 	
 	table.clear();
 	g_configManager.getConfig(getConfigName(CFG_OSD_TEXT), table);
@@ -113,7 +139,12 @@ bool CAVManager::VideoParamInit()
 	{
 		printf("VideoParamInit -> [%s]\n", m_OSDTextAllConf.osd_text[i].text.c_str());
 		std::string src_str = hexToStr(m_OSDTextAllConf.osd_text[i].text);
-		gb_rkipc_osd_text_set(i, src_str.c_str(), m_OSDTextAllConf.osd_text[i].x, m_OSDTextAllConf.osd_text[i].y, m_OSDTextAllConf.osd_text[i].show);
+		gb_rkipc_osd_text_set(i,
+							  src_str.c_str(),
+							  m_OSDTextAllConf.osd_text[i].x,
+							  m_OSDTextAllConf.osd_text[i].y,
+							  m_OSDTextAllConf.osd_text[i].show,
+							  m_OSDTextAllConf.osd_text[i].alignment);
 	}
 	return true;
 }

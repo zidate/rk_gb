@@ -722,9 +722,14 @@ template<> void exchangeTable<OSDTimeConf_S>(CConfigTable &table, OSDTimeConf_S 
 	exchanger.setState(state);
 	exchanger.exchange(table, "date_type", 		config.date_type);
 	exchanger.exchange(table, "time_type", 		config.time_type);
+	exchanger.exchange(table, "display_week_enabled", config.display_week_enabled);
 	exchanger.exchange(table, "x", 				config.x);
 	exchanger.exchange(table, "y", 				config.y);
 	exchanger.exchange(table, "show", 			config.show);
+	exchanger.exchange(table, "alignment", 		config.alignment);
+	exchanger.exchange(table, "font_size", 		config.font_size);
+	exchanger.exchange(table, "font_color_mode", config.font_color_mode);
+	exchanger.exchange(table, "font_color", 	config.font_color);
 }
 
 template<> void exchangeTable<OSDTextConf_S>(CConfigTable &table, OSDTextConf_S &config, int state)
@@ -736,6 +741,7 @@ template<> void exchangeTable<OSDTextConf_S>(CConfigTable &table, OSDTextConf_S 
 	exchanger.exchange(table, "x",    	config.x);
 	exchanger.exchange(table, "y", 		config.y);
 	exchanger.exchange(table, "show", 	config.show);
+	exchanger.exchange(table, "alignment", config.alignment);
 }
 template<> void exchangeTable<OSDTextAllConf_S>(CConfigTable &table, OSDTextAllConf_S &configAll, int state)
 {

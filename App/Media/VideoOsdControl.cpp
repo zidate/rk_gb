@@ -18,6 +18,9 @@ namespace
 
 static const int kVideoOsdDateTimeId = 1;
 static const int kVideoOsdCustomTextId = 2;
+static const int kVideoOsdCoordinateMax = 10000;
+static const int kDefaultMainStreamWidth = 1920;
+static const int kDefaultMainStreamHeight = 1080;
 static int g_cached_master_switch = -1;
 static int g_cached_event_switch = -1;
 static int g_cached_alert_switch = -1;
@@ -70,20 +73,16 @@ static std::string NormalizeVideoOsdDateStyle(const std::string& formatIn)
         return "CHR-YYYY-MM-DD";
     }
 
+    if (ContainsToken(format, "yyyy.mm.dd")) {
+        return "CHR-YYYY.MM.DD";
+    }
     if (ContainsToken(format, "yyyy/mm/dd")) {
         return "CHR-YYYY/MM/DD";
     }
-    if (ContainsToken(format, "mm/dd/yyyy")) {
-        return "CHR-MM/DD/YYYY";
-    }
-    if (ContainsToken(format, "dd/mm/yyyy")) {
-        return "CHR-DD/MM/YYYY";
-    }
-    if (ContainsToken(format, "mm-dd-yyyy")) {
-        return "CHR-MM-DD-YYYY";
-    }
-    if (ContainsToken(format, "dd-mm-yyyy")) {
-        return "CHR-DD-MM-YYYY";
+    if (format.find("年") != std::string::npos ||
+        format.find("月") != std::string::npos ||
+        format.find("日") != std::string::npos) {
+        return "YYYY-MM-DD";
     }
 
     return "CHR-YYYY-MM-DD";
@@ -112,16 +111,14 @@ static std::string BuildVideoOsdTimeFormatFromStyles(const std::string& dateStyl
 {
     std::string datePart = "yyyy-MM-dd";
     const std::string dateStyle = ToLowerCopy(TrimWhitespaceCopy(dateStyleIn));
-    if (ContainsToken(dateStyle, "yyyy/mm/dd")) {
+    if (ContainsToken(dateStyle, "yyyy.mm.dd")) {
+        datePart = "yyyy.MM.dd";
+    } else if (ContainsToken(dateStyle, "yyyy/mm/dd")) {
         datePart = "yyyy/MM/dd";
-    } else if (ContainsToken(dateStyle, "mm/dd/yyyy")) {
-        datePart = "MM/dd/yyyy";
-    } else if (ContainsToken(dateStyle, "dd/mm/yyyy")) {
-        datePart = "dd/MM/yyyy";
-    } else if (ContainsToken(dateStyle, "mm-dd-yyyy")) {
-        datePart = "MM-dd-yyyy";
-    } else if (ContainsToken(dateStyle, "dd-mm-yyyy")) {
-        datePart = "dd-MM-yyyy";
+    } else if (dateStyle.find("年") != std::string::npos ||
+               dateStyle.find("月") != std::string::npos ||
+               dateStyle.find("日") != std::string::npos) {
+        datePart = "yyyy年MM月dd日";
     }
 
     std::string timePart = "HH:mm:ss";
@@ -138,6 +135,202 @@ static bool QueryMainStreamResolution(int& width, int& height)
     width = 0;
     height = 0;
     return CaptureGetResolution(0, &width, &height) == 0 && width > 0 && height > 0;
+}
+
+static void QueryMainStreamResolutionOrDefault(int& width, int& height)
+{
+    if (!QueryMainStreamResolution(width, height)) {
+        width = kDefaultMainStreamWidth;
+        height = kDefaultMainStreamHeight;
+    }
+}
+
+static int ClampVideoOsdCoordinate(int value)
+{
+    if (value < 0) {
+        return 0;
+    }
+    if (value > kVideoOsdCoordinateMax) {
+        return kVideoOsdCoordinateMax;
+    }
+    return value;
+}
+
+static int ScaleVideoOsdXToDevice(int value)
+{
+    int width = 0;
+    int height = 0;
+    QueryMainStreamResolutionOrDefault(width, height);
+    return (ClampVideoOsdCoordinate(value) * width + kVideoOsdCoordinateMax / 2) /
+        kVideoOsdCoordinateMax;
+}
+
+static int ScaleVideoOsdYToDevice(int value)
+{
+    int width = 0;
+    int height = 0;
+    QueryMainStreamResolutionOrDefault(width, height);
+    return (ClampVideoOsdCoordinate(value) * height + kVideoOsdCoordinateMax / 2) /
+        kVideoOsdCoordinateMax;
+}
+
+static int ScaleVideoOsdXFromDevice(int value)
+{
+    int width = 0;
+    int height = 0;
+    QueryMainStreamResolutionOrDefault(width, height);
+    if (value <= 0 || width <= 0) {
+        return 0;
+    }
+    return ClampVideoOsdCoordinate(
+        (value * kVideoOsdCoordinateMax + width / 2) / width);
+}
+
+static int ScaleVideoOsdYFromDevice(int value)
+{
+    int width = 0;
+    int height = 0;
+    QueryMainStreamResolutionOrDefault(width, height);
+    if (value <= 0 || height <= 0) {
+        return 0;
+    }
+    return ClampVideoOsdCoordinate(
+        (value * kVideoOsdCoordinateMax + height / 2) / height);
+}
+
+static int NormalizeVideoOsdDateType(const std::string& formatIn)
+{
+    const std::string format = ToLowerCopy(TrimWhitespaceCopy(formatIn));
+    if (ContainsToken(format, "yyyy.mm.dd")) {
+        return 1;
+    }
+    if (ContainsToken(format, "yyyy/mm/dd")) {
+        return 2;
+    }
+    if (format.find("年") != std::string::npos ||
+        format.find("月") != std::string::npos ||
+        format.find("日") != std::string::npos) {
+        return 3;
+    }
+    return 0;
+}
+
+static int NormalizeVideoOsdTimeType(const std::string& formatIn)
+{
+    return (NormalizeVideoOsdTimeStyle(formatIn) == "12hour") ? 1 : 0;
+}
+
+static std::string BuildVideoOsdDateStyleFromType(int dateType)
+{
+    switch (dateType) {
+    case 1:
+        return "CHR-YYYY.MM.DD";
+    case 2:
+        return "CHR-YYYY/MM/DD";
+    case 3:
+        return "YYYY-MM-DD";
+    case 0:
+    default:
+        return "CHR-YYYY-MM-DD";
+    }
+}
+
+static std::string BuildVideoOsdTimeFormatFromConfig(int dateType, int timeType)
+{
+    std::string datePart = "yyyy-MM-dd";
+    switch (dateType) {
+    case 1:
+        datePart = "yyyy.MM.dd";
+        break;
+    case 2:
+        datePart = "yyyy/MM/dd";
+        break;
+    case 3:
+        datePart = "yyyy年MM月dd日";
+        break;
+    case 0:
+    default:
+        break;
+    }
+
+    return datePart + ((timeType == 1) ? " hh:mm:ss tt" : " HH:mm:ss");
+}
+
+static bool NormalizeVideoOsdFontSize(int value, int* out)
+{
+    if (out == NULL) {
+        return false;
+    }
+    if (value == 16 || value == 32 || value == 64) {
+        *out = value;
+        return true;
+    }
+    return false;
+}
+
+static bool NormalizeVideoOsdFontColorMode(const std::string& modeIn, std::string* out)
+{
+    if (out == NULL) {
+        return false;
+    }
+    const std::string mode = ToLowerCopy(TrimWhitespaceCopy(modeIn));
+    if (mode.empty() || mode == "custom" || mode == "customize" || mode == "manual" || mode == "2") {
+        *out = "customize";
+        return true;
+    }
+    if (mode == "auto" || mode == "black_white_auto" || mode == "blackwhite" || mode == "1") {
+        *out = "auto";
+        return true;
+    }
+    return false;
+}
+
+static bool IsHexDigit(char value)
+{
+    return (value >= '0' && value <= '9') ||
+           (value >= 'a' && value <= 'f') ||
+           (value >= 'A' && value <= 'F');
+}
+
+static bool NormalizeVideoOsdFontColor(const std::string& colorIn, std::string* out)
+{
+    if (out == NULL) {
+        return false;
+    }
+    std::string color = TrimWhitespaceCopy(colorIn);
+    if (color.size() >= 2 && color[0] == '0' && (color[1] == 'x' || color[1] == 'X')) {
+        color = color.substr(2);
+    }
+    if (!color.empty() && color[0] == '#') {
+        color = color.substr(1);
+    }
+    if (color.size() != 6) {
+        return false;
+    }
+    for (size_t index = 0; index < color.size(); ++index) {
+        if (!IsHexDigit(color[index])) {
+            return false;
+        }
+        if (color[index] >= 'A' && color[index] <= 'F') {
+            color[index] = static_cast<char>(color[index] - 'A' + 'a');
+        }
+    }
+    *out = "#" + color;
+    return true;
+}
+
+static int NormalizeVideoOsdAlignmentValue(const std::string& alignmentIn)
+{
+    const std::string alignment = ToLowerCopy(TrimWhitespaceCopy(alignmentIn));
+    if (alignment == "right" || alignment == "right_align" || alignment == "right-aligned" || alignment == "1") {
+        return 1;
+    }
+    return 0;
+}
+
+static std::string BuildVideoOsdAlignmentValue(int alignment)
+{
+    return (alignment == 1) ? "right" : "left";
 }
 
 static int MergeError(int current, int candidate)
@@ -163,7 +356,11 @@ static void NormalizeVideoOsdTextItems(media::VideoOsdState* state)
             item.text = NormalizeVideoOsdTextTemplate(item.text);
             item.has_text = !item.text.empty();
         }
-        if (!item.has_text && !item.has_position) {
+        if (item.has_alignment) {
+            item.alignment = BuildVideoOsdAlignmentValue(
+                NormalizeVideoOsdAlignmentValue(item.alignment));
+        }
+        if (!item.has_text && !item.has_position && !item.has_alignment) {
             continue;
         }
         if (writeIndex != index) {
@@ -310,45 +507,38 @@ bool ResolveVideoOsdAnchor(const std::string& positionIn, int* x, int* y)
          sscanf(position.c_str(), "%d:%d", x, y) == 2) &&
         *x >= 0 &&
         *y >= 0) {
+        *x = ClampVideoOsdCoordinate(*x);
+        *y = ClampVideoOsdCoordinate(*y);
         return true;
     }
 
-    int width = 1280;
-    int height = 720;
-    (void)QueryMainStreamResolution(width, height);
-
-    const int marginX = 0;
-    const int marginY = 0;
-    const int estimatedTextWidth = 176;
-    const int estimatedTextHeight = 64;
-
     if (position == "top_left" || position == "left_top" || position == "top-left") {
-        *x = marginX;
-        *y = marginY;
+        *x = 0;
+        *y = 0;
         return true;
     }
 
     if (position == "top_right" || position == "right_top" || position == "top-right") {
-        *x = (width > estimatedTextWidth + marginX) ? (width - estimatedTextWidth) : marginX;
-        *y = marginY;
+        *x = kVideoOsdCoordinateMax;
+        *y = 0;
         return true;
     }
 
     if (position == "bottom_left" || position == "left_bottom" || position == "bottom-left") {
-        *x = marginX;
-        *y = (height > estimatedTextHeight + marginY) ? (height - estimatedTextHeight) : marginY;
+        *x = 0;
+        *y = kVideoOsdCoordinateMax;
         return true;
     }
 
     if (position == "bottom_right" || position == "right_bottom" || position == "bottom-right") {
-        *x = (width > estimatedTextWidth + marginX) ? (width - estimatedTextWidth) : marginX;
-        *y = (height > estimatedTextHeight + marginY) ? (height - estimatedTextHeight) : marginY;
+        *x = kVideoOsdCoordinateMax;
+        *y = kVideoOsdCoordinateMax;
         return true;
     }
 
     if (position == "center" || position == "middle") {
-        *x = width / 2;
-        *y = height / 2;
+        *x = kVideoOsdCoordinateMax / 2;
+        *y = kVideoOsdCoordinateMax / 2;
         return true;
     }
 
@@ -360,26 +550,23 @@ int ApplyVideoOsdConfig(const VideoOsdState& desired)
     VideoOsdState normalizedDesired = desired;
     NormalizeVideoOsdTextItems(&normalizedDesired);
 
-	printf("has_time_enabled: %d, time_enabled: %d\n", normalizedDesired.has_time_enabled, normalizedDesired.time_enabled);
-	printf("has_text_enabled: %d, text_enabled: %d\n", normalizedDesired.has_text_enabled, normalizedDesired.text_enabled);
-	printf("has_time_format: %d, time_format: %s\n", normalizedDesired.has_time_format, normalizedDesired.time_format.c_str());
-	printf("has_date_style: %d, date_style: %s\n", normalizedDesired.has_date_style, normalizedDesired.date_style.c_str());
-	printf("has_time_style: %d, time_style: %s\n", normalizedDesired.has_time_style, normalizedDesired.time_style.c_str());
-	printf("has_time_position: %d\n", normalizedDesired.has_time_position);
-	printf("time_x: %d, time_y: %d\n", normalizedDesired.time_x, normalizedDesired.time_y);
-	printf("has_text_items: %d\n", normalizedDesired.has_text_items);
-    for (size_t index = 0; index < normalizedDesired.text_items.size(); ++index) {
-        media::VideoOsdTextItem item = normalizedDesired.text_items[index];
-		printf("text_items[%d].has_text: %d\n", index, item.has_text);
-		printf("text_items[%d].text: %s\n", index, item.text.c_str());
-		const char *p = item.text.c_str();
-		printf("[");
-		for (int i = 0; p[i] != '\0'; i++)
-			printf("%02X ", p[i]);
-		printf("]\n");
-		printf("text_items[%d].has_position: %d\n", index, item.has_position);
-		printf("text_items[%d].x: %d y: %d\n", index, item.x, item.y);
-    }
+	int normalizedFontSize = 0;
+	if (normalizedDesired.has_font_size &&
+	    !NormalizeVideoOsdFontSize(normalizedDesired.font_size, &normalizedFontSize)) {
+		return -1;
+	}
+
+	std::string normalizedFontColorMode;
+	if (normalizedDesired.has_font_color_mode &&
+	    !NormalizeVideoOsdFontColorMode(normalizedDesired.font_color_mode, &normalizedFontColorMode)) {
+		return -1;
+	}
+
+	std::string normalizedFontColor;
+	if (normalizedDesired.has_font_color &&
+	    !NormalizeVideoOsdFontColor(normalizedDesired.font_color, &normalizedFontColor)) {
+		return -1;
+	}
 
 	CConfigTable table;
 	OSDTimeConf_S curOSDTimeConfig;
@@ -394,25 +581,55 @@ int ApplyVideoOsdConfig(const VideoOsdState& desired)
 	}
 	if (normalizedDesired.has_time_position)
 	{
-		newOSDTimeConfig.x = normalizedDesired.time_x;
-		newOSDTimeConfig.y = normalizedDesired.time_y;
+		newOSDTimeConfig.x = ScaleVideoOsdXToDevice(normalizedDesired.time_x);
+		newOSDTimeConfig.y = ScaleVideoOsdYToDevice(normalizedDesired.time_y);
 	}
 	if (normalizedDesired.has_time_format)
 	{
-		//yyyy-MM-dd HH:mm:ss
-		//yyyy年MM月dd日 HH:mm:ss
-		const std::string format = ToLowerCopy(normalizedDesired.time_format);
-		if (ContainsToken(format, "yyyy年mm月dd日") == false)
-			newOSDTimeConfig.date_type = 0;
-		else
-			newOSDTimeConfig.date_type = 1;
-		newOSDTimeConfig.time_type = 0;
+		newOSDTimeConfig.date_type = NormalizeVideoOsdDateType(normalizedDesired.time_format);
+		newOSDTimeConfig.time_type = NormalizeVideoOsdTimeType(normalizedDesired.time_format);
 	}
-	if (newOSDTimeConfig.date_type != curOSDTimeConfig.date_type || 
-		newOSDTimeConfig.time_type != curOSDTimeConfig.time_type || 
-		newOSDTimeConfig.x != curOSDTimeConfig.x || 
-		newOSDTimeConfig.y != curOSDTimeConfig.y || 
-		newOSDTimeConfig.show != curOSDTimeConfig.show)
+	if (normalizedDesired.has_date_style)
+	{
+		newOSDTimeConfig.date_type = NormalizeVideoOsdDateType(normalizedDesired.date_style);
+	}
+	if (normalizedDesired.has_time_style)
+	{
+		newOSDTimeConfig.time_type = NormalizeVideoOsdTimeType(normalizedDesired.time_style);
+	}
+	if (normalizedDesired.has_time_display_week_enabled)
+	{
+		newOSDTimeConfig.display_week_enabled =
+			(normalizedDesired.time_display_week_enabled != 0) ? 1 : 0;
+	}
+	if (normalizedDesired.has_time_alignment)
+	{
+		newOSDTimeConfig.alignment =
+			NormalizeVideoOsdAlignmentValue(normalizedDesired.time_alignment);
+	}
+	if (normalizedDesired.has_font_size)
+	{
+		newOSDTimeConfig.font_size = normalizedFontSize;
+	}
+	if (normalizedDesired.has_font_color_mode)
+	{
+		newOSDTimeConfig.font_color_mode = normalizedFontColorMode;
+	}
+	if (normalizedDesired.has_font_color)
+	{
+		newOSDTimeConfig.font_color = normalizedFontColor;
+	}
+
+	if (newOSDTimeConfig.date_type != curOSDTimeConfig.date_type ||
+		newOSDTimeConfig.time_type != curOSDTimeConfig.time_type ||
+		newOSDTimeConfig.display_week_enabled != curOSDTimeConfig.display_week_enabled ||
+		newOSDTimeConfig.x != curOSDTimeConfig.x ||
+		newOSDTimeConfig.y != curOSDTimeConfig.y ||
+		newOSDTimeConfig.show != curOSDTimeConfig.show ||
+		newOSDTimeConfig.alignment != curOSDTimeConfig.alignment ||
+		newOSDTimeConfig.font_size != curOSDTimeConfig.font_size ||
+		newOSDTimeConfig.font_color_mode != curOSDTimeConfig.font_color_mode ||
+		newOSDTimeConfig.font_color != curOSDTimeConfig.font_color)
 	{
 		table.clear();
 		TExchangeAL<OSDTimeConf_S>::setConfig(newOSDTimeConfig, table);
@@ -428,46 +645,50 @@ int ApplyVideoOsdConfig(const VideoOsdState& desired)
 	if (normalizedDesired.has_text_items)
 	{
 		int i;
-		for (i = 0; i < OSD_TEXT_MAX && i < normalizedDesired.text_items.size(); i++)
+		for (i = 0; i < OSD_TEXT_MAX && i < (int)normalizedDesired.text_items.size(); i++)
 		{
 			media::VideoOsdTextItem &item = normalizedDesired.text_items[i];
 			if (item.has_text)
 			{
 				newOSDTextAllConfig.osd_text[i].text = strToHexAscii(item.text);
-				const char *p = newOSDTextAllConfig.osd_text[i].text.c_str();
-				printf("ApplyVideoOsdConfig -> [%s]\n", p);
-//				snprintf(newOSDTextAllConfig.osd_text[i].text, sizeof(newOSDTextAllConfig.osd_text[i].text), item.text.c_str());
-//				const char *p = newOSDTextAllConfig.osd_text[i].text.c_str();
-//				printf("ApplyVideoOsdConfig -> [");
-//				for (int i = 0; p[i] != '\0'; i++)
-//					printf("%02X ", p[i]);
-//				printf("]\n");
 			}
 			if (item.has_position)
 			{
-				newOSDTextAllConfig.osd_text[i].x = item.x;
-				newOSDTextAllConfig.osd_text[i].y = item.y;
+				newOSDTextAllConfig.osd_text[i].x = ScaleVideoOsdXToDevice(item.x);
+				newOSDTextAllConfig.osd_text[i].y = ScaleVideoOsdYToDevice(item.y);
 			}
-			newOSDTextAllConfig.osd_text[i].show = 1;
+			if (item.has_alignment)
+			{
+				newOSDTextAllConfig.osd_text[i].alignment =
+					NormalizeVideoOsdAlignmentValue(item.alignment);
+			}
+			const bool hasText =
+				!newOSDTextAllConfig.osd_text[i].text.empty();
+			newOSDTextAllConfig.osd_text[i].show =
+				((!normalizedDesired.has_text_enabled || normalizedDesired.text_enabled != 0) &&
+				 hasText) ? 1 : 0;
 		}
 		for (; i < OSD_TEXT_MAX; i++)
 		{
 			newOSDTextAllConfig.osd_text[i].show = 0;
 		}
 	}
-	else
+	else if (normalizedDesired.has_text_enabled)
 	{
 		for (int i = 0; i < OSD_TEXT_MAX; i++)
 		{
-			newOSDTextAllConfig.osd_text[i].show = 0;
+			newOSDTextAllConfig.osd_text[i].show =
+				(normalizedDesired.text_enabled != 0 &&
+				 !newOSDTextAllConfig.osd_text[i].text.empty()) ? 1 : 0;
 		}
 	}
 	for (int i = 0; i < OSD_TEXT_MAX; i++)
 	{
-		if (newOSDTextAllConfig.osd_text[i].text != curOSDTextAllConfig.osd_text[i].text || 
-			newOSDTextAllConfig.osd_text[i].x != curOSDTextAllConfig.osd_text[i].x || 
-			newOSDTextAllConfig.osd_text[i].y != curOSDTextAllConfig.osd_text[i].y || 
-			newOSDTextAllConfig.osd_text[i].show != curOSDTextAllConfig.osd_text[i].show)
+		if (newOSDTextAllConfig.osd_text[i].text != curOSDTextAllConfig.osd_text[i].text ||
+			newOSDTextAllConfig.osd_text[i].x != curOSDTextAllConfig.osd_text[i].x ||
+			newOSDTextAllConfig.osd_text[i].y != curOSDTextAllConfig.osd_text[i].y ||
+			newOSDTextAllConfig.osd_text[i].show != curOSDTextAllConfig.osd_text[i].show ||
+			newOSDTextAllConfig.osd_text[i].alignment != curOSDTextAllConfig.osd_text[i].alignment)
 		{
 			table.clear();
 			TExchangeAL<OSDTextAllConf_S>::setConfig(newOSDTextAllConfig, table);
@@ -518,6 +739,13 @@ bool QueryVideoOsdState(VideoOsdState* state)
 	state->has_time_enabled = true;
 	state->time_enabled = curOSDTimeConfig.show;
 
+	state->has_font_size = true;
+	state->font_size = curOSDTimeConfig.font_size;
+	state->has_font_color_mode = true;
+	state->font_color_mode = curOSDTimeConfig.font_color_mode;
+	state->has_font_color = true;
+	state->font_color = curOSDTimeConfig.font_color;
+
 	state->has_text_enabled = true;
 	state->text_enabled = 0;
 	for (int i = 0; i < OSD_TEXT_MAX; i++)
@@ -530,15 +758,21 @@ bool QueryVideoOsdState(VideoOsdState* state)
 	}
 
 	state->has_time_format = true;
-	if (0 == curOSDTimeConfig.date_type)
-		state->time_format = "yyyy-MM-dd HH:mm:ss";
-	else
-		state->time_format = "yyyy年MM月dd日 HH:mm:ss";
-	printf("state->time_format: %s\n", state->time_format.c_str());
+	state->time_format = BuildVideoOsdTimeFormatFromConfig(
+		curOSDTimeConfig.date_type, curOSDTimeConfig.time_type);
+
+	state->has_date_style = true;
+	state->date_style = BuildVideoOsdDateStyleFromType(curOSDTimeConfig.date_type);
+	state->has_time_style = true;
+	state->time_style = (curOSDTimeConfig.time_type == 1) ? "12hour" : "24hour";
 
 	state->has_time_position = true;
-	state->time_x = curOSDTimeConfig.x;
-	state->time_y = curOSDTimeConfig.y;
+	state->time_x = ScaleVideoOsdXFromDevice(curOSDTimeConfig.x);
+	state->time_y = ScaleVideoOsdYFromDevice(curOSDTimeConfig.y);
+	state->has_time_display_week_enabled = true;
+	state->time_display_week_enabled = curOSDTimeConfig.display_week_enabled;
+	state->has_time_alignment = true;
+	state->time_alignment = BuildVideoOsdAlignmentValue(curOSDTimeConfig.alignment);
 
 	state->has_text_items = true;
 	for (int i = 0; i < OSD_TEXT_MAX; i++)
@@ -546,37 +780,44 @@ bool QueryVideoOsdState(VideoOsdState* state)
 		if (curOSDTextAllConfig.osd_text[i].show)
 		{
 			media::VideoOsdTextItem item;
-			item.has_text = true;			
+			item.has_text = true;
 			item.text = hexToStr(curOSDTextAllConfig.osd_text[i].text);
 			item.has_position = true;
-			item.x = curOSDTextAllConfig.osd_text[i].x;
-			item.y = curOSDTextAllConfig.osd_text[i].y;
+			item.x = ScaleVideoOsdXFromDevice(curOSDTextAllConfig.osd_text[i].x);
+			item.y = ScaleVideoOsdYFromDevice(curOSDTextAllConfig.osd_text[i].y);
+			item.has_alignment = true;
+			item.alignment = BuildVideoOsdAlignmentValue(curOSDTextAllConfig.osd_text[i].alignment);
 			state->text_items.push_back(item);
 		}
 	}
 
-	printf("state->text_items size: %d\n", state->text_items.size());
-
     NormalizeVideoOsdTextItems(state);
 
-    if (!state->has_master_enabled &&
-        (state->has_time_enabled || state->has_event_enabled || state->has_alert_enabled)) {
-        state->has_master_enabled = true;
-        state->master_enabled = ((state->has_time_enabled && state->time_enabled != 0) ||
-                                 (state->has_event_enabled && state->event_enabled != 0) ||
-                                 (state->has_alert_enabled && state->alert_enabled != 0)) ? 1 : 0;
-    }
+	if (!state->has_master_enabled &&
+	    (state->has_time_enabled || state->has_event_enabled ||
+	     state->has_alert_enabled || state->has_text_enabled)) {
+	    state->has_master_enabled = true;
+	    state->master_enabled = ((state->has_time_enabled && state->time_enabled != 0) ||
+	                             (state->has_event_enabled && state->event_enabled != 0) ||
+	                             (state->has_alert_enabled && state->alert_enabled != 0) ||
+	                             (state->has_text_enabled && state->text_enabled != 0)) ? 1 : 0;
+	}
 
-    return state->has_master_enabled ||
-           state->has_event_enabled ||
-           state->has_alert_enabled ||
-           state->has_time_enabled ||
-           state->has_text_enabled ||
-           state->has_time_format ||
-           state->has_date_style ||
-           state->has_time_style ||
-           state->has_time_position ||
-           state->has_text_items;
+	return state->has_master_enabled ||
+	       state->has_event_enabled ||
+	       state->has_alert_enabled ||
+	       state->has_font_size ||
+	       state->has_font_color_mode ||
+	       state->has_font_color ||
+	       state->has_time_enabled ||
+	       state->has_text_enabled ||
+	       state->has_time_format ||
+	       state->has_date_style ||
+	       state->has_time_style ||
+	       state->has_time_position ||
+	       state->has_time_display_week_enabled ||
+	       state->has_time_alignment ||
+	       state->has_text_items;
 }
 
 } // namespace media

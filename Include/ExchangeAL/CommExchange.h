@@ -407,18 +407,33 @@ struct OSDTimeConf_S
 {
 	int date_type;			/*
 							 *0 "YYYY-MM-DD"
-							 *1 "MM-DD-YYYY"
-							 *2 "DD-MM-YYYY"
-							 *3 "YYYY/MM/DD"
-							 *4 "MM/DD/YYYY"
-							 *5 "DD/MM/YYYY"
-							 *0 yyyy-MM-dd
-							 *1 yyyy年MM月dd日
+							 *1 "YYYY.MM.DD"
+							 *2 "YYYY/MM/DD"
+							 *3 "YYYY年MM月DD日"
 							 */
 	int time_type; 			//0-24小时 1-12小时
+	int display_week_enabled;//0-不显示星期 1-显示星期
 	int x;
 	int y;
 	int show;
+	int alignment;			//0-左对齐 1-右对齐
+	int font_size;			//16/32/64
+	std::string font_color_mode; //auto/customize
+	std::string font_color;	//RGB HEX #rrggbb
+
+	OSDTimeConf_S()
+		: date_type(0),
+		  time_type(0),
+		  display_week_enabled(0),
+		  x(0),
+		  y(0),
+		  show(1),
+		  alignment(0),
+		  font_size(32),
+		  font_color_mode("customize"),
+		  font_color("#fff799")
+	{
+	}
 };
 
 #define OSD_TEXT_MAX (7)
@@ -428,6 +443,15 @@ struct OSDTextConf_S
 	int x;
 	int y;
 	int show;
+	int alignment;			//0-左对齐 1-右对齐
+
+	OSDTextConf_S()
+		: x(0),
+		  y(0),
+		  show(0),
+		  alignment(0)
+	{
+	}
 };
 struct OSDTextAllConf_S
 {

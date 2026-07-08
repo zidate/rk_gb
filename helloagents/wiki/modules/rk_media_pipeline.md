@@ -6,7 +6,7 @@
 ## 模块概述
 - **职责:** 说明视频/音频数据如何从 RK 媒体抽象层进入实时预览、录像、回放和协议发送
 - **状态:** ✅稳定
-- **最后更新:** 2026-05-16
+- **最后更新:** 2026-07-08
 - **代码真实来源:** `Middleware/Include/PAL/Capture.h`、`Middleware/Include/PAL/libdmc.h`、`App/Media/*`、`App/Storage/*`、`App/Protocol/ProtocolManager.cpp`
 
 ## 规范
@@ -121,10 +121,12 @@ flowchart TD
 
 | 能力 | 配置来源 | 应用路径 |
 |------|----------|----------|
-| 时间 OSD | `CFG_OSD_TIME` | `AVManager::VideoParamInit()` / `onConfigOSDTime()` 调 `gb_rkipc_osd_time_set()` |
-| 文本 OSD | `CFG_OSD_TEXT` | `AVManager::VideoParamInit()` / `onConfigOSDText()` 调 `gb_rkipc_osd_text_set()` |
-| GB OSD 协议态 | `VideoOsdControl` 缓存多文本、日期格式、时间格式等协议字段 | 当前设备侧主要落第一条文本和时间 OSD |
+| 时间 OSD | `CFG_OSD_TIME` | `AVManager::VideoParamInit()` / `onConfigOSDTime()` 先调 `gb_rkipc_osd_common_set()`，再调 `gb_rkipc_osd_time_set()` |
+| 文本 OSD | `CFG_OSD_TEXT` | `AVManager::VideoParamInit()` / `onConfigOSDText()` 调 `gb_rkipc_osd_text_set()`，RV1106 侧使用 `1-7` 号区域显示最多 `7` 条文本 |
+| GB/外部 OSD 状态 | `VideoOsdControl` 承载多文本、日期/时间格式、星期、字体、颜色、坐标和对齐 | 外部 x/y 统一为 `0-10000` 归一化坐标，媒体层按主码流分辨率换算到底层像素 |
 | 翻转 | `CFG_CAMERA_PARAM -> CameraParamAll.vCameraParamAll[0].mirror/flip` | `VideoImageControl::ApplyVideoImageFlipMode()` 写配置并触发 `applyOK` |
+
+RV1106 的 OSD 字体仍走 ARGB8888 FreeType 位图路径。`font_color_mode=auto` 时，RK 层会从 `VIDEO_PIPE_1` 取一帧 NV12，按 Y 平面下采样生成亮/暗 map，再在 `font_factory` 逐字符回调里选择黑色或白色；取不到帧或格式不匹配时不阻塞刷新，字符颜色回退为白色。
 
 ## 注意事项
 
@@ -133,6 +135,12 @@ flowchart TD
 - 录像回放排查应优先看 MP4 文件实际 codec 与 demuxer `iCodeType`，当前实时预览 codec 只能作为参考。
 - DMC `media_chn` 与 `media_type` 是两个维度：主/子码流由 `media_chn` 表示，H264/H265/AUDIO 由 `media_type` 表示。
 - 协议层新增媒体控制时，应遵守 `query -> compare -> apply`，尽量一次配置写回多个字段，避免连续重配编码器。
+
+## 代码亮点
+
+- 协议、媒体、存储的职责切得比较清楚，`ProtocolManager` 负责会话与报文编排，`VideoEncodeControl` 负责参数比较与落地，`StorageManager` 负责文件流和结束语义，边界比较利于定位问题。
+- 编码参数不是“收到就写”，而是先读当前 `CFG_VIDEO` 再比对差异后一次性应用，减少重复重配和抖动。
+- 回放链路对混合 H264/H265 的处理比较实用：先按文件名判 codec，再回退 moov，逐帧仍按 `iCodeType` 发，文件 EOF 还会主动补 `MediaStatus 121/eos`，比单纯靠平台猜会话状态稳一些。
 
 ## 依赖
 - `Middleware/Include/PAL/Capture.h`
@@ -148,5 +156,6 @@ flowchart TD
 - `App/Protocol/gb28181/GB28181RtpPsSender.*`
 
 ## 变更历史
+- 2026-07-08: 补齐 RV1106 OSD 自动黑白：`font_color_mode=auto` 从子码流 VI NV12 Y 平面采样亮度，并在 ARGB8888 FreeType 绘制中逐字符选择黑/白，失败时白色兜底。
 - 2026-05-16: 补充 GB 回放单文件 EOF 主动 EOS 口径，明确 Storage NULL 回调到 `MediaStatus 121/eos` 的链路。
 - 2026-05-16: 新增 RK 媒体链路知识库，沉淀 PAL/DMC、编码配置、实时流、录像、回放/下载和 OSD/翻转边界。

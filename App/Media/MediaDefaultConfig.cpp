@@ -266,9 +266,14 @@ void CMediaDefaultConfig::setOSDTime()
 	CConfigTable table;
 	table[Json::StaticString("date_type")] = 0;
 	table[Json::StaticString("time_type")] = 0;
+	table[Json::StaticString("display_week_enabled")] = 0;
 	table[Json::StaticString("x")] = 0;
 	table[Json::StaticString("y")] = 0;
 	table[Json::StaticString("show")] = 1;
+	table[Json::StaticString("alignment")] = 0;
+	table[Json::StaticString("font_size")] = 32;
+	table[Json::StaticString("font_color_mode")] = "customize";
+	table[Json::StaticString("font_color")] = "#fff799";
 	g_configManager.setDefault(getConfigName(CFG_OSD_TIME), table);
 }
 
@@ -282,6 +287,7 @@ void CMediaDefaultConfig::setOSDText()
 		table[i][Json::StaticString("x")] = 0;
 		table[i][Json::StaticString("y")] = 0;
 		table[i][Json::StaticString("show")] = 0;
+		table[i][Json::StaticString("alignment")] = 0;
 	}
 	g_configManager.setDefault(getConfigName(CFG_OSD_TEXT), table);
 }

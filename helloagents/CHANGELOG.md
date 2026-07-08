@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 修复
+- 修复 RV1106 OSD `font_color_mode=auto` 只落成固定白色的问题：GB/RK OSD 层现在按子码流 VI NV12 Y 平面生成低分辨率亮度 map，并在现有 ARGB8888 FreeType 绘制路径中逐字符选择黑/白；取帧失败时保留白色兜底，不阻塞 OSD 刷新。
 - 修复 GB28181 与 GAT1400 启动耦合问题：`ProtocolManager::Start()/ReloadExternalConfig()/RestartGbRegisterService()` 现按 `gb_register.enabled` 门控 GB live/replay RTP/PS sender、广播、对讲、listen 和 GB client lifecycle；关闭 GB28181 时不再影响 GAT1400 独立启动。
 - 修复 GAT1400 对上连接缺少明确连接超时和双栈回退的问题：对上请求目标会按配置优先尝试 IPv6，失败后回退 IPv4，TCP 连接阶段使用非阻塞 `connect + select + SO_ERROR` 按 `request_timeout_ms` 超时退出。
 - 修复 GAT1400 双栈接入可能串平台 endpoint 的问题：注册成功后只记录实际连通的 IPv4/IPv6 地址族，后续保活、注销、上报和补传走该地址族对应的配置 endpoint，直到注销、心跳失败或重新注册。
@@ -32,6 +33,7 @@
 - 为恢复该分支的交叉编译验证能力，禁用根目录与 `Middleware` 的全局 `-o3/-O3` 参数，并重新跑通 `tools/issue_bot/build_verify.sh`。
 
 ### 新增
+- 扩展 OSD 水印外部接口能力：`VideoOsdState`、`CFG_OSD_TIME/CFG_OSD_TEXT`、`AVManager` 和 RV1106 RGN 层现支持 `16/32/64` 字号、`auto/customize #rrggbb` 颜色、日期四种格式、12/24 小时制、星期开关、左右对齐、外部 `0-10000` 坐标，以及最多 `7` 条文本水印真实下发。
 - 新增 GAT1400 注册配置 `server_ipv6/server_ipv6_port`，本地 INI、Web 配置桥、配置 diff/reload 和请求目标构造均已接入。
 - 新增 GAT1400 车牌检测异步上报入口 `ProtocolManager::NotifyGatPlateDetections()`、`GAT1400ClientService::NotifyPlateDetections()` 与 `LOWER_1400_NOTIFY_PLATEDETECTIONS()`，复用 `GAT_1400_Motor` 车牌字段和 `/VIID/MotorVehicles` 资源。
 - 新增 `RK_ENABLE_IPV6_SOCKET` 应用层 socket 宏，默认关闭保持 IPv4-only 行为；开启后 GB28181 RTP/PS、广播/对讲、GB socket shim、GB SDK SDP 地址族、RTSP TCP/UDP RTP、GAT1400 callback listener、NTP UDP connect 和 DM/LwM2M UDP 等关键路径改用 IPv4/IPv6 兼容 socket。
@@ -84,7 +86,7 @@
 - 将 GB28181 编码参数访问链路从 `ProtocolManager` 下沉到 `App/Media/VideoEncodeControl.*`：GB 模块现在通过媒体接口统一读取主/辅码流 `codec/fps/bitrate/gop/resolution` 运行态，并保留 `ApplyVideoEncodeStreamConfig()` 作为后续设备侧应用入口，不再直接调用 `rk_video_*` / `CaptureGetResolution`。
 - 将 GB28181 OSD 的设备落地职责从 `ProtocolManager` 下沉到 `App/Media/VideoOsdControl.*`：GB 模块现在只保留协议字段映射、配置持久化和查询应答组包，媒体/编码侧统一负责 `CaptureSetOSDSwitch`、`rk_osd_*` 的默认适配实现。
 - 统一 OSD get/set 结构到 `media::VideoOsdState`：`ApplyVideoOsdConfig()` 与 `QueryVideoOsdState()` 现共用同一套状态模型，新增 `VideoOsdTextItem` / `VideoOsdState.text_items[]` 承载白皮书 `OSDConfig.SumNum + Item[]` 多文本协议态，GB 协议层不再维护单独的 `VideoOsdConfig` 中间结构。
-- 补齐 GB28181 白皮书 `OSDConfig` 多文本协议兼容：`ConfigDownload + OSDConfig` 现可按运行态回 `SumNum + Item[]`，`DeviceConfig + OSDConfig` 也可解析并保存多条文本项；当前 SoC 仍只尽力落第 `1` 条文本及其坐标，额外文本项由 `VideoOsdState` 缓存并用于后续查询回显，`TimeType=1` 继续只做协议保留与回显。
+- 补齐 GB28181 白皮书 `OSDConfig` 多文本协议兼容：`ConfigDownload + OSDConfig` 现可按运行态回 `SumNum + Item[]`，`DeviceConfig + OSDConfig` 也可解析并保存多条文本项；早期 RV1106 落地只覆盖第 `1` 条文本，现已扩展为时间区域 + 最多 `7` 条文本区域真实下发。
 - 补充 `helloagents/wiki/modules/gb28181.md` 中的 GB28181 OSD 对接说明，明确当前 OSD 获取/设置联调已通、实际生效路径为 `GB28181ClientReceiverAdapter -> ProtocolManager -> Capture/rk_osd_*`，并标注 `DevInterface` 的 OSD 四个虚接口尚未作为当前 GB OSD 正式入口使用。
 - 将 GB28181 “标准国标 / 零配置” 切换方式从编译期开关改为 `gb28181.ini::register_mode` 运行时控制，并同步补齐 `HttpConfigProvider` 的 `gb_register_mode` 字段；`register_mode=standard` 时忽略 `zero_config.ini` 缺失，`register_mode=zero_config` 时按零配置流程校验与启动。
 - 将零配置字段 `StringCode/Mac/Line/redirect_domain/redirect_server_id/CustomProtocolVersion/manufacturer/model` 从 `gb28181.ini` 拆到独立 `/userdata/conf/Config/GB/zero_config.ini`；当 `register_mode=zero_config` 且缺少该文件时，配置加载会直接记录日志并返回错误，不再做兼容迁移或自动生成。

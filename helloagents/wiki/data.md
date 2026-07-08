@@ -58,10 +58,15 @@
 | `has_time_format/time_format` | 统一时间格式字符串 |
 | `has_date_style/date_style` | 底层日期样式 |
 | `has_time_style/time_style` | 底层时间样式 |
-| `has_time_position/time_x/time_y` | 时间 OSD 坐标 |
-| `has_text_items/text_items[]` | 文本项数组；每项包含 `has_text/text/has_position/x/y` |
+| `has_time_display_week_enabled/time_display_week_enabled` | 日期水印后是否显示星期 |
+| `has_time_alignment/time_alignment` | 日期水印水平对齐方式，当前支持 `left/right` |
+| `has_time_position/time_x/time_y` | 时间 OSD 坐标；外部接口统一使用 `0-10000` 归一化坐标 |
+| `has_font_size/font_size` | OSD 字号，当前支持 `16/32/64` |
+| `has_font_color_mode/font_color_mode` | OSD 颜色模式，当前支持 `auto/customize` |
+| `has_font_color/font_color` | 自定义 OSD 颜色，格式为 `#rrggbb` |
+| `has_text_items/text_items[]` | 文本项数组；每项包含 `has_text/text/has_position/x/y/has_alignment/alignment`，坐标同样为 `0-10000` |
 
-**说明:** 白皮书 `OSDConfig.SumNum + Item[]` 当前直接映射到 `VideoOsdState.text_items[]`。协议态支持多文本回显，但当前 SoC 真实只会尽力显示第 `1` 个文本项；额外项由媒体层缓存并供 GB 查询回显。
+**说明:** 白皮书 `OSDConfig.SumNum + Item[]` 当前直接映射到 `VideoOsdState.text_items[]`。RV1106 OSD 层现按 `0` 号时间区域 + `1-7` 号文本区域下发，最多可真实显示 `7` 条文本；`VideoOsdControl` 负责把外部 `0-10000` 坐标与当前主码流分辨率互转。
 
 ### `GbRegisterParam` 本地持久化子集
 

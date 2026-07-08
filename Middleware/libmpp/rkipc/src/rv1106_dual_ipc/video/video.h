@@ -148,8 +148,9 @@ int gb_rkipc_video_det_start();
 int gb_rkipc_video_det_stop();
 
 int gb_rkipc_osd_init();
-int gb_rkipc_osd_time_set(int date_type, int time_type, int x, int y, int show);
-int gb_rkipc_osd_text_set(int index, const char *text, int x, int y, int show);
+int gb_rkipc_osd_common_set(int font_size, const char *font_color_mode, const char *font_color);
+int gb_rkipc_osd_time_set(int date_type, int time_type, int display_week_enabled,
+						  int x, int y, int show, int alignment);
+int gb_rkipc_osd_text_set(int index, const char *text, int x, int y, int show, int alignment);
 int gb_rkipc_osd_attach(int des_chan);
 int gb_rkipc_osd_detach(int des_chan);
-

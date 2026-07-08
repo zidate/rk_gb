@@ -236,6 +236,8 @@ int generate_date_time(const char *fmt, wchar_t *result) {
 	if (strstr(fmt, OSD_FMT_CHR)) {
 		if (strstr(fmt, OSD_FMT_YMD0))
 			sprintf(ymd_string, "%s-%s-%s", year, month, day);
+		else if (strstr(fmt, OSD_FMT_YMD_DOT))
+			sprintf(ymd_string, "%s.%s.%s", year, month, day);
 		else if (strstr(fmt, OSD_FMT_YMD1))
 			sprintf(ymd_string, "%s-%s-%s", month, day, year);
 		else if (strstr(fmt, OSD_FMT_YMD2))
@@ -272,8 +274,9 @@ int generate_date_time_2(const char *fmt, wchar_t *result) {
 	char year[8] = {0}, month[4] = {0}, day[4] = {0};
 	char week[16] = {0}, hms[12] = {0};
 	char ymd_string[32] = {0};
+	char week_string[16] = {0};
 	char time_string[MAX_WCH_BYTE] = {0};
-	int wchar_cnt = 0;
+	int wid = -1;
 
 	time_t curtime;
 	curtime = time(0);
@@ -287,16 +290,54 @@ int generate_date_time_2(const char *fmt, wchar_t *result) {
 		strftime(hms, sizeof(hms), "%I:%M:%S %p", localtime(&curtime));
 	}
 
-	wchar_cnt = sizeof(ymd_string) / sizeof(wchar_t);
 	if (strstr(fmt, OSD_FMT_CHR)) {
-		sprintf(ymd_string, "%s-%s-%s", year, month, day);
+		if (strstr(fmt, OSD_FMT_YMD_DOT))
+			sprintf(ymd_string, "%s.%s.%s", year, month, day);
+		else if (strstr(fmt, OSD_FMT_YMD3))
+			sprintf(ymd_string, "%s/%s/%s", year, month, day);
+		else
+			sprintf(ymd_string, "%s-%s-%s", year, month, day);
 	} else {
 		sprintf(ymd_string, "%s年%s月%s日", year, month, day);
 	}
 
+	if (strstr(fmt, OSD_FMT_WEEK0)) {
+		strftime(week, sizeof(week), "%u", localtime(&curtime));
+		wid = week[0] - '0';
+		switch (wid) {
+		case 1:
+			sprintf(week_string, " 星期一");
+			break;
+		case 2:
+			sprintf(week_string, " 星期二");
+			break;
+		case 3:
+			sprintf(week_string, " 星期三");
+			break;
+		case 4:
+			sprintf(week_string, " 星期四");
+			break;
+		case 5:
+			sprintf(week_string, " 星期五");
+			break;
+		case 6:
+			sprintf(week_string, " 星期六");
+			break;
+		case 7:
+			sprintf(week_string, " 星期日");
+			break;
+		default:
+			sprintf(week_string, " 星期*");
+			break;
+		}
+	} else if (strstr(fmt, OSD_FMT_WEEK1)) {
+		strftime(week, sizeof(week), "%A", localtime(&curtime));
+		snprintf(week_string, sizeof(week_string), " %s", week);
+	}
+
 //	printf("ymd_string: %s\n", ymd_string);
 //	printf("hms: %s\n", hms);
-	snprintf(time_string, MAX_WCH_BYTE, "%s %s", ymd_string, hms);
+	snprintf(time_string, MAX_WCH_BYTE, "%s %s%s", ymd_string, hms, week_string);
 	// LOG_INFO("time_string is %s\n", time_string);
 //	printf("time_string: %s\n", time_string);
 //	printf("time_string len: %d\n", strlen(time_string));

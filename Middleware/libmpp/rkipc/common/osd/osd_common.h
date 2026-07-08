@@ -14,6 +14,7 @@
 #define OSD_FMT_WEEK1 "WEEK"
 #define OSD_FMT_CHR "CHR"
 #define OSD_FMT_YMD0 "YYYY-MM-DD"
+#define OSD_FMT_YMD_DOT "YYYY.MM.DD"
 #define OSD_FMT_YMD1 "MM-DD-YYYY"
 #define OSD_FMT_YMD2 "DD-MM-YYYY"
 #define OSD_FMT_YMD3 "YYYY/MM/DD"

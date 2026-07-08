@@ -19,7 +19,8 @@ int g_test_enc_type[2]; //for debug
 extern "C" {
 int gb_rkipc_video_det_init(DETECT_INIT *pAttr);
 int rkipc_osd_bmp_create_test();
-int gb_rkipc_osd_time_set(int date_type, int time_type, int x, int y, int show);
+int gb_rkipc_osd_time_set(int date_type, int time_type, int display_week_enabled,
+						  int x, int y, int show, int alignment);
 }
 #endif
 
@@ -1497,7 +1498,7 @@ bool CSofia::start()
 						buf[ret] = '\0';
 						if (sscanf(buf, "%d,%d,%d,%d,%d", &osd_date_type, &osd_time_type, &osd_x, &osd_y, &osd_show) > 0)
 						{
-							gb_rkipc_osd_time_set(osd_date_type, osd_time_type, osd_x, osd_y, osd_show);
+							gb_rkipc_osd_time_set(osd_date_type, osd_time_type, 0, osd_x, osd_y, osd_show, 0);
 						}
 					}
 					fclose(fp);

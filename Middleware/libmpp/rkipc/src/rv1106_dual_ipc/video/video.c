@@ -157,6 +157,7 @@ typedef struct {
 	uint32_t height;
 	int32_t x;
 	int32_t y;
+	int32_t alignment;
 	char text[128];
 	uint32_t font_color;
 	uint32_t show;
@@ -318,6 +319,7 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 		.height = 0,
 		.x = 0,
 		.y = 0,
+		.alignment = 0,
 		.text = "24hour CHR-YYYY-MM-DD",
 		.font_color = 0xfff799,
 		.show = 1,
@@ -333,6 +335,7 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 		.height = 80,
 		.x = 0,
 		.y = 0,
+		.alignment = 0,
 		.text = "",
 		.font_color = 0xfff799,
 		.show = 0,
@@ -348,6 +351,7 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 		.height = 80,
 		.x = 0,
 		.y = 0,
+		.alignment = 0,
 		.text = "",
 		.font_color = 0xfff799,
 		.show = 0,
@@ -363,6 +367,7 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 		.height = 80,
 		.x = 0,
 		.y = 0,
+		.alignment = 0,
 		.text = "",
 		.font_color = 0xfff799,
 		.show = 0,
@@ -378,6 +383,7 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 		.height = 80,
 		.x = 0,
 		.y = 0,
+		.alignment = 0,
 		.text = "",
 		.font_color = 0xfff799,
 		.show = 0,
@@ -393,6 +399,7 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 		.height = 80,
 		.x = 0,
 		.y = 0,
+		.alignment = 0,
 		.text = "",
 		.font_color = 0xfff799,
 		.show = 0,
@@ -408,6 +415,7 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 		.height = 80,
 		.x = 0,
 		.y = 0,
+		.alignment = 0,
 		.text = "",
 		.font_color = 0xfff799,
 		.show = 0,
@@ -423,6 +431,7 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 		.height = 80,
 		.x = 0,
 		.y = 0,
+		.alignment = 0,
 		.text = "",
 		.font_color = 0xfff799,
 		.show = 0,
@@ -7240,10 +7249,330 @@ extern int iconv_gbk_to_wchar(const char *in, wchar_t *out);
 extern int generate_date_time(const char *fmt, wchar_t *result);
 extern int generate_date_time_2(const char *fmt, wchar_t *result);
 
-static uint32_t s_osd_font_size = 64;//80;
+#define RKIPC_OSD_DEFAULT_FONT_SIZE 64
+#define RKIPC_OSD_MAX_FONT_SIZE 64
+#define RKIPC_OSD_AUTO_DOWNSAMPLE 8
+#define RKIPC_OSD_AUTO_THRESHOLD 128
+#define RKIPC_OSD_AUTO_VI_TIMEOUT_MS 10
+#define RKIPC_OSD_COLOR_BLACK 0x000000
+#define RKIPC_OSD_COLOR_WHITE 0xFFFFFF
+
+static uint32_t s_osd_font_size = RKIPC_OSD_DEFAULT_FONT_SIZE;
 static int osd_update_running;
 static pthread_t osd_update_thread;
 static void *s_osd_update_signal;
+static pthread_mutex_t s_osd_auto_color_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int s_osd_color_auto_enabled;
+static unsigned char *s_osd_auto_color_map;
+static int s_osd_auto_color_map_w;
+static int s_osd_auto_color_map_h;
+static int s_osd_auto_color_frame_w;
+static int s_osd_auto_color_frame_h;
+static int s_osd_auto_color_downsample = RKIPC_OSD_AUTO_DOWNSAMPLE;
+static int s_osd_auto_color_map_valid;
+
+typedef struct {
+	int region_x;
+	int region_y;
+	int main_width;
+	int main_height;
+} RKIPC_OSD_AUTO_COLOR_CTX_T;
+
+static int rkipc_osd_normalize_font_size(int font_size)
+{
+	if (font_size == 16 || font_size == 32 || font_size == 64)
+		return font_size;
+	return RKIPC_OSD_DEFAULT_FONT_SIZE;
+}
+
+static int rkipc_osd_hex_value(char c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a' + 10;
+	if (c >= 'A' && c <= 'F')
+		return c - 'A' + 10;
+	return -1;
+}
+
+static uint32_t rkipc_osd_parse_rgb_hex(const char *color, uint32_t default_color)
+{
+	const char *p = color;
+	uint32_t value = 0;
+
+	if (!p)
+		return default_color;
+	if (p[0] == '#')
+		p++;
+	else if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X'))
+		p += 2;
+
+	for (int i = 0; i < 6; i++) {
+		int digit = rkipc_osd_hex_value(p[i]);
+		if (digit < 0)
+			return default_color;
+		value = (value << 4) | (uint32_t)digit;
+	}
+	return value;
+}
+
+static int rkipc_osd_clamp_int(int value, int min_value, int max_value)
+{
+	if (value < min_value)
+		return min_value;
+	if (value > max_value)
+		return max_value;
+	return value;
+}
+
+static int rkipc_osd_aligned_x(const RGN_OSD_PARAM_T *param, int bitmap_width, int stream_width)
+{
+	int x;
+
+	if (!param)
+		return 0;
+	x = param->x;
+	if (param->alignment == 1)
+		x -= bitmap_width;
+	if (stream_width > bitmap_width)
+		return rkipc_osd_clamp_int(x, 0, stream_width - bitmap_width);
+	return 0;
+}
+
+static void rkipc_osd_auto_color_free_locked(void)
+{
+	if (s_osd_auto_color_map) {
+		free(s_osd_auto_color_map);
+		s_osd_auto_color_map = NULL;
+	}
+	s_osd_auto_color_map_w = 0;
+	s_osd_auto_color_map_h = 0;
+	s_osd_auto_color_frame_w = 0;
+	s_osd_auto_color_frame_h = 0;
+	s_osd_auto_color_map_valid = 0;
+}
+
+static void rkipc_osd_auto_color_set_enabled(int enabled)
+{
+	pthread_mutex_lock(&s_osd_auto_color_mutex);
+	s_osd_color_auto_enabled = enabled ? 1 : 0;
+	if (!s_osd_color_auto_enabled)
+		rkipc_osd_auto_color_free_locked();
+	else
+		s_osd_auto_color_map_valid = 0;
+	pthread_mutex_unlock(&s_osd_auto_color_mutex);
+}
+
+static int rkipc_osd_auto_color_is_enabled(void)
+{
+	int enabled;
+
+	pthread_mutex_lock(&s_osd_auto_color_mutex);
+	enabled = s_osd_color_auto_enabled;
+	pthread_mutex_unlock(&s_osd_auto_color_mutex);
+
+	return enabled;
+}
+
+static int rkipc_osd_auto_color_resize_locked(int frame_w, int frame_h, int downsample)
+{
+	int map_w;
+	int map_h;
+	unsigned char *map;
+
+	if (frame_w <= 0 || frame_h <= 0 || downsample <= 0)
+		return -1;
+
+	map_w = (frame_w + downsample - 1) / downsample;
+	map_h = (frame_h + downsample - 1) / downsample;
+	if (map_w <= 0 || map_h <= 0)
+		return -1;
+	if (s_osd_auto_color_map && s_osd_auto_color_frame_w == frame_w &&
+	    s_osd_auto_color_frame_h == frame_h && s_osd_auto_color_map_w == map_w &&
+	    s_osd_auto_color_map_h == map_h && s_osd_auto_color_downsample == downsample)
+		return 0;
+
+	map = (unsigned char *)malloc(map_w * map_h);
+	if (!map) {
+		rkipc_osd_auto_color_free_locked();
+		return -1;
+	}
+
+	rkipc_osd_auto_color_free_locked();
+	s_osd_auto_color_map = map;
+	s_osd_auto_color_map_w = map_w;
+	s_osd_auto_color_map_h = map_h;
+	s_osd_auto_color_frame_w = frame_w;
+	s_osd_auto_color_frame_h = frame_h;
+	s_osd_auto_color_downsample = downsample;
+
+	return 0;
+}
+
+static void rkipc_osd_auto_color_fill_map_locked(const unsigned char *y_addr, int frame_w,
+                                                 int frame_h, int stride, int downsample)
+{
+	for (int my = 0; my < s_osd_auto_color_map_h; my++) {
+		int y0 = my * downsample;
+		int y1 = rkipc_osd_clamp_int(y0 + downsample, 0, frame_h);
+		for (int mx = 0; mx < s_osd_auto_color_map_w; mx++) {
+			int x0 = mx * downsample;
+			int x1 = rkipc_osd_clamp_int(x0 + downsample, 0, frame_w);
+			unsigned int sum = 0;
+			unsigned int count = 0;
+
+			for (int y = y0; y < y1; y++) {
+				const unsigned char *line = y_addr + y * stride;
+				for (int x = x0; x < x1; x++) {
+					sum += line[x];
+					count++;
+				}
+			}
+			s_osd_auto_color_map[my * s_osd_auto_color_map_w + mx] =
+				count && (sum / count >= RKIPC_OSD_AUTO_THRESHOLD) ? 1 : 0;
+		}
+	}
+	s_osd_auto_color_map_valid = 1;
+}
+
+static int rkipc_osd_auto_color_update(void)
+{
+	VIDEO_FRAME_INFO_S frame;
+	unsigned char *y_addr;
+	int frame_w;
+	int frame_h;
+	int stride;
+	int ret;
+	int release_ret;
+
+	if (!rkipc_osd_auto_color_is_enabled())
+		return 0;
+
+	memset(&frame, 0, sizeof(frame));
+	ret = RK_MPI_VI_GetChnFrame(pipe_id_, VIDEO_PIPE_1, &frame, RKIPC_OSD_AUTO_VI_TIMEOUT_MS);
+	if (ret != RK_SUCCESS)
+		return ret;
+
+	y_addr = (unsigned char *)RK_MPI_MB_Handle2VirAddr(frame.stVFrame.pMbBlk);
+	frame_w = frame.stVFrame.u32Width;
+	frame_h = frame.stVFrame.u32Height;
+	stride = frame.stVFrame.u32VirWidth ? frame.stVFrame.u32VirWidth : frame_w;
+	if (y_addr && frame.stVFrame.enPixelFormat == RK_FMT_YUV420SP &&
+	    frame.stVFrame.enCompressMode == COMPRESS_MODE_NONE && frame_w > 0 && frame_h > 0 &&
+	    stride >= frame_w) {
+		pthread_mutex_lock(&s_osd_auto_color_mutex);
+		if (s_osd_color_auto_enabled &&
+		    !rkipc_osd_auto_color_resize_locked(frame_w, frame_h, RKIPC_OSD_AUTO_DOWNSAMPLE))
+			rkipc_osd_auto_color_fill_map_locked(y_addr, frame_w, frame_h, stride,
+			                                     RKIPC_OSD_AUTO_DOWNSAMPLE);
+		pthread_mutex_unlock(&s_osd_auto_color_mutex);
+	}
+
+	release_ret = RK_MPI_VI_ReleaseChnFrame(pipe_id_, VIDEO_PIPE_1, &frame);
+	if (release_ret != RK_SUCCESS)
+		LOG_ERROR("RK_MPI_VI_ReleaseChnFrame fail %x\n", release_ret);
+
+	return ret;
+}
+
+static int rkipc_osd_auto_color_map_is_bright_locked(int frame_x, int frame_y)
+{
+	int map_x;
+	int map_y;
+
+	if (!s_osd_auto_color_map_valid || !s_osd_auto_color_map ||
+	    s_osd_auto_color_map_w <= 0 || s_osd_auto_color_map_h <= 0 ||
+	    s_osd_auto_color_downsample <= 0)
+		return 0;
+
+	frame_x = rkipc_osd_clamp_int(frame_x, 0, s_osd_auto_color_frame_w - 1);
+	frame_y = rkipc_osd_clamp_int(frame_y, 0, s_osd_auto_color_frame_h - 1);
+	map_x = rkipc_osd_clamp_int(frame_x / s_osd_auto_color_downsample, 0,
+	                            s_osd_auto_color_map_w - 1);
+	map_y = rkipc_osd_clamp_int(frame_y / s_osd_auto_color_downsample, 0,
+	                            s_osd_auto_color_map_h - 1);
+
+	return s_osd_auto_color_map[map_y * s_osd_auto_color_map_w + map_x] ? 1 : 0;
+}
+
+static unsigned int rkipc_osd_auto_color_judge(void *userdata, int x, int y, int w, int h,
+                                               unsigned int default_color)
+{
+	RKIPC_OSD_AUTO_COLOR_CTX_T *ctx = (RKIPC_OSD_AUTO_COLOR_CTX_T *)userdata;
+	int sample_points[5][2];
+	unsigned int color = RKIPC_OSD_COLOR_WHITE;
+
+	if (!ctx)
+		return default_color;
+
+	if (w <= 0)
+		w = 1;
+	if (h <= 0)
+		h = 1;
+
+	sample_points[0][0] = x + w / 2;
+	sample_points[0][1] = y + h / 2;
+	sample_points[1][0] = x;
+	sample_points[1][1] = y;
+	sample_points[2][0] = x + w - 1;
+	sample_points[2][1] = y;
+	sample_points[3][0] = x;
+	sample_points[3][1] = y + h - 1;
+	sample_points[4][0] = x + w - 1;
+	sample_points[4][1] = y + h - 1;
+
+	pthread_mutex_lock(&s_osd_auto_color_mutex);
+	if (!s_osd_color_auto_enabled) {
+		pthread_mutex_unlock(&s_osd_auto_color_mutex);
+		return default_color;
+	}
+	if (!s_osd_auto_color_map_valid || !s_osd_auto_color_map ||
+	    ctx->main_width <= 0 || ctx->main_height <= 0 ||
+	    s_osd_auto_color_frame_w <= 0 || s_osd_auto_color_frame_h <= 0) {
+		pthread_mutex_unlock(&s_osd_auto_color_mutex);
+		return color;
+	}
+
+	for (int i = 0; i < 5; i++) {
+		int main_x = ctx->region_x + sample_points[i][0];
+		int main_y = ctx->region_y + sample_points[i][1];
+		int frame_x;
+		int frame_y;
+
+		main_x = rkipc_osd_clamp_int(main_x, 0, ctx->main_width - 1);
+		main_y = rkipc_osd_clamp_int(main_y, 0, ctx->main_height - 1);
+		frame_x = main_x * s_osd_auto_color_frame_w / ctx->main_width;
+		frame_y = main_y * s_osd_auto_color_frame_h / ctx->main_height;
+		if (rkipc_osd_auto_color_map_is_bright_locked(frame_x, frame_y)) {
+			color = RKIPC_OSD_COLOR_BLACK;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&s_osd_auto_color_mutex);
+
+	return color;
+}
+
+static void rkipc_osd_draw_argb8888_text(unsigned char *bmp_buffer, int bmp_width, int bmp_height,
+                                         const wchar_t *wch_text, const RGN_OSD_PARAM_T *param,
+                                         int main_display_x)
+{
+	RKIPC_OSD_AUTO_COLOR_CTX_T auto_ctx;
+
+	set_font_color(param->font_color);
+	if (!rkipc_osd_auto_color_is_enabled()) {
+		draw_argb8888_text(bmp_buffer, bmp_width, bmp_height, wch_text);
+		return;
+	}
+
+	auto_ctx.region_x = UPALIGNTO16(main_display_x);
+	auto_ctx.region_y = UPALIGNTO16(param->y);
+	auto_ctx.main_width = s_stream_venc_chan_param[0].width;
+	auto_ctx.main_height = s_stream_venc_chan_param[0].height;
+	draw_argb8888_text_with_color_callback(bmp_buffer, bmp_width, bmp_height, wch_text,
+	                                       &auto_ctx, rkipc_osd_auto_color_judge);
+}
 
 
 static void *thread_osd_update(void *arg) {
@@ -7275,6 +7604,7 @@ static void *thread_osd_update(void *arg) {
 			continue;
 		else
 			last_time_sec = cur_time_info->tm_sec;
+		rkipc_osd_auto_color_update();
 
 		for (int i = 0; i < 8; i++)
 		{
@@ -7283,6 +7613,21 @@ static void *thread_osd_update(void *arg) {
 			{
 				printf("rgn[%d] change. text: %s, x: %d, y: %d, show: %d\n", i, p_osd_time_param[i].text, 
 					p_osd_time_param[i].x, p_osd_time_param[i].y, p_osd_time_param[i].show);
+				if (i == 0) {
+					generate_date_time_2(p_osd_time_param[i].text, wch_text);
+					bmp_width = UPALIGNTO16(wstr_get_actual_advance_x(wch_text));
+					bmp_height = UPALIGNTO16(s_osd_font_size) + 16;
+					p_osd_time_param[i].width = bmp_width;
+					p_osd_time_param[i].height = bmp_height;
+				} else if (p_osd_time_param[i].show && strlen(p_osd_time_param[i].text) > 0) {
+					iconv_gbk_to_wchar(p_osd_time_param[i].text, wch_text);
+					bmp_width = UPALIGNTO16(wstr_get_actual_advance_x(wch_text));
+					bmp_height = UPALIGNTO16(s_osd_font_size) + 16;
+					p_osd_time_param[i].width = bmp_width;
+					p_osd_time_param[i].height = bmp_height;
+				}
+				int main_display_x = rkipc_osd_aligned_x(&p_osd_time_param[i],
+					p_osd_time_param[i].width, s_stream_venc_chan_param[0].width);
 				stMppChn.enModId = RK_ID_VENC;
 				stMppChn.s32DevId = 0;
 				//主码流
@@ -7294,7 +7639,7 @@ static void *thread_osd_update(void *arg) {
 					break;
 				}
 				stRgnChnAttr.bShow = p_osd_time_param[i].show ? RK_TRUE : RK_FALSE;
-				stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X = UPALIGNTO16(p_osd_time_param[i].x);
+				stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X = UPALIGNTO16(main_display_x);
 				stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y = UPALIGNTO16(p_osd_time_param[i].y);
 				ret = RK_MPI_RGN_SetDisplayAttr(p_osd_time_param[i].handle, &stMppChn, &stRgnChnAttr);
 				if (RK_SUCCESS != ret)
@@ -7312,7 +7657,7 @@ static void *thread_osd_update(void *arg) {
 				}
 				stRgnChnAttr.bShow = p_osd_time_param[i].show ? RK_TRUE : RK_FALSE;
 				stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X =
-					UPALIGNTO16(p_osd_time_param[i].x * s_stream_venc_chan_param[1].width /
+					UPALIGNTO16(main_display_x * s_stream_venc_chan_param[1].width /
 								s_stream_venc_chan_param[0].width);
 				stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y =
 					UPALIGNTO16(p_osd_time_param[i].y * s_stream_venc_chan_param[1].height /
@@ -7333,7 +7678,7 @@ static void *thread_osd_update(void *arg) {
 				}
 				stRgnChnAttr.bShow = p_osd_time_param[i].show ? RK_TRUE : RK_FALSE;
 				stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X =
-					UPALIGNTO16(p_osd_time_param[i].x * s_jpeg_venc_chan_param[0].width /
+					UPALIGNTO16(main_display_x * s_jpeg_venc_chan_param[0].width /
 								s_stream_venc_chan_param[0].width);
 				stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y =
 					UPALIGNTO16(p_osd_time_param[i].y * s_jpeg_venc_chan_param[0].height /
@@ -7352,13 +7697,16 @@ static void *thread_osd_update(void *arg) {
 					iconv_gbk_to_wchar(p_osd_time_param[i].text, wch_text);
 					bmp_width = UPALIGNTO16(wstr_get_actual_advance_x(wch_text));
 					bmp_height = UPALIGNTO16(s_osd_font_size) + 16;
+					p_osd_time_param[i].width = bmp_width;
+					p_osd_time_param[i].height = bmp_height;
 					bmp_size = bmp_width * bmp_height * 4; // BGRA8888 4byte
 					bmp_buffer = malloc(bmp_size);
 					if (bmp_buffer)
 					{
 						memset(bmp_buffer, 0, bmp_size);
-						set_font_color(p_osd_time_param[i].font_color);
-						draw_argb8888_text(bmp_buffer, bmp_width, bmp_height, wch_text);
+						rkipc_osd_draw_argb8888_text(bmp_buffer, bmp_width, bmp_height,
+						                             wch_text, &p_osd_time_param[i],
+						                             main_display_x);
 						
 						// set bitmap
 						stBitmap.enPixelFormat = RK_FMT_ARGB8888;
@@ -7384,13 +7732,18 @@ static void *thread_osd_update(void *arg) {
 			generate_date_time_2(p_osd_time_param[0].text, wch_text);
 			bmp_width = UPALIGNTO16(wstr_get_actual_advance_x(wch_text));
 			bmp_height = UPALIGNTO16(s_osd_font_size) + 16;
+			p_osd_time_param[0].width = bmp_width;
+			p_osd_time_param[0].height = bmp_height;
 			bmp_size = bmp_width * bmp_height * 4; // BGRA8888 4byte
 			bmp_buffer = malloc(bmp_size);
 			if (bmp_buffer)
 			{
+				int main_display_x = rkipc_osd_aligned_x(&p_osd_time_param[0],
+					bmp_width, s_stream_venc_chan_param[0].width);
 				memset(bmp_buffer, 0, bmp_size);
-				set_font_color(p_osd_time_param[0].font_color);
-				draw_argb8888_text(bmp_buffer, bmp_width, bmp_height, wch_text);
+				rkipc_osd_draw_argb8888_text(bmp_buffer, bmp_width, bmp_height,
+				                             wch_text, &p_osd_time_param[0],
+				                             main_display_x);
 
 				// set bitmap
 				stBitmap.enPixelFormat = RK_FMT_ARGB8888;
@@ -7426,15 +7779,8 @@ int gb_rkipc_osd_time_create(RGN_OSD_PARAM_T *p_st_rgn_osd_time_param) {
 		return 0;
 	}
 
-	//用12小时制，算出最大的宽度
-//	char format[MAX_WCH_BYTE] = "12hour CHR-YYYY-MM-DD";
-	char format[MAX_WCH_BYTE] = "12hour YYYY-MM-DD";
-	wchar_t wch[MAX_WCH_BYTE];
-	generate_date_time_2(format, wch);
-//	snprintf(format, sizeof(format), "2026年04月27日 17:20:00");
-//	iconv_utf8_to_wchar(format, wch);
-	p_st_rgn_osd_time_param->max_width = UPALIGNTO16(wstr_get_actual_advance_x(wch));
-	p_st_rgn_osd_time_param->max_height = UPALIGNTO16(s_osd_font_size) + 16;
+	p_st_rgn_osd_time_param->max_width = 800;
+	p_st_rgn_osd_time_param->max_height = UPALIGNTO16(RKIPC_OSD_MAX_FONT_SIZE) + 16;
 	p_st_rgn_osd_time_param->width = p_st_rgn_osd_time_param->max_width;
 	p_st_rgn_osd_time_param->height = p_st_rgn_osd_time_param->max_height;
 
@@ -7463,7 +7809,9 @@ int gb_rkipc_osd_time_create(RGN_OSD_PARAM_T *p_st_rgn_osd_time_param) {
 	memset(&stRgnChnAttr, 0, sizeof(stRgnChnAttr));
 	stRgnChnAttr.bShow = p_st_rgn_osd_time_param->show ? RK_TRUE : RK_FALSE;
 	stRgnChnAttr.enType = OVERLAY_RGN;
-	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X = UPALIGNTO16(p_st_rgn_osd_time_param->x);
+	int main_display_x = rkipc_osd_aligned_x(p_st_rgn_osd_time_param,
+		p_st_rgn_osd_time_param->width, s_stream_venc_chan_param[0].width);
+	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X = UPALIGNTO16(main_display_x);
 	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y = UPALIGNTO16(p_st_rgn_osd_time_param->y);
 	stRgnChnAttr.unChnAttr.stOverlayChn.u32BgAlpha = 128;
 	stRgnChnAttr.unChnAttr.stOverlayChn.u32FgAlpha = 128;
@@ -7478,7 +7826,7 @@ int gb_rkipc_osd_time_create(RGN_OSD_PARAM_T *p_st_rgn_osd_time_param) {
 	LOG_DEBUG("RK_MPI_RGN_AttachToChn to venc0 success\n");
 
 	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X =
-		UPALIGNTO16(p_st_rgn_osd_time_param->x * s_stream_venc_chan_param[1].width /
+		UPALIGNTO16(main_display_x * s_stream_venc_chan_param[1].width /
 					s_stream_venc_chan_param[0].width);
 	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y =
 		UPALIGNTO16(p_st_rgn_osd_time_param->y * s_stream_venc_chan_param[1].height /
@@ -7491,6 +7839,12 @@ int gb_rkipc_osd_time_create(RGN_OSD_PARAM_T *p_st_rgn_osd_time_param) {
 	}
 	LOG_DEBUG("RK_MPI_RGN_AttachToChn to venc1 success\n");
 	
+	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X =
+		UPALIGNTO16(main_display_x * s_jpeg_venc_chan_param[0].width /
+					s_stream_venc_chan_param[0].width);
+	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y =
+		UPALIGNTO16(p_st_rgn_osd_time_param->y * s_jpeg_venc_chan_param[0].height /
+					s_stream_venc_chan_param[0].height);
 	stMppChn.s32ChnId = s_jpeg_venc_chan_param[0].channel;
 	ret = RK_MPI_RGN_AttachToChn(RgnHandle, &stMppChn, &stRgnChnAttr);
 	if (RK_SUCCESS != ret) {
@@ -7559,7 +7913,9 @@ int gb_rkipc_osd_text_create(RGN_OSD_PARAM_T *p_st_rgn_osd_text_param) {
 	memset(&stRgnChnAttr, 0, sizeof(stRgnChnAttr));
 	stRgnChnAttr.bShow = p_st_rgn_osd_text_param->show ? RK_TRUE : RK_FALSE;
 	stRgnChnAttr.enType = OVERLAY_RGN;
-	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X = UPALIGNTO16(p_st_rgn_osd_text_param->x);
+	int main_display_x = rkipc_osd_aligned_x(p_st_rgn_osd_text_param,
+		p_st_rgn_osd_text_param->width, s_stream_venc_chan_param[0].width);
+	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X = UPALIGNTO16(main_display_x);
 	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y = UPALIGNTO16(p_st_rgn_osd_text_param->y);
 	stRgnChnAttr.unChnAttr.stOverlayChn.u32BgAlpha = 128;
 	stRgnChnAttr.unChnAttr.stOverlayChn.u32FgAlpha = 128;
@@ -7574,7 +7930,7 @@ int gb_rkipc_osd_text_create(RGN_OSD_PARAM_T *p_st_rgn_osd_text_param) {
 	LOG_DEBUG("RK_MPI_RGN_AttachToChn to venc0 success\n");
 
 	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X =
-		UPALIGNTO16(p_st_rgn_osd_text_param->x * s_stream_venc_chan_param[1].width /
+		UPALIGNTO16(main_display_x * s_stream_venc_chan_param[1].width /
 					s_stream_venc_chan_param[0].width);
 	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y =
 		UPALIGNTO16(p_st_rgn_osd_text_param->y * s_stream_venc_chan_param[1].height /
@@ -7587,6 +7943,12 @@ int gb_rkipc_osd_text_create(RGN_OSD_PARAM_T *p_st_rgn_osd_text_param) {
 	}
 	LOG_DEBUG("RK_MPI_RGN_AttachToChn to venc1 success\n");
 	
+	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X =
+		UPALIGNTO16(main_display_x * s_jpeg_venc_chan_param[0].width /
+					s_stream_venc_chan_param[0].width);
+	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y =
+		UPALIGNTO16(p_st_rgn_osd_text_param->y * s_jpeg_venc_chan_param[0].height /
+					s_stream_venc_chan_param[0].height);
 	stMppChn.s32ChnId = s_jpeg_venc_chan_param[0].channel;
 	ret = RK_MPI_RGN_AttachToChn(RgnHandle, &stMppChn, &stRgnChnAttr);
 	if (RK_SUCCESS != ret) {
@@ -7658,62 +8020,88 @@ ERR_SIGL:
 	return -1;
 }
 
-int gb_rkipc_osd_time_set(int date_type, int time_type, int x, int y, int show) {
+int gb_rkipc_osd_common_set(int font_size, const char *font_color_mode, const char *font_color) {
 
-	char str_date_type[32];
-	char str_time_type[32];
-	
-//	if (0 == date_type)
-//		sprintf(str_date_type, "CHR-%s", OSD_FMT_YMD0);
-//	else if (1 == date_type)
-//		sprintf(str_date_type, "CHR-%s", OSD_FMT_YMD1);
-//	else if (2 == date_type)
-//		sprintf(str_date_type, "CHR-%s", OSD_FMT_YMD2);
-//	else if (3 == date_type)
-//		sprintf(str_date_type, "CHR-%s", OSD_FMT_YMD3);
-//	else if (4 == date_type)
-//		sprintf(str_date_type, "CHR-%s", OSD_FMT_YMD4);
-//	else if (5 == date_type)
-//		sprintf(str_date_type, "CHR-%s", OSD_FMT_YMD5);
-	if (0 == date_type)
-		sprintf(str_date_type, "CHR-%s", OSD_FMT_YMD0);
+	uint32_t color = 0xfff799;
+	int auto_color = font_color_mode &&
+		(!strcmp(font_color_mode, "auto") || !strcmp(font_color_mode, "1"));
+
+	s_osd_font_size = rkipc_osd_normalize_font_size(font_size);
+	if (auto_color)
+		color = RKIPC_OSD_COLOR_WHITE;
 	else
+		color = rkipc_osd_parse_rgb_hex(font_color, color);
+
+	set_font_size(s_osd_font_size);
+	rkipc_osd_auto_color_set_enabled(auto_color);
+	for (int i = 0; i < 8; i++) {
+		pthread_mutex_lock(&s_rgn_osd_param[i].mutex);
+		s_rgn_osd_param[i].font_color = color;
+		s_rgn_osd_param[i].changed = 1;
+		pthread_mutex_unlock(&s_rgn_osd_param[i].mutex);
+	}
+
+	return 0;
+}
+
+int gb_rkipc_osd_time_set(int date_type, int time_type, int display_week_enabled,
+						  int x, int y, int show, int alignment) {
+
+	char str_date_type[32] = {0};
+	char str_time_type[32] = {0};
+	char str_week_type[32] = {0};
+
+	if (0 == date_type) {
+		sprintf(str_date_type, "CHR-%s", OSD_FMT_YMD0);
+	} else if (1 == date_type) {
+		sprintf(str_date_type, "CHR-%s", OSD_FMT_YMD_DOT);
+	} else if (2 == date_type) {
+		sprintf(str_date_type, "CHR-%s", OSD_FMT_YMD3);
+	} else {
 		sprintf(str_date_type, "%s", OSD_FMT_YMD0);
+	}
 
 	if (0 == time_type)
 		snprintf(str_time_type, sizeof(str_time_type), "24hour");
 	else
 		snprintf(str_time_type, sizeof(str_time_type), "12hour");
+	if (display_week_enabled)
+		snprintf(str_week_type, sizeof(str_week_type), " %s", OSD_FMT_WEEK0);
 	
 	pthread_mutex_lock(&s_rgn_osd_param[0].mutex);
-	snprintf(s_rgn_osd_param[0].text, sizeof(s_rgn_osd_param[0].text), "%s %s", str_time_type, str_date_type);
-	s_rgn_osd_param[0].x = x > s_stream_venc_chan_param[0].width ? s_stream_venc_chan_param[0].width : x;
-	s_rgn_osd_param[0].y = y > s_stream_venc_chan_param[0].height ? s_stream_venc_chan_param[0].height : y;
+	snprintf(s_rgn_osd_param[0].text, sizeof(s_rgn_osd_param[0].text),
+			 "%s %s%s", str_time_type, str_date_type, str_week_type);
+	s_rgn_osd_param[0].x = rkipc_osd_clamp_int(x, 0, s_stream_venc_chan_param[0].width);
+	s_rgn_osd_param[0].y = rkipc_osd_clamp_int(y, 0, s_stream_venc_chan_param[0].height);
+	s_rgn_osd_param[0].alignment = alignment == 1 ? 1 : 0;
 	s_rgn_osd_param[0].show = show;
 
 	s_rgn_osd_param[0].changed = 1;
-	printf("gb_rkipc_osd_time_set -> %s %d %d %d\n", s_rgn_osd_param[0].text, 
-		s_rgn_osd_param[0].x, s_rgn_osd_param[0].y, s_rgn_osd_param[0].show);
+	printf("gb_rkipc_osd_time_set -> %s %d %d %d %d\n", s_rgn_osd_param[0].text,
+		s_rgn_osd_param[0].x, s_rgn_osd_param[0].y, s_rgn_osd_param[0].show,
+		s_rgn_osd_param[0].alignment);
 	pthread_mutex_unlock(&s_rgn_osd_param[0].mutex);
 
 	return 0;
 }
 
-int gb_rkipc_osd_text_set(int index, const char *text, int x, int y, int show) {
+int gb_rkipc_osd_text_set(int index, const char *text, int x, int y, int show, int alignment) {
 
 	if (index < 0 || index > 6 || !text)
 		return -1;
 	index += 1;
 	
 	pthread_mutex_lock(&s_rgn_osd_param[index].mutex);
-	snprintf(s_rgn_osd_param[index].text, sizeof(s_rgn_osd_param[index].text), text);
-	s_rgn_osd_param[index].x = x > s_stream_venc_chan_param[0].width ? s_stream_venc_chan_param[0].width : x;
-	s_rgn_osd_param[index].y = y > s_stream_venc_chan_param[0].height ? s_stream_venc_chan_param[0].height : y;
+	snprintf(s_rgn_osd_param[index].text, sizeof(s_rgn_osd_param[index].text), "%s", text);
+	s_rgn_osd_param[index].x = rkipc_osd_clamp_int(x, 0, s_stream_venc_chan_param[0].width);
+	s_rgn_osd_param[index].y = rkipc_osd_clamp_int(y, 0, s_stream_venc_chan_param[0].height);
+	s_rgn_osd_param[index].alignment = alignment == 1 ? 1 : 0;
 	s_rgn_osd_param[index].show = show;
 
 	s_rgn_osd_param[index].changed = 1;
-	printf("gb_rkipc_osd_text_set -> [%d] %s %d %d %d\n", index, s_rgn_osd_param[index].text, 
-		s_rgn_osd_param[index].x, s_rgn_osd_param[index].y, s_rgn_osd_param[index].show);
+	printf("gb_rkipc_osd_text_set -> [%d] %s %d %d %d %d\n", index, s_rgn_osd_param[index].text,
+		s_rgn_osd_param[index].x, s_rgn_osd_param[index].y, s_rgn_osd_param[index].show,
+		s_rgn_osd_param[index].alignment);
 	pthread_mutex_unlock(&s_rgn_osd_param[index].mutex);
 
 	return 0;
@@ -7737,15 +8125,17 @@ int gb_rkipc_osd_attach(int des_chan) {
 		memset(&stRgnChnAttr, 0, sizeof(stRgnChnAttr));
 		stRgnChnAttr.bShow = s_rgn_osd_param[i].show ? RK_TRUE : RK_FALSE;
 		stRgnChnAttr.enType = OVERLAY_RGN;
+		int main_display_x = rkipc_osd_aligned_x(&s_rgn_osd_param[i],
+			s_rgn_osd_param[i].width, s_stream_venc_chan_param[0].width);
 		if (0 == des_chan)
 		{
-			stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X = UPALIGNTO16(s_rgn_osd_param[i].x);
+			stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X = UPALIGNTO16(main_display_x);
 			stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y = UPALIGNTO16(s_rgn_osd_param[i].y);
 		}
 		else
 		{
 			stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X =
-				UPALIGNTO16(s_rgn_osd_param[i].x * s_stream_venc_chan_param[1].width /
+				UPALIGNTO16(main_display_x * s_stream_venc_chan_param[1].width /
 							s_stream_venc_chan_param[0].width);
 			stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y =
 				UPALIGNTO16(s_rgn_osd_param[i].y * s_stream_venc_chan_param[1].height /
@@ -7790,4 +8180,3 @@ int gb_rkipc_osd_detach(int des_chan) {
 	}
 	return 0;
 }
-

@@ -18,9 +18,23 @@ FT_Vector pen_;
 double font_angle_;
 int font_size_;
 unsigned int font_color_,bg_font_color_;
+unsigned int font_input_color_;
 char *font_path_[128];
 unsigned int color_index_;
 unsigned int trans_index_;
+
+static void draw_argb8888_buffer_with_color(unsigned int *buffer, int buf_w, int buf_h,
+                                            unsigned int font_color);
+
+static unsigned int font_color_to_bgra(unsigned int font_color) {
+	unsigned int color = 0x000000FF;
+
+	color |= font_color >> 8 & 0x0000FF00;  // R
+	color |= font_color << 8 & 0x00FF0000;  // G
+	color |= font_color << 24 & 0xFF000000; // B
+
+	return color;
+}
 
 int create_font(const char *font_path, int font_size) {
 	pthread_mutex_lock(&g_font_mutex);
@@ -81,17 +95,13 @@ int get_font_size() { return font_size_; }
 
 unsigned int set_font_color(unsigned int font_color) {
 	pthread_mutex_lock(&g_font_mutex);
+	font_input_color_ = font_color;
 	// argb → bgra
-	font_color_ = 0x000000FF;
-	font_color_ |= font_color >> 8 & 0x0000FF00;  // R
-	font_color_ |= font_color << 8 & 0x00FF0000;  // G
-	font_color_ |= font_color << 24 & 0xFF000000; // B
+	font_color_ = font_color_to_bgra(font_color);
 
 	// argb → bgra
-	bg_font_color_ = 0x00000060;
-	bg_font_color_ |= 0x000000 >> 8 & 0x0000FF00;  // R
-	bg_font_color_ |= 0x000000 << 8 & 0x00FF0000;  // G
-	bg_font_color_ |= 0x000000 << 24 & 0xFF000000; // B
+	bg_font_color_ = font_color_to_bgra(0x000000) & 0xFFFFFF00;
+	bg_font_color_ |= 0x00000060;
 
 	// LOG_INFO("font_color is %08x, font_color_ is %08x\n", font_color,
 	// font_color_);
@@ -133,6 +143,11 @@ unsigned int get_font_color() { return font_color_; }
 // }
 
 void draw_argb8888_buffer(unsigned int *buffer, int buf_w, int buf_h) {
+	draw_argb8888_buffer_with_color(buffer, buf_w, buf_h, font_color_);
+}
+
+static void draw_argb8888_buffer_with_color(unsigned int *buffer, int buf_w, int buf_h,
+                                            unsigned int font_color) {
 	int i, j, p, q;
 	int left = slot_->bitmap_left;
 	int top = (face_->size->metrics.ascender >> 6) - slot_->bitmap_top;
@@ -150,7 +165,7 @@ void draw_argb8888_buffer(unsigned int *buffer, int buf_w, int buf_h) {
 			// LOG_INFO("bmp_offset + p is %d\n", bmp_offset + p);
 			if (slot_->bitmap.buffer[bmp_offset + p]) {
 				// printf("0");
-				buffer[offset + i] = font_color_;
+				buffer[offset + i] = font_color;
 			} else {
 				// printf(".");
 				buffer[offset + i] = bg_font_color_; //0x00000000 白色全透明
@@ -188,11 +203,22 @@ void draw_argb8888_wchar(unsigned char *buffer, int buf_w, int buf_h, const wcha
 }
 
 void draw_argb8888_text(unsigned char *buffer, int buf_w, int buf_h, const wchar_t *wstr) {
+	draw_argb8888_text_with_color_callback(buffer, buf_w, buf_h, wstr, NULL, NULL);
+}
+
+void draw_argb8888_text_with_color_callback(unsigned char *buffer, int buf_w, int buf_h,
+                                            const wchar_t *wstr, void *userdata,
+                                            font_color_judge_cb cb) {
 	if (wstr == NULL) {
 		LOG_ERROR("wstr is NULL\n");
 		return;
 	}
-	int k = 0;
+	pthread_mutex_lock(&g_font_mutex);
+	if (!face_) {
+		LOG_INFO("please check font_path %s\n", *font_path_);
+		pthread_mutex_unlock(&g_font_mutex);
+		return;
+	}
 	unsigned int BG_COLOR  = bg_font_color_; // 黑色前景色
 	// 绘制背景
 	unsigned int* imagePtr = (unsigned int*)buffer;
@@ -205,10 +231,33 @@ void draw_argb8888_text(unsigned char *buffer, int buf_w, int buf_h, const wchar
 	pen_.x = 0;
 	pen_.y = 0;
 	for (int i = 0; i < len; i++) {
-		draw_argb8888_wchar(buffer, buf_w, buf_h, wstr[i]);
+		FT_Error error;
+		unsigned int draw_color = font_color_;
+
+		FT_Set_Transform(face_, NULL, &pen_);
+		error = FT_Load_Char(face_, wstr[i], FT_LOAD_DEFAULT | FT_LOAD_NO_BITMAP);
+		if (error) {
+			LOG_DEBUG("FT_Load_Char error\n");
+			continue;
+		}
+		FT_Render_Glyph(slot_, FT_RENDER_MODE_NORMAL); // 8bit per pixel
+		if (cb) {
+			int left = slot_->bitmap_left;
+			int top = (face_->size->metrics.ascender >> 6) - slot_->bitmap_top;
+			int width = slot_->advance.x > 0 ? slot_->advance.x / 64 : slot_->bitmap.width;
+			int height = slot_->bitmap.rows;
+			if (width < (int)slot_->bitmap.width)
+				width = slot_->bitmap.width;
+			if (height <= 0)
+				height = font_size_;
+			draw_color = font_color_to_bgra(
+				cb(userdata, left, top, width, height, font_input_color_));
+		}
+		draw_argb8888_buffer_with_color((unsigned int *)buffer, buf_w, buf_h, draw_color);
 		pen_.x += slot_->advance.x;
 		pen_.y += slot_->advance.y;
 	}
+	pthread_mutex_unlock(&g_font_mutex);
 	// save_argb8888_to_bmp(buffer, buf_w, buf_h);
 }
 

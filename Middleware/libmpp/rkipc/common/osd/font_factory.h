@@ -21,9 +21,14 @@ int set_font_size(int font_size);
 int get_font_size();
 unsigned int set_font_color(unsigned int font_color);
 unsigned int get_font_color();
+typedef unsigned int (*font_color_judge_cb)(void *userdata, int x, int y, int w, int h,
+                                            unsigned int default_color);
 void draw_argb8888_buffer(unsigned int *buffer, int buf_w, int buf_h);
 void draw_argb8888_wchar(unsigned char *buffer, int buf_w, int buf_h, const wchar_t wch);
 void draw_argb8888_text(unsigned char *buffer, int buf_w, int buf_h, const wchar_t *wstr);
+void draw_argb8888_text_with_color_callback(unsigned char *buffer, int buf_w, int buf_h,
+                                            const wchar_t *wstr, void *userdata,
+                                            font_color_judge_cb cb);
 int wstr_get_actual_advance_x(const wchar_t *wstr);
 
 #endif

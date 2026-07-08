@@ -2915,20 +2915,16 @@ static std::string NormalizeVideoOsdDateStyleValue(const std::string& formatIn)
         return "CHR-YYYY-MM-DD";
     }
 
+    if (ContainsToken(format, "yyyy.mm.dd")) {
+        return "CHR-YYYY.MM.DD";
+    }
     if (ContainsToken(format, "yyyy/mm/dd")) {
         return "CHR-YYYY/MM/DD";
     }
-    if (ContainsToken(format, "mm/dd/yyyy")) {
-        return "CHR-MM/DD/YYYY";
-    }
-    if (ContainsToken(format, "dd/mm/yyyy")) {
-        return "CHR-DD/MM/YYYY";
-    }
-    if (ContainsToken(format, "mm-dd-yyyy")) {
-        return "CHR-MM-DD-YYYY";
-    }
-    if (ContainsToken(format, "dd-mm-yyyy")) {
-        return "CHR-DD-MM-YYYY";
+    if (format.find("年") != std::string::npos ||
+        format.find("月") != std::string::npos ||
+        format.find("日") != std::string::npos) {
+        return "YYYY-MM-DD";
     }
 
     return "CHR-YYYY-MM-DD";
@@ -2965,16 +2961,14 @@ static std::string BuildGbOsdTimeFormatFromRuntimeState(const media::VideoOsdSta
     std::string datePart = "yyyy-MM-dd";
     if (runtimeState->has_date_style) {
         const std::string style = ToLowerCopy(TrimWhitespaceCopy(runtimeState->date_style));
-        if (ContainsToken(style, "yyyy/mm/dd")) {
+        if (ContainsToken(style, "yyyy.mm.dd")) {
+            datePart = "yyyy.MM.dd";
+        } else if (ContainsToken(style, "yyyy/mm/dd")) {
             datePart = "yyyy/MM/dd";
-        } else if (ContainsToken(style, "mm/dd/yyyy")) {
-            datePart = "MM/dd/yyyy";
-        } else if (ContainsToken(style, "dd/mm/yyyy")) {
-            datePart = "dd/MM/yyyy";
-        } else if (ContainsToken(style, "mm-dd-yyyy")) {
-            datePart = "MM-dd-yyyy";
-        } else if (ContainsToken(style, "dd-mm-yyyy")) {
-            datePart = "dd-MM-yyyy";
+        } else if (style.find("年") != std::string::npos ||
+                   style.find("月") != std::string::npos ||
+                   style.find("日") != std::string::npos) {
+            datePart = "yyyy年MM月dd日";
         }
     }
 
@@ -3005,7 +2999,11 @@ static void NormalizeVideoOsdStateForProtocol(media::VideoOsdState* state)
                 item.text = NormalizeGbOsdTextTemplate(item.text);
                 item.has_text = !item.text.empty();
             }
-            if (!item.has_text && !item.has_position) {
+            if (item.has_alignment) {
+                const std::string alignment = ToLowerCopy(TrimWhitespaceCopy(item.alignment));
+                item.alignment = (alignment == "right" || alignment == "1") ? "right" : "left";
+            }
+            if (!item.has_text && !item.has_position && !item.has_alignment) {
                 continue;
             }
             if (writeIndex != index) {
@@ -3015,6 +3013,17 @@ static void NormalizeVideoOsdStateForProtocol(media::VideoOsdState* state)
         }
         state->text_items.resize(writeIndex);
         state->has_text_items = !state->text_items.empty();
+    }
+
+    if (state->has_font_color_mode) {
+        state->font_color_mode = ToLowerCopy(TrimWhitespaceCopy(state->font_color_mode));
+    }
+    if (state->has_font_color) {
+        state->font_color = ToLowerCopy(TrimWhitespaceCopy(state->font_color));
+    }
+    if (state->has_time_alignment) {
+        const std::string alignment = ToLowerCopy(TrimWhitespaceCopy(state->time_alignment));
+        state->time_alignment = (alignment == "right" || alignment == "1") ? "right" : "left";
     }
 
     if (!state->has_time_format &&
@@ -3081,7 +3090,8 @@ static bool IsVideoOsdStateMatched(const media::VideoOsdState& desired,
         (normalizedTextTemplate.empty() ? 0 : 1);
     const int desiredMasterSwitch = normalizedDesired.has_master_enabled ?
         ((normalizedDesired.master_enabled != 0) ? 1 : 0) :
-        ((desiredTimeEnabled != 0 || desiredEventEnabled != 0 || desiredAlertEnabled != 0) ? 1 : 0);
+        ((desiredTimeEnabled != 0 || desiredEventEnabled != 0 ||
+          desiredAlertEnabled != 0 || desiredCustomTextEnabled != 0) ? 1 : 0);
 
     if (!runtimeState->has_master_enabled || runtimeState->master_enabled != desiredMasterSwitch) {
         return false;
@@ -3092,6 +3102,23 @@ static bool IsVideoOsdStateMatched(const media::VideoOsdState& desired,
     }
 
     if (!runtimeState->has_text_enabled || runtimeState->text_enabled != desiredCustomTextEnabled) {
+        return false;
+    }
+
+    if (normalizedDesired.has_font_size &&
+        (!runtimeState->has_font_size || runtimeState->font_size != normalizedDesired.font_size)) {
+        return false;
+    }
+
+    if (normalizedDesired.has_font_color_mode &&
+        (!runtimeState->has_font_color_mode ||
+         ToLowerCopy(runtimeState->font_color_mode) != ToLowerCopy(normalizedDesired.font_color_mode))) {
+        return false;
+    }
+
+    if (normalizedDesired.has_font_color &&
+        (!runtimeState->has_font_color ||
+         ToLowerCopy(runtimeState->font_color) != ToLowerCopy(normalizedDesired.font_color))) {
         return false;
     }
 
@@ -3113,6 +3140,19 @@ static bool IsVideoOsdStateMatched(const media::VideoOsdState& desired,
             runtimeState->time_y != normalizedDesired.time_y) {
             return false;
         }
+    }
+
+    if (normalizedDesired.has_time_display_week_enabled &&
+        (!runtimeState->has_time_display_week_enabled ||
+         runtimeState->time_display_week_enabled !=
+            ((normalizedDesired.time_display_week_enabled != 0) ? 1 : 0))) {
+        return false;
+    }
+
+    if (normalizedDesired.has_time_alignment &&
+        (!runtimeState->has_time_alignment ||
+         ToLowerCopy(runtimeState->time_alignment) != ToLowerCopy(normalizedDesired.time_alignment))) {
+        return false;
     }
 
     if (normalizedDesired.has_text_items) {
@@ -3137,6 +3177,13 @@ static bool IsVideoOsdStateMatched(const media::VideoOsdState& desired,
             }
             if (desiredItem.has_position &&
                 (desiredItem.x != runtimeItem.x || desiredItem.y != runtimeItem.y)) {
+                return false;
+            }
+            if (desiredItem.has_alignment != runtimeItem.has_alignment) {
+                return false;
+            }
+            if (desiredItem.has_alignment &&
+                ToLowerCopy(desiredItem.alignment) != ToLowerCopy(runtimeItem.alignment)) {
                 return false;
             }
         }
