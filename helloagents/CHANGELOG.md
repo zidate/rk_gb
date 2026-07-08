@@ -7,7 +7,8 @@
 ## [Unreleased]
 
 ### 修复
-- 修复 RV1106 OSD `font_color_mode=auto` 只落成固定白色的问题：GB/RK OSD 层现在按子码流 VI NV12 Y 平面生成低分辨率亮度 map，并在现有 ARGB8888 FreeType 绘制路径中逐字符选择黑/白；取帧失败时保留白色兜底，不阻塞 OSD 刷新。
+- 收口 RV1106 OSD 扩展对 GB28181 的影响：新增字号、颜色、星期和对齐等能力只作为媒体/ExchangeAL 外部接口与 RK OSD 落地能力，`ProtocolManager` 的 GB OSD 协议归一化、比较和日期格式映射恢复到既有兼容字段，避免影响已联调通过的 GB28181 OSD 接口。
+- 修复 RV1106 OSD `font_color_mode=auto` 只落成固定白色的问题：媒体/RK OSD 层现在按子码流 VI NV12 Y 平面生成低分辨率亮度 map，并在现有 ARGB8888 FreeType 绘制路径中逐字符选择黑/白；取帧失败时保留白色兜底，不阻塞 OSD 刷新。
 - 修复 GB28181 与 GAT1400 启动耦合问题：`ProtocolManager::Start()/ReloadExternalConfig()/RestartGbRegisterService()` 现按 `gb_register.enabled` 门控 GB live/replay RTP/PS sender、广播、对讲、listen 和 GB client lifecycle；关闭 GB28181 时不再影响 GAT1400 独立启动。
 - 修复 GAT1400 对上连接缺少明确连接超时和双栈回退的问题：对上请求目标会按配置优先尝试 IPv6，失败后回退 IPv4，TCP 连接阶段使用非阻塞 `connect + select + SO_ERROR` 按 `request_timeout_ms` 超时退出。
 - 修复 GAT1400 双栈接入可能串平台 endpoint 的问题：注册成功后只记录实际连通的 IPv4/IPv6 地址族，后续保活、注销、上报和补传走该地址族对应的配置 endpoint，直到注销、心跳失败或重新注册。
