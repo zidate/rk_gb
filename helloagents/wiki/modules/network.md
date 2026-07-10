@@ -6,7 +6,7 @@
 ## 模块概述
 - **职责:** 说明以太网/Wi-Fi DHCP 客户端、内核 IPv6、BusyBox 网络 applet、应用层 IPv6 socket 宏和 RKIPC 网络 API 的当前状态
 - **状态:** 🚧源码、rootfs applet 和 IPv6 kernel/boot 镜像已接入，待实机验证
-- **最后更新:** 2026-07-02
+- **最后更新:** 2026-07-10
 - **代码真实来源:** `build.sh`、`driver/kernel/*/rv1106_defconfig`、`driver/busybox/.config`、`Middleware/libmpp/rkipc/common/network/network.c`、`Middleware/libmpp/rkipc/common/network/Rk_wifi.c`、`Middleware/libmpp/rkipc/common/network/ntp.c`、`App/Protocol/SocketCompat.h`、`App/Protocol/gb28181/*`、`third_party/platform_sdk_port/CommonLibSrc/GB28181SDK/include/SDP/SdpUtil.cpp`、`App/RtspServer/src/net/*`、`App/RtspServer/src/xop/*`、`App/DM/DmClientService.cpp`
 
 ## 当前事实
@@ -16,10 +16,10 @@
 - RC0240/RC0240_LGV10/RC0330_V20 的主 `rv1106_defconfig` 已打开 `CONFIG_IPV6=y`；`driver/rndis-kernel/rv1106_defconfig` 里仍存在历史 `CONFIG_IPV6=m`。
 - SDK 侧 `lunch 9` 使用 `RK_KERNEL_DEFCONFIG=rv1106_defconfig` 与 `RK_KERNEL_DEFCONFIG_FRAGMENT=rv1106-ipc-XWR60440.config`；基础 defconfig 里 `CONFIG_IPV6` 关闭，但 fragment 已覆盖为 `CONFIG_IPV6=y`，最终 `objs_kernel/.config` 已验证为 `CONFIG_IPV6=y`。
 - 工具链 uClibc 配置已启用 IPv6，但这不能替代目标内核 IPv6。
-- BusyBox 已启用 `CONFIG_FEATURE_IPV6`、IPv4 `udhcpc`、`CONFIG_UDHCPC6`、`CONFIG_FEATURE_UDHCPC6_RFC3646`、`ip`/`ip addr`/`ip route` 和 `ping6`。
+- BusyBox 已启用 `CONFIG_FEATURE_IPV6`、IPv4 `udhcpc`、`CONFIG_UDHCPC6`、`CONFIG_FEATURE_UDHCPC6_RFC3646`、`ip`/`ip addr`/`ip route`、`ping6` 和 `wget`。
 - `network.c::rk_network_ipv4_set()` 的 DHCP 路径会按接口启动 IPv4 `udhcpc`，随后启动 IPv6 SLAAC + DHCPv6 DNS。
 - `network.c::rk_network_get_cable_state()` 在网线 link up 时会启动 IPv4 `udhcpc` 和 `rk_network_dhcpv6_start(name)`；link down 时会停止 `udhcpc6` 并清理 IPv6 地址。
-- `packaging/rootfs_pub/bin/busybox` 已按 BusyBox 1.27.2 和 `driver/busybox/.config` 交叉重建，包含 `udhcpc6`、`ping6`、`ipaddr`、`iplink`、`iproute`；rootfs 已补齐 `ping6`、`ip*`、`udhcpc6` applet 链接。
+- `packaging/rootfs_pub/bin/busybox` 已按 BusyBox 1.27.2 和 `driver/busybox/.config` 交叉重建，包含 `udhcpc6`、`ping6`、`ipaddr`、`iplink`、`iproute`、`wget`；rootfs 已补齐 `ping6`、`ip*`、`udhcpc6`、`wget` applet 链接。
 - 当前打包 rootfs 没有 `dhcpcd`，Wi-Fi 应用逻辑已在 `Rk_wifi.c` 中收敛为 BusyBox `udhcpc` + `udhcpc6`：`wlan0` 启动/连接成功时开启 IPv6 sysctl、IPv4 DHCP 和 DHCPv6 DNS，断开/关闭时停止 `udhcpc6` 并清理 IPv6 地址。
 - Wi-Fi IPv4 地址读取不能只依赖 `wpa_cli status ip_address`；`Rk_wifi.c::RK_wifi_running_getConnectionInfo()` 已增加 `SIOCGIFADDR` fallback，从内核接口状态读取 `wlan0` 地址。
 - IPv6 不要求 Wi-Fi 芯片驱动单独修改；当前仓库固件包内驱动模块在 `packaging/oem_ipc/usr/ko/`，完整 SDK 驱动源码在 `/tmp/lhy_rv1106_sdk/RV1106_IPC_SDK/sysdrv/drv_ko/wifi/`，主要目录包括 `aic8800_netdrv/`、`atbm/`、`rtl8188ftv/`。
@@ -41,7 +41,7 @@
 | 目标 | 命令/观察 |
 |------|-----------|
 | 内核 IPv6 | `cat /proc/net/if_inet6`、`ls /proc/sys/net/ipv6/conf/eth0`、`ls /proc/sys/net/ipv6/conf/wlan0` |
-| 客户端能力 | `busybox | grep -E 'udhcpc6|udhcpc|ping6|ipaddr|iproute'` |
+| 客户端能力 | `busybox | grep -E 'udhcpc6|udhcpc|ping6|ipaddr|iproute|wget'` |
 | 地址 | `ip -6 addr show dev eth0`、`ip -6 addr show dev wlan0` 或 `/proc/net/if_inet6` |
 | 默认路由 | `ip -6 route` 或 BusyBox `route -A inet6` |
 | 抓包 | `tcpdump -i eth0 -nn 'icmp6 or udp port 546 or udp port 547'` |
@@ -59,6 +59,7 @@
 - 2026-07-02: 在 `/tmp/lhy_rv1106_sdk/RV1106_IPC_SDK` 用 `project/build.sh kernel` 生成 IPv6 `boot.img` 并替换 `rk_gb/packaging/image/boot.img`；应用层 IPv6 socket 宏收尾后，重新执行 `make -C packaging CROSS=/home/jerry/silver/RK/arm-rockchip830-linux-uclibcgnueabihf/bin/arm-rockchip830-linux-uclibcgnueabihf-` 生成 `Release/raw.bin`、`Release/linux.bin`、`Release/upgrade.bin`。当前 MD5: `boot.img=cde6decc2fc07dfd6870bfc877ae411a`，`raw.bin=6123c1ed925d0a99ab4b58e2a2dff9af`，`linux.bin=78ac36771b8d1a4d3da2c73dcecca8c1`，`upgrade.bin=78ac36771b8d1a4d3da2c73dcecca8c1`，`Bin/dgiot=a4c92b470caf3e7f1d8d96453de1fe00`，`oem_ipc/usr/bin/dgiot=eb020035257fc158480b5981fabd4662`。
 - 2026-07-02: Wi-Fi 路线不改驱动，应用层 `Rk_wifi.c` 已接入 `wlan0` BusyBox `udhcpc` + `udhcpc6`，并为 `wpa_cli status` 缺少 `ip_address` 的情况增加 `SIOCGIFADDR` fallback；`python3 tools/tests/network_ipv6_slaac_dhcpv6_regression.py` 与 `bash tools/issue_bot/build_verify.sh /home/jerry/silver/rk_gb` 均已通过。
 - 2026-07-02: 新增 `RK_ENABLE_IPV6_SOCKET` 应用层 socket 宏，默认关闭保持 IPv4；开启后 GB28181/RTSP/GAT/NTP/DM(LwM2M) 关键 socket 路径和 GB SDK SDP 地址族支持 IPv6。验证：`python3 tools/tests/network_ipv6_socket_macro_regression.py` 通过；默认构建 `bash tools/issue_bot/build_verify.sh /home/jerry/silver/rk_gb` 通过，日志 `/tmp/rk_gb-build-verify.91D0xE/logs`；宏开启交叉构建通过，构建目录 `/tmp/rk_gb-ipv6-socket-on.9dWpEd`。
+- 2026-07-10: `driver/busybox/.config` 已启用 `CONFIG_WGET`、长参数、进度条、认证和超时能力，`CONFIG_FEATURE_WGET_HTTPS`/`OPENSSL` 保持关闭；使用 BusyBox 1.27.2 和 `arm-rockchip830-linux-uclibcgnueabihf-` 重新交叉编译，替换 `packaging/rootfs_pub/bin/busybox` 并补 `packaging/rootfs_pub/usr/bin/wget -> ../../bin/busybox`。验证：新 busybox 为 ARM/uClibc ELF，二进制包含 `wget` 字符串，`python3 tools/tests/network_ipv6_slaac_dhcpv6_regression.py` 通过。
 - 2026-06-30: `doc/ipv6_slaac_dhcpv6_dns_support.md` 已补全为实施手册，覆盖 BusyBox/appet 机制、当前实现状态、构建命令、上板验收、故障定位、回滚方案和后续必须完成项；文档明确 BusyBox 1.27.2 `udhcpc6` 可能发送 IA_NA，严格 `SLAAC + DHCPv6 DNS` 仍需抓包确认或换支持 information-only 的 DHCPv6 客户端。
 
 ## 依赖
