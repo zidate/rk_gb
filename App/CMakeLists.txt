@@ -47,6 +47,7 @@ include_directories(
 	${CMAKE_CURRENT_SOURCE_DIR}/Protocol/config/
 	${CMAKE_CURRENT_SOURCE_DIR}/Protocol/gb28181/
 	${CMAKE_CURRENT_SOURCE_DIR}/Protocol/gat1400/
+	${CMAKE_CURRENT_SOURCE_DIR}/cmiot/
 	${CMAKE_CURRENT_SOURCE_DIR}/DM/
 	${PROJECT_SOURCE_DIR}/third_party/wakaama/include/
 	${PROJECT_SOURCE_DIR}/third_party/wakaama/core/
@@ -248,6 +249,9 @@ set(DM_SRC
 	DM/DmConfig.cpp
 	DM/DmCrypto.cpp
 	DM/DmLwm2mObjects.cpp
+)
+set(CMIOT_SRC
+	cmiot/CmiotOsdControl.cpp
 )
 #加密和产测配置 模块
 set(Encryption_SRC Encryption/Encryption.cpp)
@@ -537,6 +541,7 @@ add_executable(${PROJECT_NAME} ./Main.cpp ./Common.cpp ./Inifile.cpp
 	${Update}
 	${Protocol_SRC}
 	${DM_SRC}
+	${CMIOT_SRC}
     ${Encryption_SRC}
     ${ProductCof_SRC}
 	${Wdt_SRC}
