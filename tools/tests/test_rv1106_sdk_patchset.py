@@ -1,4 +1,5 @@
 import pathlib
+import shlex
 import subprocess
 import tempfile
 import unittest
@@ -11,14 +12,14 @@ FORBIDDEN_PRODUCT_PATH = "driver/uboot"
 def patch_diff_paths(patch_text):
     for line in patch_text.splitlines():
         if line.startswith("diff --git "):
-            yield from line.removeprefix("diff --git ").split()[:2]
-        elif line.startswith(("--- ", "+++ ")):
-            yield line[4:].split("\t", 1)[0]
+            yield from shlex.split(line.removeprefix("diff --git "))[:2]
 
 
 def patch_touches_forbidden_product_path(patch_text):
     for path in patch_diff_paths(patch_text):
-        normalized_path = path.removeprefix("a/").removeprefix("b/")
+        _, separator, normalized_path = path.partition("/")
+        if not separator:
+            continue
         if normalized_path == FORBIDDEN_PRODUCT_PATH:
             return True
         if normalized_path.startswith(f"{FORBIDDEN_PRODUCT_PATH}/"):
@@ -57,6 +58,27 @@ diff --git a/project/Makefile b/project/Makefile
 """
         self.assertTrue(patch_touches_forbidden_product_path(forbidden_patch))
         self.assertFalse(patch_touches_forbidden_product_path(safe_patch))
+
+    def test_patch_path_detector_strips_any_patch_p1_prefix(self):
+        patch_text = """\
+diff --git x/driver/uboot/Makefile y/driver/uboot/Makefile
+"""
+        self.assertTrue(patch_touches_forbidden_product_path(patch_text))
+
+    def test_patch_path_detector_handles_git_quoted_paths(self):
+        patch_text = """\
+diff --git "a/driver/uboot/file name" "b/driver/uboot/file name"
+"""
+        self.assertTrue(patch_touches_forbidden_product_path(patch_text))
+
+    def test_patch_path_detector_ignores_hunk_body_markers(self):
+        patch_text = """\
+diff --git a/project/Makefile b/project/Makefile
+@@ -1 +1 @@
+--- driver/uboot/not-a-file-header
++++ replacement text
+"""
+        self.assertFalse(patch_touches_forbidden_product_path(patch_text))
 
     def test_patch_payloads_never_touch_product_driver_uboot(self):
         for patch_path in sorted(PATCH_DIR.glob("000*.patch")):
