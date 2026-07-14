@@ -1,4 +1,5 @@
 .vscode
+.worktrees/
 packaging/
 packaging-RV1103_DUAL_IPC/
 packaging-RV1106_DUAL_IPC/
