@@ -1,4 +1,3 @@
-# Preserves: export RK_MISC=wipe_all-misc.img
 diff --git a/project/cfg/BoardConfig_IPC/BoardConfig-SPI_NAND-NONE-RV1106_IPC38_DEMO_V10-IPC-XWR60440.mk b/project/cfg/BoardConfig_IPC/BoardConfig-SPI_NAND-NONE-RV1106_IPC38_DEMO_V10-IPC-XWR60440.mk
 index 118d4cd..7a770db 100644
 --- a/project/cfg/BoardConfig_IPC/BoardConfig-SPI_NAND-NONE-RV1106_IPC38_DEMO_V10-IPC-XWR60440.mk
