@@ -27,6 +27,10 @@ def main() -> int:
     require("return ret" in body, "callback must propagate adapter failure")
     require("ChinaMobile/CmiotOsdControl.cpp" in CMAKE,
             "adapter source must be part of CM_SRC")
+    require("ret = select(" in CALLBACK and "if(ret < 0)" in CALLBACK,
+            "keepalive must test the select return value")
+    require("if(select < 0)" not in CALLBACK,
+            "keepalive must not compare the select function pointer")
     print("PASS: CMIOT_CMD_SET_OSD applies and reports the persistent adapter result")
     return 0
 

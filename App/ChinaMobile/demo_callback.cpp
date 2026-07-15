@@ -277,7 +277,7 @@ void *demo_keepalive_thread(void* args)
         tv.tv_usec = DEMO_KEEPALIVE_SELECT_TIMEOUT_MS * 1000;
 
         ret = select(maxfd, &rset, NULL, NULL, &tv);
-        if(select < 0)
+        if(ret < 0)
         {
             DEMO_PRINT("select error, ret[%d] errno[%d]\n", ret, errno);
         }
