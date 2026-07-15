@@ -1,5 +1,6 @@
 """Verify C5F1GM7x A0 block protection in both RV1106 SDK stacks."""
 
+import hashlib
 import os
 import pathlib
 import re
@@ -34,6 +35,26 @@ REQUIRED_HEADER_LINES = (
     "int spinand_get_block_lock(struct spinand_device *spinand, u8 *lock);",
     "int spinand_set_block_lock(struct spinand_device *spinand, u8 lock);",
 )
+BASELINE_SHA256 = {
+    f"{UBOOT_PREFIX}/include/linux/mtd/spinand.h": "69a6b6146b4f0fa2a46e9fadb9a4e0c264d176ba22be7216469a5637fbbd6066",
+    f"{UBOOT_PREFIX}/drivers/mtd/nand/spi/core.c": "fa8ddbed4500fb0b4191cfa76f85d828bccd97a8c4496482ea8d47af9187380a",
+    f"{UBOOT_PREFIX}/drivers/mtd/nand/spi/chucun.c": "649994b0727e29cbec1af1b0e21a1aab1f5df11257d3fc5586db9f1f19e52a3f",
+    f"{KERNEL_PREFIX}/include/linux/mtd/spinand.h": "944f28aeadd1579124eccac3838ab134dddd95b8950e0b502ae2cf361cbd7770",
+    f"{KERNEL_PREFIX}/drivers/mtd/nand/spi/core.c": "420ebf1d3765504547cd5579efd4771ea628aa7ab0d43c718484c53f034e2fe1",
+    f"{KERNEL_PREFIX}/drivers/mtd/nand/spi/chucun.c": "9b0ed01599eff032899e076c0c4b6a092f57e88f0919329e954b9d491265ab8c",
+}
+PATCHED_SHA256 = {
+    f"{UBOOT_PREFIX}/include/linux/mtd/spinand.h": "6a052bdce15783d481fd99a310cccf60217e0227621ea44c2d34019756a9c7a5",
+    f"{UBOOT_PREFIX}/drivers/mtd/nand/spi/core.c": "3c71aaa7de382ea4fb195fd289bcb74271dcfd1d961142db25645551e56ec0bd",
+    f"{UBOOT_PREFIX}/drivers/mtd/nand/spi/chucun.c": "1a2c9bee7d42c04c4488bcfacd11aa26a99076a72dd032ca77854a8426c48c18",
+    f"{KERNEL_PREFIX}/include/linux/mtd/spinand.h": "a1e1c72d3c523dc80a4f9f39a5a78df92eff204b55c84dc970d0c99a9bd0693e",
+    f"{KERNEL_PREFIX}/drivers/mtd/nand/spi/core.c": "8ae5de7d2b6558a1cd69fe67f5ba0a875c6ae0d2dd0c68222027a8c3efbfe807",
+    f"{KERNEL_PREFIX}/drivers/mtd/nand/spi/chucun.c": "a934235549a8743dcd191bce77918b22d891c262259822d96cc93536912aac35",
+}
+
+
+def file_sha256(path):
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def parse_git_patch(patch_text):
@@ -92,6 +113,10 @@ def apply_patch_to_clean_sources(patch_name, prefix):
     sdk_root = pathlib.Path(tempdir.name)
     for relative in RELATIVE_FILES:
         source = BASELINE / prefix / relative
+        expected_sha256 = BASELINE_SHA256[f"{prefix}/{relative}"]
+        if file_sha256(source) != expected_sha256:
+            tempdir.cleanup()
+            raise AssertionError(f"baseline hash mismatch: {source}")
         destination = sdk_root / prefix / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
@@ -117,6 +142,12 @@ def apply_patch_to_clean_sources(patch_name, prefix):
         relative: (sdk_root / prefix / relative).read_text(encoding="utf-8")
         for relative in RELATIVE_FILES
     }
+    for relative in RELATIVE_FILES:
+        patched = sdk_root / prefix / relative
+        expected_sha256 = PATCHED_SHA256[f"{prefix}/{relative}"]
+        if file_sha256(patched) != expected_sha256:
+            tempdir.cleanup()
+            raise AssertionError(f"patched hash mismatch: {patched}")
     return tempdir, sources
 
 
