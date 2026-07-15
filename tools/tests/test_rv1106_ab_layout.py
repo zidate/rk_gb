@@ -14,6 +14,11 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 IMAGE_DIR = ROOT / "packaging" / "image"
+PACKAGING_MAKEFILE = ROOT / "packaging" / "Makefile"
+RAW_PACKER_SOURCE = (
+    IMAGE_DIR / "tools-sourcecode" / "packaging-raw" / "packaging.c"
+)
+RAW_PACKER = IMAGE_DIR / "packaging-raw"
 PATCH_PATH = ROOT / "vendor" / "rv1106_sdk_patches" / "0001-ab-layout.patch"
 LINKMOUNT_PATH = ROOT / "packaging" / "rootfs_pub" / "etc" / "init.d" / "S20linkmount"
 ALIGNMENT = 0x20000
@@ -242,6 +247,83 @@ class DeprecatedUpgradeInputTest(unittest.TestCase):
 
     def test_makefile_is_not_executable(self):
         self.assertEqual((IMAGE_DIR / "Makefile").stat().st_mode & 0o111, 0)
+
+
+class PackagingArtifactsTest(unittest.TestCase):
+    def test_partition_sizes_and_outputs_are_exact(self):
+        makefile = PACKAGING_MAKEFILE.read_text(encoding="utf-8")
+        for assignment in (
+            "ROOTFS_PART_SIZE := 10*0x100000",
+            "OEM_PART_SIZE := 32*0x100000",
+            "USERDATA_PART_SIZE := 0x1FC0000",
+        ):
+            self.assertIn(assignment, makefile)
+        for image in ("rootfs", "oem", "userdata"):
+            self.assertIn(f"/{image}.img", makefile)
+        self.assertIn("RELEASE_DIR := $(ROOT)/Release", makefile)
+        self.assertIn("$(RELEASE_DIR)/ota_ab.tar", makefile)
+        self.assertIn("$(RELEASE_DIR)/sd", makefile)
+        self.assertRegex(makefile, r"tar .*boot\.img rootfs\.img oem\.img")
+        self.assertNotIn("sd_update.txt", makefile)
+        image_makefile = (IMAGE_DIR / "Makefile").read_text(encoding="utf-8")
+        self.assertNotIn("./packaging-update", image_makefile)
+
+    def test_raw_packer_declares_exact_ordered_sections(self):
+        source = RAW_PACKER_SOURCE.read_text(encoding="utf-8")
+        expected = (
+            '"env", "idblock", "uboot", "boot_a", "boot_b",\n'
+            '    "rootfs_a", "rootfs_b", "oem_a", "oem_b",\n'
+            '    "reserved", "misc", "userdata",'
+        )
+        self.assertIn(expected, source)
+        self.assertIn("0x8000000", source)
+        self.assertIn("0x20000", source)
+
+    def test_raw_packer_builds_empty_b_slots_as_ff(self):
+        self.assertTrue(RAW_PACKER.is_file())
+        with tempfile.TemporaryDirectory(prefix="rv1106-raw-pack-") as tempdir:
+            work = pathlib.Path(tempdir)
+            shutil.copy2(IMAGE_DIR / "partition.ini", work / "partition.ini")
+            for name in FACTORY_IMAGES.values():
+                (work / name).write_bytes(bytes([len(name) & 0xFF]))
+
+            result = subprocess.run(
+                [str(RAW_PACKER), "partition.ini", "raw.bin"],
+                cwd=work,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            raw = work / "raw.bin"
+            self.assertEqual(raw.stat().st_size, FLASH_SIZE)
+            with raw.open("rb") as stream:
+                for section in ("boot_b", "rootfs_b", "oem_b", "reserved", "misc"):
+                    start, size = EXPECTED[section]
+                    stream.seek(start)
+                    self.assertEqual(stream.read(min(size, 4096)), b"\xff" * min(size, 4096))
+
+    def test_raw_packer_rejects_invalid_layout_before_output(self):
+        original = (IMAGE_DIR / "partition.ini").read_text(encoding="utf-8")
+        invalid_layouts = (
+            original.replace("start=0x640000", "start=0x640001"),
+            original.replace("start=0x640000", "start=0x240000"),
+            original.replace("[boot_b]\nstart=0x640000\nsize=0x400000\ntype=4\n", ""),
+            original.replace("size=0x40000", "size=0x9000000", 1),
+        )
+        with tempfile.TemporaryDirectory(prefix="rv1106-raw-invalid-") as tempdir:
+            work = pathlib.Path(tempdir)
+            for index, content in enumerate(invalid_layouts):
+                ini = work / f"invalid-{index}.ini"
+                output = work / f"invalid-{index}.bin"
+                ini.write_text(content, encoding="utf-8")
+                result = subprocess.run(
+                    [str(RAW_PACKER), str(ini), str(output)],
+                    cwd=work,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertNotEqual(result.returncode, 0, index)
+                self.assertFalse(output.exists(), index)
 
 
 class BoardConfigPatchTest(unittest.TestCase):

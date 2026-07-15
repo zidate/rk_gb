@@ -1,8 +1,12 @@
 .PHONY: all clean
+.PHONY: rebuild-raw
 
-all:
-	$(Q)./packaging-update ./merge.ini ./linux.bin
+all: rebuild-raw
 	$(Q)./packaging-raw ./partition.ini ./raw.bin
+
+rebuild-raw:
+	$(Q)$(MAKE) -C ./tools-sourcecode/packaging-raw clean all
+	$(Q)cp ./tools-sourcecode/packaging-raw/packaging-raw ./packaging-raw
 
 clean:
 	$(Q)rm -f ./oem.img
@@ -11,3 +15,4 @@ clean:
 	$(Q)rm -f ./upgrade.bin
 	$(Q)rm -f ./raw.bin
 	$(Q)rm -f ./conf.jffs2
+	$(Q)$(MAKE) -C ./tools-sourcecode/packaging-raw clean
