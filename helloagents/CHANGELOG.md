@@ -34,6 +34,8 @@
 - 为恢复该分支的交叉编译验证能力，禁用根目录与 `Middleware` 的全局 `-o3/-O3` 参数，并重新跑通 `tools/issue_bot/build_verify.sh`。
 
 ### 新增
+- 新增持久化云平台选择 `CFG_CLOUD_PLATFORM`：同一固件在启动时只运行 `GB28181` 或 `CMIOT`，缺省为 GB28181，配置修改后重启生效。
+- 新增独立 cmiot OSD 配置 `CFG_CMIOT_OSD` 与 `NormalizedOsdControl` 媒体边界；平台下发的 `0-10000` 坐标保持原值到 RK OSD 最终应用阶段。
 - 扩展 OSD 水印外部接口能力：`VideoOsdState`、`CFG_OSD_TIME/CFG_OSD_TEXT`、`AVManager` 和 RV1106 RGN 层现支持 `16/32/64` 字号、`auto/customize #rrggbb` 颜色、日期四种格式、12/24 小时制、星期开关、左右对齐、外部 `0-10000` 坐标，以及最多 `7` 条文本水印真实下发。
 - 新增 GAT1400 注册配置 `server_ipv6/server_ipv6_port`，本地 INI、Web 配置桥、配置 diff/reload 和请求目标构造均已接入。
 - 新增 GAT1400 车牌检测异步上报入口 `ProtocolManager::NotifyGatPlateDetections()`、`GAT1400ClientService::NotifyPlateDetections()` 与 `LOWER_1400_NOTIFY_PLATEDETECTIONS()`，复用 `GAT_1400_Motor` 车牌字段和 `/VIID/MotorVehicles` 资源。
@@ -59,6 +61,8 @@
 - 新增 `App/Media/GAT1400CaptureControl.*` 抓拍桥接层，供编码侧 / 算法侧以“人脸 / 机动车 + 图片 / 视频 / 文件”事件方式向 1400 模块投递待上传数据，并补齐调用方接入使用说明。
 
 ### 变更
+- cmiot OSD 改为直接解析并深拷贝 `cmiotOSDInfo_t`，不再经过国标 `VideoOsdState` 或覆盖本地 `CFG_OSD_*`；`osdSwitch=1` 时优先使用持久化 cmiot 配置，关闭时恢复覆盖期间仍持续保存的最新本地 OSD。
+- `CMIOT_CMD_SET_OSD` 已接入 `cmiot_osd_set_config()` 并传播实际返回码，迁移后的 `ChinaMobile/CmiotOsdControl.cpp` 同步加入应用构建。
 - 复核当前分支构建入口后修正 `build_runtime.md` 中 `-o3/-O3` 口径：当前顶层与 Middleware CMake 仍显示 `add_definitions(-o3)`，构建排查时需以代码事实为准。
 - 将 `feature/dg_ipc_replay_20260415` 分支中的默认 `packaging/` 目录收敛为单个 `packaging.tar.xz` 归档；`build.sh` 现会在目标打包目录缺失但同名归档存在时自动解压恢复，`.gitignore` 也同步忽略解压后的 `packaging/` 工作目录，减少板级二进制资源对 Git 差异和历史浏览的噪声。
 - 在独立回放分支中先补齐 `feature/gb-zero-config-macro-switch-20260326` 的本地/远端独有提交，再吸收 `feature/dg_ipc` 的 IPC 适配改动；回放过程中仅清理 `cmake-build`、调试目录、压缩包和资料类垃圾文件，保留仓库中原本版本化管理的板级库、固件与打包资源。

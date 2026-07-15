@@ -124,10 +124,20 @@ flowchart TD
 | 时间 OSD | `CFG_OSD_TIME` | `AVManager::VideoParamInit()` / `onConfigOSDTime()` 先调 `gb_rkipc_osd_common_set()`，再调 `gb_rkipc_osd_time_set()` |
 | 文本 OSD | `CFG_OSD_TEXT` | `AVManager::VideoParamInit()` / `onConfigOSDText()` 调 `gb_rkipc_osd_text_set()`，RV1106 侧使用 `1-7` 号区域显示最多 `7` 条文本 |
 | GB/外部 OSD 状态 | `VideoOsdControl` 承载多文本、日期/时间格式、星期、字体、颜色、坐标和对齐 | 外部 x/y 统一为 `0-10000` 归一化坐标，媒体层按主码流分辨率换算到底层像素 |
-| cmiot OSD 适配 | `App/cmiot/CmiotOsdControl.*` 对外提供 `cmiot_osd_set_config()` / `cmiot_osd_get_config()` | 时间/字体复用 `VideoOsdControl`；文本只更新 `CFG_OSD_TEXT` 的 `0-4` 槽，避免占用下层映射到硬件 RGN `6/7` 的文本区域 |
+| cmiot OSD 适配 | `App/ChinaMobile/CmiotOsdControl.*` 对外提供 `cmiot_osd_initialize()`、`cmiot_osd_set_config()` / `cmiot_osd_get_config()` | cmiot 配置独立持久化到 `CFG_CMIOT_OSD`，不经过 `VideoOsdState`；`NormalizedOsdControl` 只在 RK OSD 最终边界把 `0-10000` 坐标换成像素 |
 | 翻转 | `CFG_CAMERA_PARAM -> CameraParamAll.vCameraParamAll[0].mirror/flip` | `VideoImageControl::ApplyVideoImageFlipMode()` 写配置并触发 `applyOK` |
 
 RV1106 的 OSD 字体仍走 ARGB8888 FreeType 位图路径。`font_color_mode=auto` 时，RK 层会从 `VIDEO_PIPE_1` 取一帧 NV12，按 Y 平面下采样生成亮/暗 map，再在 `font_factory` 逐字符回调里选择黑色或白色；取不到帧或格式不匹配时不阻塞刷新，字符颜色回退为白色。
+
+同一固件通过 `CFG_CLOUD_PLATFORM` 在启动时选择唯一云平台，缺省及非法配置均回退 `GB28181`；选择结果在进程生命周期内固定，修改配置后重启生效。`CMIOT` 与 `GB28181` 不同时启动，cmiot SDK 的 `mode=2` 只是水印排版模式，不表示当前云平台为国标。
+
+| 当前平台 | cmiot `osdSwitch` | 生效 OSD |
+|----------|------------------:|----------|
+| `GB28181` | 任意 | 本地/国标 `CFG_OSD_TIME` 与 `CFG_OSD_TEXT` |
+| `CMIOT` | `0` | 本地 `CFG_OSD_TIME` 与 `CFG_OSD_TEXT` |
+| `CMIOT` | `1` | 独立持久化的 `CFG_CMIOT_OSD` |
+
+cmiot 覆盖期间，本地 OSD 配置仍正常保存并更新 `AVManager` 缓存，但不刷新硬件；收到 `osdSwitch=0` 后立即恢复最新本地时间与全部 `7` 个文本槽。重启或从 GB28181 切回 CMIOT 时，只有 `CFG_CMIOT_OSD.valid=true` 且 `osdSwitch=1` 才恢复 cmiot 水印。
 
 ## 注意事项
 
@@ -157,7 +167,8 @@ RV1106 的 OSD 字体仍走 ARGB8888 FreeType 位图路径。`font_color_mode=au
 - `App/Protocol/gb28181/GB28181RtpPsSender.*`
 
 ## 变更历史
-- 2026-07-13: 增加 cmiot OSD 适配记录：接口位于 `App/cmiot`，复用既有 OSD 配置链路，同时在 cmiot 应用逻辑中保留 RGN 6/7 给后续位图叠加。
+- 2026-07-15: 增加单固件 `GB28181/CMIOT` 运行时平台选择和 cmiot OSD 独立持久化；cmiot 坐标只在 `NormalizedOsdControl` 最终边界换算，覆盖关闭后恢复最新本地 OSD。
+- 2026-07-13: 增加首版 cmiot OSD 适配记录；当时接口位于 `App/cmiot` 且复用 `VideoOsdControl/CFG_OSD_*`，该口径已由 2026-07-15 的独立持久化与平台优先级规则取代。
 - 2026-07-08: 补齐 RV1106 OSD 自动黑白：`font_color_mode=auto` 从子码流 VI NV12 Y 平面采样亮度，并在 ARGB8888 FreeType 绘制中逐字符选择黑/白，失败时白色兜底。
 - 2026-05-16: 补充 GB 回放单文件 EOF 主动 EOS 口径，明确 Storage NULL 回调到 `MediaStatus 121/eos` 的链路。
 - 2026-05-16: 新增 RK 媒体链路知识库，沉淀 PAL/DMC、编码配置、实时流、录像、回放/下载和 OSD/翻转边界。
