@@ -27,6 +27,8 @@ bool CMediaDefaultConfig::start()
 	setAudio();
 	setOSDTime();
 	setOSDText();
+	setCmiot();
+	setCmiotIntrude();
 	return true;
 }
 
@@ -256,6 +258,7 @@ void CMediaDefaultConfig::setAudio()
 {
 	/// audio默认配置
 	CConfigTable audio;
+	audio[Json::StaticString("mic_enable")] = 1;
 	audio[Json::StaticString("enc_type")] = 0;
 	g_configManager.setDefault(getConfigName(CFG_AUDIO), audio);
 }
@@ -291,4 +294,35 @@ void CMediaDefaultConfig::setOSDText()
 	}
 	g_configManager.setDefault(getConfigName(CFG_OSD_TEXT), table);
 }
+
+void CMediaDefaultConfig::setCmiot()
+{
+	/// 千里眼默认配置
+	CConfigTable table;
+	table[Json::StaticString("video_quality")] = 1;
+	g_configManager.setDefault(getConfigName(CFG_CMIOT), table);
+}
+
+void CMediaDefaultConfig::setCmiotIntrude()
+{
+	/// 千里眼入侵默认配置
+	CConfigTable table;
+	table["rect_point"][0]["x"] = 0;
+	table["rect_point"][0]["y"] = 0;
+	table["rect_point"][1]["x"] = 1000;
+	table["rect_point"][1]["y"] = 0;
+	table["rect_point"][2]["x"] = 1000;
+	table["rect_point"][2]["y"] = 1000;
+	table["rect_point"][3]["x"] = 0;
+	table["rect_point"][3]["y"] = 1000;
+	table["person_report_en"] = 1;
+	table["person_report_interval"] = 60;
+	table["intrude_report_en"] = 1;
+	table["intrude_report_interval"] = 60;
+	table["real_time_frame"] = 0;
+	table["intrude_sound_light_alarm"] = 0;
+	g_configManager.setDefault(getConfigName(CFG_CMIOT_INTRUDE), table);
+ }
+
+
 

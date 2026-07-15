@@ -27,6 +27,7 @@ include_directories(
 	${CMAKE_CURRENT_SOURCE_DIR}/../Include/libevent/
 	${CMAKE_CURRENT_SOURCE_DIR}/../Include/Ble/
 	${CMAKE_CURRENT_SOURCE_DIR}/../Include/TestModuleV2/
+	${CMAKE_CURRENT_SOURCE_DIR}/../Include/ChinaMobile/
 	${CMAKE_CURRENT_SOURCE_DIR}/Manager/
 	${CMAKE_CURRENT_SOURCE_DIR}/Media/
 	${CMAKE_CURRENT_SOURCE_DIR}/Net/
@@ -47,7 +48,6 @@ include_directories(
 	${CMAKE_CURRENT_SOURCE_DIR}/Protocol/config/
 	${CMAKE_CURRENT_SOURCE_DIR}/Protocol/gb28181/
 	${CMAKE_CURRENT_SOURCE_DIR}/Protocol/gat1400/
-	${CMAKE_CURRENT_SOURCE_DIR}/cmiot/
 	${CMAKE_CURRENT_SOURCE_DIR}/DM/
 	${PROJECT_SOURCE_DIR}/third_party/wakaama/include/
 	${PROJECT_SOURCE_DIR}/third_party/wakaama/core/
@@ -113,6 +113,7 @@ link_directories(
 	${PROJECT_SOURCE_DIR}/Lib/Device/ThirdPartyLibs/libevent
 	${PROJECT_SOURCE_DIR}/Lib/Device/ThirdPartyLibs/TestModuleV2
 #	${PROJECT_SOURCE_DIR}/Lib/Device/Tuya
+	${PROJECT_SOURCE_DIR}/Lib/Device/ChinaMobile
 	${PROJECT_SOURCE_DIR}/Lib/Package
 	${PROJECT_SOURCE_DIR}/Middleware/Lib
 )
@@ -158,6 +159,11 @@ set(Tuya_SRC tuya/Tuya.cpp
 	tuya/tuya_ipc_sdk_simple_start.cpp
 	tuya/tuya_ipc_doorbell.cpp
 )
+
+#ChinaMobile模块
+set(CM_SRC ChinaMobile/cmiot_demo.cpp ChinaMobile/demo_callback.cpp ChinaMobile/demo_socket.cpp ChinaMobile/dev_log.cpp ChinaMobile/dev_log_test.cpp
+	ChinaMobile/ntp/ntp.cpp ChinaMobile/ntp/TPUdp.c ChinaMobile/ntp/TPSocket.c)
+
 #Net模块
 set(Net_SRC Net/NetConfigHook.cpp)
 #QrCode模块
@@ -249,9 +255,6 @@ set(DM_SRC
 	DM/DmConfig.cpp
 	DM/DmCrypto.cpp
 	DM/DmLwm2mObjects.cpp
-)
-set(CMIOT_SRC
-	cmiot/CmiotOsdControl.cpp
 )
 #加密和产测配置 模块
 set(Encryption_SRC Encryption/Encryption.cpp)
@@ -526,6 +529,7 @@ add_executable(${PROJECT_NAME} ./Main.cpp ./Common.cpp ./Inifile.cpp
 	${Media_SRC} 
 	${Manager_SRC} 
 #	${Tuya_SRC} 
+	${CM_SRC}
 	${Net_SRC} 
 	${QrCode_SRC} 
 	${Produce_SRC} 
@@ -541,7 +545,6 @@ add_executable(${PROJECT_NAME} ./Main.cpp ./Common.cpp ./Inifile.cpp
 	${Update}
 	${Protocol_SRC}
 	${DM_SRC}
-	${CMIOT_SRC}
     ${Encryption_SRC}
     ${ProductCof_SRC}
 	${Wdt_SRC}
@@ -561,6 +564,8 @@ set(COMLIBSDIR libManager.a
 set(LIBMIDWARE_DIR libmpp.a)
 
 set(LIBTUYA_DIR libtuya_iot.a)
+
+set(LIBCM_DIR libandmu_sdk.a libcurl.a libmbedtls.a libmbedcrypto.a libmbedx509.a libprotobuf-c.a)
 
 if(ATBM6062 OR ATBM6012B OR ATBM6132)
 	set(LIBBLE_DIR libnimble_linux.a)
@@ -596,6 +601,7 @@ target_link_libraries(
 	${LIBMIDWARE_DIR}
 	${LIBBLE_DIR}
 #	${LIBTUYA_DIR}
+	${LIBCM_DIR}
 	${LIBFFMPEG_DIR}
 #	${LIBICONV_DIR}
 	${LIBRTSP_DIR}

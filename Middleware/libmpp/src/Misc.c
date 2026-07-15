@@ -148,7 +148,7 @@ static int PirCheckReady()
 int SystemRest()
 {
 	static int pro = 0;
-	uint32_t gpio_num = GPIO(RK_GPIO1,RK_PD2);
+	uint32_t gpio_num = GPIO(RK_GPIO2,RK_PA1);
 	if(pro == 0)
 	{
 		pro = 1;
@@ -459,7 +459,7 @@ int SystemSetPirSen(int val,int option)//设置pir灵敏度
 
 int SystemSetLight_Power(int value)
 {
-	uint32_t gpio_led_r = GPIO(RK_GPIO0,RK_PA3);
+	uint32_t gpio_led_r = GPIO(RK_GPIO2,RK_PA4);//WiFi枪机
 	static int pro = 0;
 	static int s_value = -1;
 	if(0 == pro)
@@ -487,7 +487,7 @@ int SystemSetLight_Power(int value)
 
 int SystemSetLight_Link(int value)
 {
-	uint32_t gpio_led_b = GPIO(RK_GPIO0,RK_PA2);
+	uint32_t gpio_led_b = GPIO(RK_GPIO2,RK_PA3);//WiFi枪机
 	static int pro = 0;
 	static int s_value = -1;
 	if(0 == pro)

@@ -168,6 +168,7 @@ private:
 	void onConfigCamera(const CConfigTable &config, int &ret);
 	void onConfigMotion(const CConfigTable &config, int &ret);
 	void onConfigMotionTrack(const CConfigTable &table, int &ret);
+	void onConfigCmiotIntrude(const CConfigTable &config, int &ret);
 private:
 	static Bool m_MotionResult;
 	static Bool m_PersonResult;
@@ -181,5 +182,7 @@ private:
 	CameraParamAll m_configAll;
 	MotionDetectConfigAll m_CCfgMotion;
 	MotionTrackConfig m_CCfgMotionTrack;
+
+	CmiotIntrudeConf_S m_cfgCmiotIntrude;
 };
 #endif

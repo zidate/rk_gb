@@ -560,6 +560,7 @@ template<> void exchangeTable<NetWifiConfig>(CConfigTable& table, NetWifiConfig&
 	exchanger.exchange(table, "Submask", config.Submask.l);
 	exchanger.exchange(table, "GateWay", config.Gateway.l);
 	exchanger.exchange(table, "DNS", config.Dns.l);
+	exchanger.exchange(table, "Bind", config.bBind);
 }
 
 template<> void exchangeTable<NetAPConfig>(CConfigTable& table, NetAPConfig& config, int state)

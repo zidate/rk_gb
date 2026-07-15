@@ -133,6 +133,7 @@ int CMp4Muxer::mp4_mux_init(AVCodecContext *v_codec, AVCodecContext *a_codec, in
 	int ret;
 	int err_code = -1;
 	AVBSFContext *a_bsf_ctx = NULL;
+	AVDictionary *opt = NULL;
 
 	m_stMp4Ctx.a_bsf_ctx = NULL;
 	m_stMp4Ctx.ofmt_ctx = NULL;
@@ -249,8 +250,12 @@ int CMp4Muxer::mp4_mux_init(AVCodecContext *v_codec, AVCodecContext *a_codec, in
 			goto fail;
 		}
 	}
+	ret = av_dict_set(&opt, "movflags", "faststart+empty_moov", 0);
+	printf("av_dict_set faststart+empty_moov. ret: %d\n", ret);
 	//Write file header
-	if ((ret = avformat_write_header(ofmt_ctx, NULL)) < 0)
+	ret = avformat_write_header(ofmt_ctx, &opt);
+	av_dict_free(&opt);
+	if (ret < 0)
 	{
 		printf("Error occurred when opening output file %d\n", ret);
 		goto fail;

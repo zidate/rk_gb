@@ -6,6 +6,17 @@ extern unsigned char bStartPrivateMode; 		//是否开启隐私模式
 extern int gb_alarm_notify();
 extern void gat1400_alarm_notify(DET_PIC_S *snap, DET_THUM_S *thum, int thum_num);
 
+extern "C"{
+void rk_video_set_cmoit_intrude_event_param(CmiotQuad_t det_rect, int person_en, int person_interval, 
+															int intrude_en, int intrude_interval, int frame);
+
+void rk_video_set_cmoit_intrude_event_callback(cmoit_intrude_event_start_callback_t start_cb, 
+																cmoit_intrude_event_stop_callback_t stop_cb);
+}
+
+extern void cmoit_intrude_event_start_proc(int type, char *pic, int pic_size, uint64_t utcms);
+extern void cmoit_intrude_event_stop_proc(int type, uint64_t utcms);
+
 PATTERN_SINGLETON_IMPLEMENT(CAlarm);
 
 CAlarm::CAlarm() : CThread("CAlarm", 50)
@@ -529,6 +540,33 @@ Bool CAlarmMotion::Start()
 	g_configManager.attach(getConfigName(CFG_MOTIONDETECT), IConfigManager::Proc(&CAlarmMotion::onConfigMotion, this));
 	
 
+	CConfigTable tableIntrude;
+	g_configManager.getConfig(getConfigName(CFG_CMIOT_INTRUDE), tableIntrude);
+	printJsonValue(tableIntrude);
+	TExchangeAL<CmiotIntrudeConf_S>::getConfig(tableIntrude, m_cfgCmiotIntrude);
+	g_configManager.attach(getConfigName(CFG_CMIOT_INTRUDE), IConfigManager::Proc(&CAlarmMotion::onConfigCmiotIntrude, this));
+	printf("m_cfgCmiotIntrude: [%d, %d], [%d, %d], [%d, %d], [%d, %d], per_en: %d, per_int: %d, int_en: %d, int_int: %d, real: %d, s_l_a: %d\n", 
+		m_cfgCmiotIntrude.rect_point[0].x, m_cfgCmiotIntrude.rect_point[0].y, 
+		m_cfgCmiotIntrude.rect_point[1].x, m_cfgCmiotIntrude.rect_point[1].y, 
+		m_cfgCmiotIntrude.rect_point[2].x, m_cfgCmiotIntrude.rect_point[2].y, 
+		m_cfgCmiotIntrude.rect_point[3].x, m_cfgCmiotIntrude.rect_point[3].y, 
+		m_cfgCmiotIntrude.person_report_en, m_cfgCmiotIntrude.person_report_interval, 
+		m_cfgCmiotIntrude.intrude_report_en, m_cfgCmiotIntrude.intrude_report_interval, 
+		m_cfgCmiotIntrude.real_time_frame, m_cfgCmiotIntrude.intrude_sound_light_alarm);
+
+	CmiotQuad_t stDetRect;
+	for (int i = 0; i < 4; i++)
+	{
+		stDetRect.
+p[i].x = m_cfgCmiotIntrude.rect_point[i].x;
+		stDetRect.
+p[i].y = m_cfgCmiotIntrude.rect_point[i].y;
+	}
+	rk_video_set_cmoit_intrude_event_param(stDetRect, m_cfgCmiotIntrude.person_report_en, m_cfgCmiotIntrude.person_report_interval, 
+		m_cfgCmiotIntrude.intrude_report_en, m_cfgCmiotIntrude.intrude_report_interval, m_cfgCmiotIntrude.intrude_sound_light_alarm);
+	rk_video_set_cmoit_intrude_event_callback(cmoit_intrude_event_start_proc, cmoit_intrude_event_stop_proc);
+
+
 	CConfigTable CameraParamTable;
 	CameraParamAll m_configAll;
 	memset(&m_configAll, 0, sizeof(m_configAll));
@@ -634,7 +672,9 @@ Bool CAlarmMotion::Start()
 	#else
 
 	CaptureDetectObjectSetSnapCb(gat1400_alarm_notify);
-	
+
+	//不设置人形检测灵敏度
+	#if 0
 	DETECT_INIT detInit;
 	detInit.Rotate = (RotateAttr_t)m_configAll.vCameraParamAll[0].rotateAttr;
 	detInit.Level = m_CCfgMotion.vMotionDetectAll[0].iLevel;
@@ -649,6 +689,7 @@ Bool CAlarmMotion::Start()
 		}
 	}
 	CaptureDetectSet(&detInit);
+	#endif
 	//人型过滤
 	{
 		DETECT_ATTR attr;
@@ -696,6 +737,7 @@ Bool CAlarmMotion::Stop()
 	g_configManager.detach(getConfigName(CFG_CAMERA_PARAM), IConfigManager::Proc(&CAlarmMotion::onConfigCamera, this));
 	g_configManager.detach(getConfigName(CFG_MOTIONDETECT), IConfigManager::Proc(&CAlarmMotion::onConfigMotion, this));
 	g_configManager.detach(getConfigName(CFG_MOTIONTRACK), IConfigManager::Proc(&CAlarmMotion::onConfigMotionTrack, this));
+	g_configManager.detach(getConfigName(CFG_CMIOT_INTRUDE), IConfigManager::Proc(&CAlarmMotion::onConfigCmiotIntrude, this));
 	return TRUE;
 }
 
@@ -1086,6 +1128,8 @@ void CAlarmMotion::onConfigMotion(const CConfigTable &table, int &ret)
 			}
 		}
 		#else
+		//不设置人形检测灵敏度
+		#if 0
 		if (cfgOld.iLevel != cfgNew.iLevel)
 		{
 			DETECT_INIT detInit;
@@ -1103,6 +1147,7 @@ void CAlarmMotion::onConfigMotion(const CConfigTable &table, int &ret)
 			}
 			CaptureDetectSet(&detInit);
 		}
+		#endif
 		if (cfgNew.bEnable)
 			CaptureDetectStart();
 		else
@@ -1127,6 +1172,25 @@ void CAlarmMotion::onConfigMotionTrack(const CConfigTable &table, int &ret)
 		}
 	}
 	m_CCfgMotionTrack = CfgMotionTrack;
+}
+
+void CAlarmMotion::onConfigCmiotIntrude(const CConfigTable &config, int &ret)
+{
+	CmiotIntrudeConf_S CfgCmiotIntrude;
+	TExchangeAL<CmiotIntrudeConf_S>::getConfig(config, CfgCmiotIntrude);
+	
+	CmiotQuad_t stDetRect;
+	for (int i = 0; i < 4; i++)
+	{
+		stDetRect.
+p[i].x = CfgCmiotIntrude.rect_point[i].x;
+		stDetRect.
+p[i].y = CfgCmiotIntrude.rect_point[i].y;
+	}
+	rk_video_set_cmoit_intrude_event_param(stDetRect, CfgCmiotIntrude.person_report_en, CfgCmiotIntrude.person_report_interval, 
+		CfgCmiotIntrude.intrude_report_en, CfgCmiotIntrude.intrude_report_interval, CfgCmiotIntrude.intrude_sound_light_alarm);
+
+	m_cfgCmiotIntrude = CfgCmiotIntrude;
 }
 
 int CAlarmMotion::SetAllowMotionDetTime(int atime)

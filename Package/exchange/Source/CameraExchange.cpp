@@ -281,6 +281,7 @@ template<> void exchangeTable<CameraParam>(CConfigTable &table, CameraParam &con
 	//add by shang 2020.06.01
 	exchanger.exchange(table, "WDRSwitch", config.wdrSwitch);
 	exchanger.exchange(table, "OSDSwitch", config.osdSwitch);
+	exchanger.exchange(table, "nightVisionSwitch", config.nightVisionSwitch);
 	exchanger.exchange(table, "NightVisionMode", config.nightVisionMode);
 	exchanger.exchange(table, "AntiFlicker", config.iAntiFlicker);
 	exchanger.exchange(table, "mirror", config.mirror);

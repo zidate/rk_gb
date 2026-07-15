@@ -172,7 +172,7 @@ static unsigned char linear2alaw(short pcm_val){
 	}
 }
 //extern int get_local_ip_info(char *interface, char *ip);
-//extern int g_test_enc_type[2]; //for debug
+extern int g_test_enc_type[2]; //for debug
 //extern char g_onvifPassword[33];
 static void *rtspThread(void *data)
 {
@@ -207,10 +207,10 @@ static void *rtspThread(void *data)
 
 	{
 		xop::MediaSession *session = xop::MediaSession::CreateNew("main"); // url: rtsp://ip/live
-//		if (g_test_enc_type[0])
+		if (g_test_enc_type[0])
 		session->AddSource(xop::channel_0, xop::H265Source::CreateNew(15)); 
-//		else
-//		session->AddSource(xop::channel_0, xop::H264Source::CreateNew(15)); 
+		else
+		session->AddSource(xop::channel_0, xop::H264Source::CreateNew(15)); 
 		session->AddSource(xop::channel_1, xop::G711ASource::CreateNew());
 		//session->StartMulticast(); /* 开启组播(ip,端口随机生成), 默认使用 RTP_OVER_UDP, RTP_OVER_RTSP */
 
@@ -230,10 +230,10 @@ static void *rtspThread(void *data)
 
 	{
 		xop::MediaSession *session = xop::MediaSession::CreateNew("sub"); // url: rtsp://ip/live
-//		if (g_test_enc_type[1])
+		if (g_test_enc_type[1])
 		session->AddSource(xop::channel_0, xop::H265Source::CreateNew(15));//H265
-//		else
-//		session->AddSource(xop::channel_0, xop::H264Source::CreateNew(15));  //H264
+		else
+		session->AddSource(xop::channel_0, xop::H264Source::CreateNew(15));  //H264
 		session->AddSource(xop::channel_1, xop::G711ASource::CreateNew());
 		//session->StartMulticast(); /* 开启组播(ip,端口随机生成), 默认使用 RTP_OVER_UDP, RTP_OVER_RTSP */
 

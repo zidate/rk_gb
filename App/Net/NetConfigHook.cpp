@@ -12,6 +12,10 @@ bool check_firtst_connected = 0;
 bool check_firtst_connectfail = 0;
 
 void wifi_connect_callback(wifi_status_enum status);
+extern "C" {
+int StartOnvifDiscoveryPthread(void);
+void StopOnvifDiscoveryPthread(void);
+}
 
 
 static int s_QrcodeExit = 0;
@@ -97,6 +101,7 @@ CNetConfigHook::CNetConfigHook():CThread("NetInterFace", TP_DEFAULT)
 	TExchangeAL<NetAPConfig>::getConfig(APTable, m_ConfigAP);
 	g_configManager.attach(getConfigName(CFG_WIFI_AP), IConfigManager::Proc(&CNetConfigHook::OnCfgAPComm, this));
 
+	m_bNeedSaveWifiInfo = false;
 	m_bWifiEnable = false;
 	m_nActiveNet = 0;
 	m_nwLinkMode = NET_WORK_MODE_NONE;
@@ -383,6 +388,8 @@ void CNetConfigHook::ThreadProc(void)
 
 	bool bFirstCheckEth0 = true;
 
+	bool bOnvifDiscover = false;
+
 	while (m_bLoop)
 	{
 		if (bApQrcodeStart && GetSystemUptime_s() > (QrcodeStartTime + 300))
@@ -443,6 +450,13 @@ void CNetConfigHook::ThreadProc(void)
 						// g_Camera.SetNightModeQrcode(0);
 					}
 				}
+
+				//关闭 onvif 搜索应答
+				if (bOnvifDiscover)
+				{
+					StopOnvifDiscoveryPthread();
+					bOnvifDiscover = false;
+				}
 				
 				//通知其他模块，网络未连接
 				networkStatus["param"] = 0;
@@ -493,6 +507,13 @@ void CNetConfigHook::ThreadProc(void)
 					IEventManager::instance()->notify("NetWorkStatus", 0, appEventPulse, NULL, NULL, &networkStatus);
 					strncpy(m_ip,ip,20);
 					m_nwLinkMode = NET_WORK_MODE_ETH0;
+					
+					//启动 onvif 搜索应答
+					if (false == bOnvifDiscover)
+					{
+						StartOnvifDiscoveryPthread();
+						bOnvifDiscover = true;
+					}
 				}
 				else
 				{
@@ -566,6 +587,13 @@ void CNetConfigHook::ThreadProc(void)
 								}
 							}
 							
+							//关闭 onvif 搜索应答
+							if (bOnvifDiscover)
+							{
+								StopOnvifDiscoveryPthread();
+								bOnvifDiscover = false;
+							}
+
 							g_IndicatorLight.setLightStatus(CIndicatorLight::ENUM_LINK_INDICATOR_LIGHT_FAST_FLICKER);
 
 							wifi_connect_result_g = WIFI_DISCONNECTED;
@@ -700,12 +728,20 @@ void CNetConfigHook::ThreadProc(void)
 							wifi_connect_failed_count = 0;
 							
 							//如果在配网阶段，保存WiFi信息
-							if (bWifiConfig)
+							if (bWifiConfig || (true == m_bNeedSaveWifiInfo))
 							{
+								m_bNeedSaveWifiInfo = false;
 								bWifiConfig = false;
 								Json::Value WifiTable;
 								TExchangeAL<NetWifiConfig>::setConfig(m_ConfigWifi, WifiTable);
 								g_configManager.setConfig(getConfigName(CFG_WIFI), WifiTable, 0, IConfigManager::applyOK);
+							}
+							
+							//启动 onvif 搜索应答
+							if (false == bOnvifDiscover)
+							{
+								StartOnvifDiscoveryPthread();
+								bOnvifDiscover = true;
 							}
 						}
 						else
@@ -741,6 +777,12 @@ void CNetConfigHook::SetWifiSwitch(bool enable)
 
 void CNetConfigHook::SetWifi(const char *ssid, const char *pwd)
 {
+	if (!ssid || !pwd)
+		return;
+
+	if (m_ConfigWifi.strSSID != ssid || m_ConfigWifi.strKeys != pwd)
+		m_bNeedSaveWifiInfo = true;
+
 	m_ConfigWifi.strSSID = ssid;
 	m_ConfigWifi.strKeys = pwd;
 
@@ -763,7 +805,7 @@ int CNetConfigHook::GetNetWorkIp(char *pIp, int len)
 {
 	if (pIp)
 	{
-		strncpy(pIp,m_ip,len);
+		strncpy(pIp,m_ip,len-1);
 		return 0;
 	}
 	
@@ -851,4 +893,17 @@ bool CNetConfigHook::GetQrcodeEnable()
 {
 	return m_bCanScanQrCode;
 }
+void CNetConfigHook::SetQrcodeEnable(bool en)
+{
+	m_bCanScanQrCode = en;
+}
+
+bool CNetConfigHook::SaveWifi()
+{
+	Json::Value WifiTable;
+	TExchangeAL<NetWifiConfig>::setConfig(m_ConfigWifi, WifiTable);
+	g_configManager.setConfig(getConfigName(CFG_WIFI), WifiTable, 0, IConfigManager::applyOK);
+	return true;
+}
+
 

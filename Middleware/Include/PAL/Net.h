@@ -146,14 +146,28 @@ typedef struct
 {
 	char essid[WIFI_ESSID_NAME_LEN + 1];	//essid
 	char mode;						//mode_type_enum
-	char encryptType;				//encrypt_type_enum
+	char encryptType;				//encrypt_type_enum 0-open 1-wep 2-wap1 3-wap2 4-wap3
 	char quality;                   //max is 100  
+	char connented;                   // 
 }router_list_2_s;
 
 typedef struct
 {
 	char essid[WIFI_ESSID_NAME_LEN + 1];	//essid
+	char mode;						//mode_type_enum
+	char encryptType;				//encrypt_type_enum 0-open 1-wep 2-wap1 3-wap2 4-wap3
+	char quality;                   //max is 100  
+	char connented;                   // 
+	char bssid[128 + 1];	//bssid
+}router_list_3_s;
+
+typedef struct
+{
+	char essid[WIFI_ESSID_NAME_LEN + 1];	//essid
 	unsigned char uchSignal;
+	unsigned char uchLindSpeed; //Mbps
+	unsigned char uchFreq; //1-2.4G 2-5G
+	char dBm;
 }router_signal_s;
 
 
@@ -207,6 +221,7 @@ int WifiiStationDestroy();
 /// @param MAX_Len 
 /// @return 
 int WifiList_2(router_list_2_s* list, int MAX_Len);
+int WifiList_3(router_list_3_s* list, int MAX_Len);
 
 /// @brief 检测是否ap模式
 /// @param ssid 
@@ -258,6 +273,10 @@ int NetSetEth_Peiwang();
 /// @param name 
 /// @return 
 int NetIfInLine(char *name);
+
+
+int NetGetDns(char *dns);
+int NetGetGateway(char *gw_addr, char *gw_mac);
 
 #ifdef __cplusplus
 }

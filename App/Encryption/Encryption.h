@@ -17,6 +17,7 @@ typedef struct{
 	unsigned char TUYA_UID[21]; 	//涂鸦 UUID 		//20 bytes
 	unsigned char TUYA_AUTHKEY[33]; //涂鸦 AUTH KEY	//32 bytes
 	unsigned char TUTK_UID[21]; 	//TUTK UID		//20 bytes
+	unsigned char CM_CODE[22]; 	//移动串码 21字符
 	unsigned char DevMode;
 	unsigned char reserved[3];
 }DEVICE_INFO_FROM_EEPROM_S;

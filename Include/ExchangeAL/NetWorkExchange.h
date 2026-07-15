@@ -430,6 +430,7 @@ struct NetWifiConfig
 	IPAddress Submask;		///< netmask
 	IPAddress Gateway;		///< gateway
 	IPAddress Dns; 	///<dns
+	bool bBind;
 };
 
 //AP模式配置

@@ -106,7 +106,7 @@ static void *onvifDiscoveryThread(void *data)
 		nRet = onvifDiscoveryProcess(g_DiscoverySockFd) ;
 		if (nRet < 0) 
 			continue;
-		ERROR_LOG("discovery process successful!\n");
+//		ERROR_LOG("discovery process successful!\n");
 	}
 	ERROR_LOG("Exit onvif discovery thread \n");
 	close(g_DiscoverySockFd);
@@ -160,7 +160,7 @@ HINT32 onvifDiscoverInit(void)
 	mcast.imr_interface.s_addr = htonl(INADDR_ANY);
 	nRet = setsockopt(fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, (char*)&mcast, sizeof(mcast));
 	if (nRet < 0) {
-		ERROR_LOG("setsockopt IP_ADD_MEMBERSHIP error!\n");
+		ERROR_LOG("setsockopt IP_ADD_MEMBERSHIP error! errno: %d\n", errno);
 		return -1;
 	}
 
@@ -168,7 +168,7 @@ HINT32 onvifDiscoverInit(void)
 }
 
 /*
- * 该函数暂不可�?
+ * 该函数暂不可
  */
 int onvifHello(int sockFd)
 {

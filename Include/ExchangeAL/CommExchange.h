@@ -399,6 +399,7 @@ struct VideoConf_S
 //Audio配置
 struct AudioConf_S
 {
+	int mic_enable;
 	int enc_type; 			//0-g711a 1-g711u 2-aac
 };
 
@@ -456,6 +457,29 @@ struct OSDTextConf_S
 struct OSDTextAllConf_S
 {
 	OSDTextConf_S osd_text[OSD_TEXT_MAX];
+};
+
+//千里眼配置
+struct CmiotConf_S
+{
+	int video_quality; //1-高清 0-标清
+};
+
+struct CmiotRectPoint_S
+{
+	int x; //[0,1000]
+	int y; //[0,1000]
+};
+//千里眼入侵配置
+struct CmiotIntrudeConf_S
+{
+	CmiotRectPoint_S rect_point[4];
+	int person_report_en;
+	int person_report_interval; //单位秒
+	int intrude_report_en;
+	int intrude_report_interval; //单位秒
+	int real_time_frame;
+	int intrude_sound_light_alarm;
 };
 
 #endif

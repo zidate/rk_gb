@@ -23,6 +23,7 @@
 
 int DeviceMode_g = 0; 		//0:正常模式， 1:测试模式
 
+
 //判断是否为目录
 static bool is_dir(const char *path)
 {

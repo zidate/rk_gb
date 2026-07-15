@@ -370,12 +370,12 @@ int CCamera::configure(int chn, CameraParam* pNewConfig)
 	}
 	int ret = 0;
 
-//	if(m_configAll.vCameraParamAll[0].iAntiFlicker != pNewConfig->iAntiFlicker)
-//	{		
-//		CaptureSetAntiFlicker(pNewConfig->iAntiFlicker);
-//		
-//		m_configAll.vCameraParamAll[0].iAntiFlicker = pNewConfig->iAntiFlicker;
-//	}
+	if(m_configAll.vCameraParamAll[0].iAntiFlicker != pNewConfig->iAntiFlicker)
+	{		
+		CaptureSetAntiFlicker(pNewConfig->iAntiFlicker);
+		
+		m_configAll.vCameraParamAll[0].iAntiFlicker = pNewConfig->iAntiFlicker;
+	}
 
 	#if 0
 	if(m_configAll.vCameraParamAll[0].rotateAttr != pNewConfig->rotateAttr)
@@ -492,6 +492,7 @@ void CCamera::ThreadProc()
 	int cur_time;
 	int remain_time;
 	
+	int	night_vision_switch; 	//夜视开关
 	int night_vision_mode;
 	int iAntiFlickerMode;
 
@@ -502,6 +503,7 @@ void CCamera::ThreadProc()
 		iAntiFlickerMode = m_iCheckAntiFlickerMode;
 		if( false == m_bManualOpenWhiteLed )//未手动开白光灯
 		{
+			night_vision_switch = m_configAll.vCameraParamAll[0].nightVisionSwitch;
 			night_vision_mode = m_configAll.vCameraParamAll[0].nightVisionMode;//获取当前的夜视模式 add on 2025.01.15 添加注释
 			bStartTime = false;
 //			eNewDayNightStatus = m_eNewDayNightStatus;
@@ -539,8 +541,7 @@ void CCamera::ThreadProc()
 //						test_get_camera_mode(m_eDayNightStatus), test_get_camera_mode(eNewDayNightStatus));
 //			test_time = current_time;
 			// printf("night_vision_mode:%d,eNewDayNightStatus:%d,m_eDayNightStatus---%d,m_eNewDayNightStatus---%d",night_vision_mode,eNewDayNightStatus,m_eDayNightStatus,m_eNewDayNightStatus);
-			//夜视模式--------强制白天
-			if (SINGLE_IRMODE_CLOSE == night_vision_mode)//关闭夜视——白天 add on 2025.01.15 添加注释
+			if (0 == night_vision_switch) //关夜视
 			{
 				//如果为CAMERA_MODE_NONE表明刚切换为强制白天的模式 add on 2025.01.15 添加注释
 				if( CAMERA_MODE_NONE == m_eDayNightStatus )
@@ -549,22 +550,51 @@ void CCamera::ThreadProc()
 					m_bAlarmTurnOnWihte = false;
 					//白天模式	
 					AppErr("camera mode[%d]. init switch day.\n", night_vision_mode);
-//					setMode(CAMERA_MODE_DAY);
-					setMode(CAMERA_MODE_NIGHT, false);
+					setMode(CAMERA_MODE_DAY);
 					m_eDayNightStatus = CAMERA_MODE_DAY;
 				}
 			}
-			else if (SINGLE_IRMODE_OPEN == night_vision_mode)//开启夜视
-			{	
-				//如果为CAMERA_MODE_NONE表明刚切换为强制夜视黑白的模式
-				if( CAMERA_MODE_NONE == m_eDayNightStatus )
+			else if (DOUBLE_IRMODE_IR == night_vision_mode)//红外夜视
+			{
+				m_bAlarmTurnOnWihte = false;
+				if( eNewDayNightStatus != m_eDayNightStatus )
 				{
-					motion_alarm_is_triggerd = false;
-					m_bAlarmTurnOnWihte = false;
-					//黑夜模式
-					AppErr("camera mode[%d]. init switch night.\n", night_vision_mode);
-					setMode(CAMERA_MODE_NIGHT, true);
-					m_eDayNightStatus = CAMERA_MODE_NIGHT;//同步当前所处的状态 add on 2025.05.19
+					if( CAMERA_MODE_DAY == eNewDayNightStatus )
+					{
+						AppErr("camera mode[%d]. switch day.\n", night_vision_mode);
+						//白天模式	
+						setMode(CAMERA_MODE_DAY);
+						m_eDayNightStatus = eNewDayNightStatus;
+					}
+					else if( CAMERA_MODE_NIGHT == eNewDayNightStatus )
+					{
+						AppErr("camera mode[%d]. switch night.\n", night_vision_mode);
+						//黑夜模式
+						setMode(CAMERA_MODE_NIGHT, true);
+						m_eDayNightStatus = eNewDayNightStatus;
+					}
+				}
+			}
+			else if (DOUBLE_IRMODE_FULLCOLOR == night_vision_mode)//全彩夜视
+			{	
+				m_bAlarmTurnOnWihte = false;
+				if( eNewDayNightStatus != m_eDayNightStatus )
+				{
+					m_iAllowGetDayNightStatusTime = GetSystemUptime_s() + 10; //定时忽略灯对白天黑夜状态判断的影响
+					if( CAMERA_MODE_DAY == eNewDayNightStatus )
+					{
+						AppErr("camera mode[%d]. switch day.\n", night_vision_mode);
+						//白天模式	
+						setMode(CAMERA_MODE_DAY);
+						m_eDayNightStatus = eNewDayNightStatus;
+					}
+					else if( CAMERA_MODE_NIGHT == eNewDayNightStatus )
+					{
+						AppErr("camera mode[%d]. switch night.\n", night_vision_mode);
+						//黑夜模式
+						setMode(CAMERA_MODE_NIGHT, false);
+						m_eDayNightStatus = eNewDayNightStatus;
+					}
 				}
 			}
 			else//自动
