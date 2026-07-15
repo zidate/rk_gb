@@ -26,6 +26,9 @@ def main() -> int:
             "media boundary must scale normalized coordinates")
     require("gb_rkipc_osd_time_set" in source and "gb_rkipc_osd_text_set" in source,
             "media boundary must terminate at RK OSD")
+    require("const double normalized" in source and
+            "normalized >= static_cast<double>(kCoordinateMax)" in source,
+            "large character margins must clamp before integer conversion")
     require("Media/NormalizedOsdControl.cpp" in cmake,
             "normalized OSD boundary must be compiled")
     print("PASS: normalized cmiot coordinates convert only at the RK media boundary")

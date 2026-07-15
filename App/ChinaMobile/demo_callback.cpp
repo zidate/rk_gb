@@ -948,8 +948,8 @@ next:
             }
             cmiotOSDInfo_t* info = static_cast<cmiotOSDInfo_t*>(input);
             const int ret = cmiot_osd_set_config(info);
-            DEMO_PRINT("CMIOT_CMD_SET_OSD switch=%d mode=%u ret=%d\n",
-                       info->osdSwitch, info->mode, ret);
+            DEMO_PRINT("CMIOT_CMD_SET_OSD switch=%d ret=%d\n",
+                       info->osdSwitch, ret);
             return ret;
         }
 

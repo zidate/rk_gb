@@ -25,6 +25,8 @@ def main() -> int:
     require("input == NULL" in body and "cmiot_osd_set_config" in body,
             "callback must validate input and call the adapter")
     require("return ret" in body, "callback must propagate adapter failure")
+    require("mode=%u" not in body,
+            "osdSwitch=0 callback must not inspect irrelevant mode data")
     require("ChinaMobile/CmiotOsdControl.cpp" in CMAKE,
             "adapter source must be part of CM_SRC")
     require("ret = select(" in CALLBACK and "if(ret < 0)" in CALLBACK,

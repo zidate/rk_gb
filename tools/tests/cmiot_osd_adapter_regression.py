@@ -62,7 +62,9 @@ def main() -> int:
                 f"missing persistent cmiot OSD behavior {token}")
     require(
         "textNum > CMIOT_APP_OSD_TEXT_MAX" in CMIOT_CPP and
-        "district + addition > CMIOT_APP_OSD_TEXT_MAX" in CMIOT_CPP,
+        "district > CMIOT_APP_OSD_TEXT_MAX" in CMIOT_CPP and
+        "addition > CMIOT_APP_OSD_TEXT_MAX" in CMIOT_CPP and
+        "district > CMIOT_APP_OSD_TEXT_MAX - addition" in CMIOT_CPP,
         "cmiot OSD must reject over-capacity text instead of truncating it.",
     )
     require("std::min" not in CMIOT_CPP,
@@ -75,6 +77,10 @@ def main() -> int:
         "info.mode == kCmiotOsdModeGb && !IsGbPositionValid(info.date.gbPos)" in CMIOT_CPP,
         "cmiot GB layout mode must validate only its active date margin",
     )
+    require("ApplyEffectiveConfigLocked" in CMIOT_CPP,
+            "persisted state and hardware apply must be serialized under one lock")
+    require("value <= static_cast<float>(kCoordinateMax)" in CMIOT_CPP,
+            "character margins must reject infinity and unreasonable values")
     require(
         "CMIOT_OSD_POS_ALIGN_RIGHT" in CMIOT_CPP and "CMIOT_OSD_POS_ALIGN_LEFT" in CMIOT_CPP,
         "cmiot OSD should map cmiot alignment definitions.",

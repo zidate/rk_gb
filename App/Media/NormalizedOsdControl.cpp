@@ -82,15 +82,17 @@ int ApplyNormalizedOsdText(int index, const char* text,
 int OsdCharacterMarginToNormalized(float characters, int fontSize,
                                    int horizontal)
 {
-    if (characters < 0.0f || fontSize <= 0) {
+    if (characters != characters || characters < 0.0f || fontSize <= 0) {
         return -1;
     }
     int width = 0;
     int height = 0;
     QueryCanvas(&width, &height);
     const int canvas = horizontal ? width : height;
-    const float pixels = characters * static_cast<float>(fontSize);
-    const int normalized = static_cast<int>(
-        pixels * static_cast<float>(kCoordinateMax) / canvas + 0.5f);
-    return normalized > kCoordinateMax ? kCoordinateMax : normalized;
+    const double pixels = static_cast<double>(characters) * fontSize;
+    const double normalized = pixels * kCoordinateMax / canvas;
+    if (normalized >= static_cast<double>(kCoordinateMax)) {
+        return kCoordinateMax;
+    }
+    return static_cast<int>(normalized + 0.5);
 }

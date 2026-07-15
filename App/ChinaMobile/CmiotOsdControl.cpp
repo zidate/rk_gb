@@ -105,7 +105,8 @@ bool IsHexDigit(char value)
 
 bool IsFiniteNonNegative(float value)
 {
-    return value == value && value >= 0.0f;
+    return value == value && value >= 0.0f &&
+           value <= static_cast<float>(kCoordinateMax);
 }
 
 bool IsPositionValid(const cmiotOsdPosInfo_t& pos)
@@ -199,7 +200,9 @@ int ValidateInput(const cmiotOSDInfo_t& info)
 
     const cmiot_uint32_t district = info.osdText.gbText.districtText.textNum;
     const cmiot_uint32_t addition = info.osdText.gbText.additionText.textNum;
-    if (district + addition > CMIOT_APP_OSD_TEXT_MAX ||
+    if (district > CMIOT_APP_OSD_TEXT_MAX ||
+        addition > CMIOT_APP_OSD_TEXT_MAX ||
+        district > CMIOT_APP_OSD_TEXT_MAX - addition ||
         (district > 0 && info.osdText.gbText.districtText.text == NULL) ||
         (addition > 0 && info.osdText.gbText.additionText.text == NULL) ||
         !IsGbPositionValid(info.osdText.gbText.districtText.textPos) ||
@@ -379,7 +382,9 @@ int LoadStoredConfig(StoredCmiotOsd* config)
     const Json::Value& district = table["district_text"];
     const Json::Value& addition = table["addition_text"];
     if (custom.size() > CMIOT_APP_OSD_TEXT_MAX ||
-        district.size() + addition.size() > CMIOT_APP_OSD_TEXT_MAX) {
+        district.size() > CMIOT_APP_OSD_TEXT_MAX ||
+        addition.size() > CMIOT_APP_OSD_TEXT_MAX ||
+        district.size() > CMIOT_APP_OSD_TEXT_MAX - addition.size()) {
         return -1;
     }
     loaded.customCount = static_cast<cmiot_uint32_t>(custom.size());
@@ -608,6 +613,15 @@ int ApplyStoredCmiotOsd(const StoredCmiotOsd& config)
     return 0;
 }
 
+int ApplyEffectiveConfigLocked(const StoredCmiotOsd& config)
+{
+    if (GetCloudPlatform() != CLOUD_PLATFORM_CMIOT) {
+        return 0;
+    }
+    return config.osdSwitch ? ApplyStoredCmiotOsd(config)
+                            : g_AVManager.ApplyLocalOsdConfig();
+}
+
 cmiot_uint32_t CopyCustomText(cmiotOsdTextInfo_t* dst, cmiot_uint32_t capacity,
                               const StoredCmiotOsd& stored)
 {
@@ -678,19 +692,17 @@ extern "C" int cmiot_osd_set_config(const cmiotOSDInfo_t* info)
     }
     CopyInput(*info, &next);
     const int saveRet = SaveStoredConfig(next);
+    int applyRet = 0;
     if (saveRet == 0) {
         g_cmiot_osd = next;
         g_cmiot_osd_loaded = true;
+        applyRet = ApplyEffectiveConfigLocked(next);
     }
     pthread_mutex_unlock(&g_cmiot_osd_mutex);
     if (saveRet != 0) {
         return saveRet;
     }
-    if (GetCloudPlatform() != CLOUD_PLATFORM_CMIOT) {
-        return 0;
-    }
-    return next.osdSwitch ? ApplyStoredCmiotOsd(next)
-                          : g_AVManager.ApplyLocalOsdConfig();
+    return applyRet;
 }
 
 extern "C" int cmiot_osd_get_config(cmiotOSDInfo_t* info)
