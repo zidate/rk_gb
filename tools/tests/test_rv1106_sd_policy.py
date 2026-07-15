@@ -1,4 +1,4 @@
-"""Verify the RV1106 U-Boot SD update policy before any flash I/O."""
+"""Verify the RV1106 U-Boot SD update policy and SPI NAND transaction."""
 
 import hashlib
 import os
@@ -46,11 +46,14 @@ BASELINE_INPUTS = {
     CMD_MAKEFILE: (PLAN_BASELINE, "c3550590185aa6591614318560c012b5bbdcc172048dcd56422e38b1e955f074"),
 }
 POST_SHA256 = {
-    COMMAND: "664eb59eb544b55eb23a9ecd573c1bcbb076ee0e27c545b35661981709750835",
+    COMMAND: "32dab5c9512188ae39671fbfe785d33b9f1fb1e27f8fcca60fcddb079e54636b",
     CMD_KCONFIG: "835bf2ebc533dc5c4c359441d566076b1c85023c268811c3f41b9476a669ed9f",
     CMD_MAKEFILE: "89ed26b3e1eaea7914970174262cf0887f2a586ef473ad886cc58f0da7234d14",
     DEFCONFIG: "c239063d8188eec1126d0b322443c33bfd6ff564d9055c3af7c7a6dd0433d1e8",
 }
+TASK5_PROTECTION_CORE_SHA256 = (
+    "a30b5e4ac4898469c0f074ff863dde623d24d1ea9a636f79107beea2badda823"
+)
 PATCH_TARGETS = [
     SPINAND_HEADER,
     SPINAND_CORE,
@@ -115,6 +118,23 @@ def parse_git_patch(patch_text):
 
     validate_headers()
     return changes
+
+
+def c_function(source, name):
+    match = re.search(rf"\b{re.escape(name)}\s*\([^;]*\)\s*\{{", source, re.DOTALL)
+    if match is None:
+        raise AssertionError(f"missing C function: {name}")
+    start = match.start()
+    brace = source.index("{", start)
+    depth = 0
+    for offset in range(brace, len(source)):
+        if source[offset] == "{":
+            depth += 1
+        elif source[offset] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : offset + 1]
+    raise AssertionError(f"unterminated C function: {name}")
 
 
 class SdPolicyPatchTest(unittest.TestCase):
@@ -222,14 +242,14 @@ class SdPolicyPatchTest(unittest.TestCase):
 
     def test_fs_lifecycle_reselects_fat_before_exists_and_size(self):
         select_fat = 'fs_set_blk_dev("mmc", "1", FS_TYPE_FAT)'
-        loop_start = self.command.index(
+        command = c_function(self.command, "do_ab_sd_update")
+        loop_start = command.index(
             "for (i = 0; i < ARRAY_SIZE(ab_sd_images); i++)"
         )
-        loop_end = self.command.index('\n\tprintf("SD slot trio', loop_start)
-        loop = self.command[loop_start:loop_end]
+        loop_end = command.index('\n\tprintf("SD slot trio', loop_start)
+        loop = command[loop_start:loop_end]
 
-        self.assertNotIn(select_fat, self.command[:loop_start])
-        self.assertEqual(self.command.count(select_fat), 2)
+        self.assertNotIn(select_fat, command[:loop_start])
         self.assertEqual(loop.count(select_fat), 2)
         self.assertIn(
             "fs_exists() closes the filesystem and resets fs_type", loop
@@ -263,7 +283,7 @@ class SdPolicyPatchTest(unittest.TestCase):
         ):
             self.assertIn(snippet, self.command)
 
-    def test_command_is_wired_without_flash_io_or_slot_activation(self):
+    def test_command_is_wired_without_legacy_update_or_reboot(self):
         self.assertIn(
             "U_BOOT_CMD(ab_sd_update, 1, 1, do_ab_sd_update,", self.command
         )
@@ -280,15 +300,172 @@ class SdPolicyPatchTest(unittest.TestCase):
         self.assertIn('CONFIG_ROCKCHIP_CMD="ab_sd_update -"', defconfig)
         self.assertIn("# CONFIG_CMD_SCRIPT_UPDATE is not set", defconfig)
         forbidden = (
-            "spinand_set_block_lock",
-            "mtd_write",
-            "mtd_erase",
-            "avb_ab_mark_slot_active",
             "sd_update.txt",
             "DG_sdupdate",
+            "mtd_block_markbad",
+            "run_command(\"reset",
+            "do_reset(",
         )
         for symbol in forbidden:
             self.assertNotIn(symbol.casefold(), self.command.casefold())
+
+    def test_task6_uses_only_existing_mtd_apis_and_preserves_detection(self):
+        for header in (
+            "#include <malloc.h>",
+            "#include <mapmem.h>",
+            "#include <mtd.h>",
+            "#include <linux/mtd/mtd.h>",
+            "#include <linux/mtd/spinand.h>",
+            "#include <android_avb/avb_ops_user.h>",
+            "#include <android_avb/avb_ab_flow.h>",
+        ):
+            self.assertIn(header, self.command)
+
+        allowed_mtd_calls = {
+            "mtd_block_isbad",
+            "mtd_erase",
+            "mtd_probe_devices",
+            "mtd_read",
+            "mtd_to_spinand",
+            "mtd_write_oob",
+        }
+        actual_mtd_calls = set(re.findall(r"\b(mtd_[a-z0-9_]+)\s*\(", self.command))
+        self.assertEqual(actual_mtd_calls, allowed_mtd_calls)
+        self.assertNotRegex(self.command, r"\bmtd_write\s*\(")
+        self.assertNotIn("mtd_block_markbad", self.command)
+
+        core_change = self.changes[(f"a/{SPINAND_CORE}", f"b/{SPINAND_CORE}")]
+        core_delta = "\n".join(core_change["added"] + core_change["deleted"])
+        self.assertNotIn("mtd_block_isbad", core_delta)
+        self.assertNotIn("mtd_block_markbad", core_delta)
+        self.assertEqual(
+            sha256(self.sdk_root / SPINAND_CORE), TASK5_PROTECTION_CORE_SHA256
+        )
+
+    def test_bad_block_capacity_and_writer_use_existing_detector_only(self):
+        capacity = c_function(self.command, "ab_sd_good_capacity")
+        writer = c_function(self.command, "ab_sd_write_image")
+
+        self.assertEqual(self.command.count("mtd_block_isbad("), 2)
+        self.assertEqual(capacity.count("mtd_block_isbad("), 1)
+        self.assertEqual(writer.count("mtd_block_isbad("), 1)
+        for function in (capacity, writer):
+            self.assertIn("if (bad < 0)", function)
+            self.assertIn("if (bad > 0)", function)
+        self.assertIn("capacity += mtd->erasesize;", capacity)
+        self.assertNotIn("mtd_block_markbad", capacity + writer)
+
+    def test_writer_erases_all_good_blocks_and_verifies_page_writes(self):
+        writer = c_function(self.command, "ab_sd_write_image")
+
+        for snippet in (
+            "mtd = get_mtd_device_nm(target);",
+            "IS_ERR_OR_NULL(mtd)",
+            "required = ALIGN((u64)image_size, mtd->writesize);",
+            "if (required > good_capacity)",
+            "for (offset = 0; offset < mtd->size; offset += mtd->erasesize)",
+            "erase.mtd = mtd;",
+            "erase.addr = offset;",
+            "erase.len = mtd->erasesize;",
+            "ret = mtd_erase(mtd, &erase);",
+            "if (file_offset >= image_size)",
+            "chunk_len = min_t(loff_t, image_size - file_offset,",
+            'fs_set_blk_dev("mmc", "1", FS_TYPE_FAT)',
+            "map_to_sysmem(eraseblock_buf)",
+            "file_offset, chunk_len, &actread",
+            "actread != chunk_len",
+            "page_len = ALIGN(chunk_len, mtd->writesize);",
+            "memset(eraseblock_buf + chunk_len, 0xff, page_len - chunk_len);",
+            "ops.mode = MTD_OPS_AUTO_OOB;",
+            "ops.len = mtd->writesize;",
+            "ops.datbuf = eraseblock_buf + page_offset;",
+            "ret = mtd_write_oob(mtd, offset + page_offset, &ops);",
+            "ops.retlen != mtd->writesize",
+            "ret = mtd_read(mtd, offset + page_offset, mtd->writesize,",
+            "retlen != mtd->writesize",
+            "memcmp(verify_buf, eraseblock_buf + page_offset, mtd->writesize)",
+            "put_mtd_device(mtd);",
+        ):
+            self.assertIn(snippet, writer)
+
+        erase = writer.index("ret = mtd_erase(mtd, &erase);")
+        trailing = writer.index("if (file_offset >= image_size)")
+        read = writer.index("ret = fs_read(")
+        write = writer.index("ret = mtd_write_oob(")
+        verify = writer.index("ret = mtd_read(")
+        compare = writer.index("memcmp(")
+        self.assertLess(erase, trailing)
+        self.assertLess(trailing, read)
+        self.assertLess(read, write)
+        self.assertLess(write, verify)
+        self.assertLess(verify, compare)
+
+    def test_transaction_owns_two_buffers_and_orders_relock_before_activation(self):
+        transaction = c_function(self.command, "ab_sd_run_transaction")
+        slot_writer = c_function(self.command, "ab_sd_write_present_slot_images")
+        activation = c_function(self.command, "ab_sd_activate_slot")
+
+        self.assertEqual(self.command.count("malloc(master->erasesize)"), 1)
+        self.assertEqual(self.command.count("malloc(master->writesize)"), 1)
+        for snippet in (
+            "mtd_probe_devices();",
+            'master = get_mtd_device_nm("spi-nand0");',
+            "IS_ERR_OR_NULL(master)",
+            "spinand = mtd_to_spinand(master);",
+            "eraseblock_buf = malloc(master->erasesize);",
+            "verify_buf = malloc(master->writesize);",
+            "free(eraseblock_buf);",
+            "free(verify_buf);",
+            "put_mtd_device(master);",
+        ):
+            self.assertIn(snippet, transaction)
+
+        unlock = transaction.index(
+            "spinand_set_block_lock(spinand, BL_ALL_UNLOCKED)"
+        )
+        slot_write = transaction.index("ab_sd_write_present_slot_images(")
+        uboot_last = transaction.index("ab_sd_write_image(&ab_sd_images[0]")
+        relock_label = transaction.index("relock:")
+        relock = transaction.index(
+            "spinand_set_block_lock(spinand, BL_LOWER_3_4_LOCKED)"
+        )
+        failed = transaction.index("if (ret)", relock)
+        activate = transaction.index("if (ab_sd_should_switch(present))")
+        self.assertLess(unlock, slot_write)
+        self.assertLess(slot_write, uboot_last)
+        self.assertLess(uboot_last, relock_label)
+        self.assertLess(relock_label, relock)
+        self.assertLess(relock, failed)
+        self.assertLess(failed, activate)
+        self.assertEqual(transaction[unlock:relock_label].count("goto relock;"), 3)
+        self.assertRegex(
+            transaction,
+            r"if \(ab_sd_should_switch\(present\)\)\s+"
+            r"ret = ab_sd_activate_slot\(target_suffix\);",
+        )
+
+        ordered_images = [
+            slot_writer.index(f"&ab_sd_images[{index}]") for index in (1, 2, 3)
+        ]
+        self.assertEqual(ordered_images, sorted(ordered_images))
+        self.assertNotIn("ab_sd_images[0]", slot_writer)
+        for snippet in (
+            "ops = avb_ops_user_new();",
+            "avb_ab_mark_slot_active(ops->ab_ops, slot_number)",
+            "avb_ops_user_free(ops);",
+            'slot_number = !strcmp(target_suffix, "_b") ? 1 : 0;',
+        ):
+            self.assertIn(snippet, activation)
+
+    def test_scan_persists_sizes_and_starts_one_transaction(self):
+        command = c_function(self.command, "do_ab_sd_update")
+        for snippet in (
+            "loff_t image_sizes[ARRAY_SIZE(ab_sd_images)] = { 0 };",
+            "image_sizes[i] = size;",
+            "present |= image->present_bit;",
+            "ret = ab_sd_run_transaction(present, image_sizes, target_suffix);",
+        ):
+            self.assertIn(snippet, command)
 
 
 if __name__ == "__main__":
