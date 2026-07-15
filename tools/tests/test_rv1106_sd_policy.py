@@ -16,7 +16,9 @@ PATCH_DIR = ROOT / "vendor" / "rv1106_sdk_patches"
 DUAL_BASELINE = pathlib.Path(
     os.environ.get("RV1106_SDK_BASELINE", "/tmp/rk_dual_backup_ref/RV1106_IPC_SDK")
 )
-PLAN_BASELINE = pathlib.Path("/tmp/rk_plan_sdk/RV1106_IPC_SDK")
+PLAN_BASELINE = pathlib.Path(
+    os.environ.get("RV1106_SDK_PLAN_BASELINE", "/tmp/rk_plan_sdk/RV1106_IPC_SDK")
+)
 UBOOT = "sysdrv/source/uboot/u-boot"
 BOARD_CONFIG = (
     "project/cfg/BoardConfig_IPC/"
