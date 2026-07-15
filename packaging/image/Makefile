@@ -1,3 +1,5 @@
+.PHONY: all clean
+
 all:
 	$(Q)./packaging-update ./merge.ini ./linux.bin
 	$(Q)./packaging-raw ./partition.ini ./raw.bin

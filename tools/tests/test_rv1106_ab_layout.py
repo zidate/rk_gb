@@ -164,8 +164,22 @@ class DeprecatedUpgradeInputTest(unittest.TestCase):
 """
         self.assertTrue(makefile_references_upgrade_ini(makefile_text))
 
+    def test_makefile_declares_all_and_clean_phony(self):
+        makefile_lines = (IMAGE_DIR / "Makefile").read_text(encoding="utf-8").splitlines()
+        self.assertIn(".PHONY: all clean", makefile_lines)
+
+    def test_makefile_is_not_executable(self):
+        self.assertEqual((IMAGE_DIR / "Makefile").stat().st_mode & 0o111, 0)
+
 
 class BoardConfigPatchTest(unittest.TestCase):
+    def assert_expected_layout_changes(self, added_lines, deleted_lines):
+        self.assertEqual(added_lines, [PARTITION_COMMAND, FILESYSTEM_CONFIG])
+        self.assertEqual(
+            deleted_lines,
+            [OLD_PARTITION_COMMAND, OLD_FILESYSTEM_CONFIG],
+        )
+
     def test_patch_locks_partition_command_and_a_slot_build_inputs(self):
         self.assertTrue(PATCH_PATH.is_file(), f"missing patch: {PATCH_PATH}")
         patch_text = PATCH_PATH.read_text(encoding="utf-8")
@@ -180,18 +194,19 @@ class BoardConfigPatchTest(unittest.TestCase):
                 )
             ],
         )
-        self.assertIn(PARTITION_COMMAND, added_lines)
-        self.assertIn(FILESYSTEM_CONFIG, added_lines)
-        self.assertIn(OLD_PARTITION_COMMAND, deleted_lines)
-        self.assertIn(OLD_FILESYSTEM_CONFIG, deleted_lines)
+        self.assert_expected_layout_changes(added_lines, deleted_lines)
 
-        for changed_lines in (added_lines, deleted_lines):
-            self.assertFalse(
-                any(line.lstrip().startswith("export RK_MISC=") for line in changed_lines)
-            )
+    def test_layout_change_guard_rejects_unrelated_exports(self):
+        expected_added = [PARTITION_COMMAND, FILESYSTEM_CONFIG]
+        expected_deleted = [OLD_PARTITION_COMMAND, OLD_FILESYSTEM_CONFIG]
 
-        for b_slot_mapping in ("boot_b@", "rootfs_b@", "oem_b@"):
-            self.assertFalse(any(b_slot_mapping in line for line in added_lines))
+        for added_lines, deleted_lines in (
+            ([*expected_added, "export UNRELATED=new"], expected_deleted),
+            (expected_added, [*expected_deleted, "export UNRELATED=old"]),
+        ):
+            with self.subTest(added=added_lines, deleted=deleted_lines):
+                with self.assertRaises(AssertionError):
+                    self.assert_expected_layout_changes(added_lines, deleted_lines)
 
     def test_git_patch_parser_ignores_misleading_comments_and_context(self):
         patch_text = f"""\
