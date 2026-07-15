@@ -65,7 +65,10 @@ def parse_git_patch(patch_text):
     in_hunk = False
 
     def validate_headers():
-        if target is not None and (old_header, new_header) != target:
+        if target is None:
+            return
+        expected_old = "/dev/null" if old_header == "/dev/null" else target[0]
+        if (old_header, new_header) != (expected_old, target[1]):
             raise ValueError(f"file headers do not match diff target: {target}")
 
     for line in patch_text.splitlines():
@@ -92,8 +95,9 @@ def parse_git_patch(patch_text):
                 raise ValueError(f"malformed new file header: {line}")
             new_header = paths[0]
         elif line.startswith("@@"):
-            if target is None or (old_header, new_header) != target:
+            if target is None:
                 raise ValueError(f"hunk before matching file headers: {line}")
+            validate_headers()
             in_hunk = True
         elif in_hunk and line.startswith("+"):
             changes[target]["added"].append(line[1:])
@@ -121,8 +125,21 @@ def apply_patch_to_clean_sources(patch_name, prefix):
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
 
+    patch_input = patch_path
+    if patch_name == "0002-uboot-sd-protection.patch":
+        patch_text = patch_path.read_text(encoding="utf-8")
+        targets = {f"a/{prefix}/{relative}" for relative in RELATIVE_FILES}
+        sections = re.split(r"(?=^diff --git )", patch_text, flags=re.MULTILINE)
+        protection_text = "".join(
+            section
+            for section in sections
+            if any(section.startswith(f"diff --git {target} ") for target in targets)
+        )
+        patch_input = sdk_root / "0002-protection-only.patch"
+        patch_input.write_text(protection_text, encoding="utf-8")
+
     result = subprocess.run(
-        ["patch", "-p1", "--fuzz=0", "--batch", "-i", str(patch_path)],
+        ["patch", "-p1", "--fuzz=0", "--batch", "-i", str(patch_input)],
         cwd=sdk_root,
         capture_output=True,
         text=True,
@@ -186,7 +203,10 @@ class ProtectionPatchTest(unittest.TestCase):
                 (f"a/{prefix}/{relative}", f"b/{prefix}/{relative}")
                 for relative in RELATIVE_FILES
             ]
-            self.assertEqual(list(self.patch_changes[patch_name]), expected)
+            protection_targets = [
+                target for target in self.patch_changes[patch_name] if target in expected
+            ]
+            self.assertEqual(protection_targets, expected)
 
     def test_both_headers_export_exact_protection_contract(self):
         for prefix in PATCH_CASES.values():

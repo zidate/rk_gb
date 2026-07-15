@@ -52,3 +52,154 @@ index c4f0d34..114613a 100755
 @@ -98 +98 @@ static const struct spinand_info chucun_spinand_table[] = {
 -		     SPINAND_HAS_QE_BIT,
 +		     SPINAND_HAS_QE_BIT | SPINAND_HAS_BLOCK_PROTECTION,
+diff --git a/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c b/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
+new file mode 100644
+index 0000000..ea9a04b
+--- /dev/null
++++ b/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
+@@ -0,0 +1,121 @@
++// SPDX-License-Identifier: GPL-2.0+
++/* Validate RV1106 A/B update images on the SD card before flash access. */
++
++#include <common.h>
++#include <command.h>
++#include <fs.h>
++#include <android_ab.h>
++#include <linux/bitops.h>
++
++#define AB_SD_BOOT BIT(0)
++#define AB_SD_ROOTFS BIT(1)
++#define AB_SD_OEM BIT(2)
++#define AB_SD_UBOOT BIT(3)
++#define AB_SD_SLOT_TRIO (AB_SD_BOOT | AB_SD_ROOTFS | AB_SD_OEM)
++#define AB_SD_MIB(n) ((loff_t)(n) * 1024 * 1024)
++
++struct ab_sd_image {
++	const char *filename;
++	const char *partition;
++	u32 present_bit;
++	loff_t max_size;
++	bool slot_scoped;
++};
++
++static const struct ab_sd_image ab_sd_images[] = {
++	{ "uboot.img", "uboot", AB_SD_UBOOT, AB_SD_MIB(1), false },
++	{ "boot.img", "boot", AB_SD_BOOT, AB_SD_MIB(4), true },
++	{ "rootfs.img", "rootfs", AB_SD_ROOTFS, AB_SD_MIB(10), true },
++	{ "oem.img", "oem", AB_SD_OEM, AB_SD_MIB(32), true },
++};
++
++static bool ab_sd_should_switch(u32 present)
++{
++	return (present & AB_SD_SLOT_TRIO) == AB_SD_SLOT_TRIO;
++}
++
++static void ab_sd_get_target_suffix(char *target_suffix, size_t target_len)
++{
++	char current_suffix[3] = { 0 };
++
++	if (!ab_get_slot_suffix(current_suffix)) {
++		if (!strcmp(current_suffix, "_a")) {
++			strlcpy(target_suffix, "_b", target_len);
++			return;
++		}
++		if (!strcmp(current_suffix, "_b")) {
++			strlcpy(target_suffix, "_a", target_len);
++			return;
++		}
++	}
++
++	strlcpy(target_suffix, "_a", target_len);
++}
++
++static void ab_sd_get_target(const struct ab_sd_image *image,
++			     const char *target_suffix, char *target,
++			     size_t target_len)
++{
++	if (image->slot_scoped)
++		snprintf(target, target_len, "%s%s", image->partition, target_suffix);
++	else
++		strlcpy(target, image->partition, target_len);
++}
++
++static int do_ab_sd_update(cmd_tbl_t *cmdtp, int flag, int argc,
++			   char * const argv[])
++{
++	char target_suffix[3];
++	u32 present = 0;
++	unsigned int i;
++	int ret;
++
++	(void)cmdtp;
++	(void)flag;
++	(void)argc;
++	(void)argv;
++
++	ret = fs_set_blk_dev("mmc", "1", FS_TYPE_FAT);
++	if (ret) {
++		printf("Failed to select SD FAT root (err = %d)\n", ret);
++		return CMD_RET_FAILURE;
++	}
++
++	ab_sd_get_target_suffix(target_suffix, sizeof(target_suffix));
++	for (i = 0; i < ARRAY_SIZE(ab_sd_images); i++) {
++		const struct ab_sd_image *image = &ab_sd_images[i];
++		char target[sizeof("rootfs_b")];
++		loff_t size = 0;
++		int exists;
++
++		exists = fs_exists(image->filename);
++		if (exists < 0) {
++			printf("Failed to probe %s (err = %d)\n", image->filename,
++			       exists);
++			return CMD_RET_FAILURE;
++		}
++		if (!exists)
++			continue;
++
++		ret = fs_size(image->filename, &size);
++		if (ret || size <= 0 || size > image->max_size) {
++			printf("Invalid %s size %lld (max %lld, err = %d)\n",
++			       image->filename, (long long)size,
++			       (long long)image->max_size, ret);
++			return CMD_RET_FAILURE;
++		}
++
++		ab_sd_get_target(image, target_suffix, target, sizeof(target));
++		present |= image->present_bit;
++		printf("Validated %s (%lld bytes) for %s\n", image->filename,
++		       (long long)size, target);
++	}
++
++	printf("SD slot trio %s; target slot %s; no flash I/O performed\n",
++	       ab_sd_should_switch(present) ? "complete" : "incomplete",
++	       target_suffix);
++	return CMD_RET_SUCCESS;
++}
++
++U_BOOT_CMD(ab_sd_update, 1, 1, do_ab_sd_update,
++	   "validate RV1106 A/B images on SD before flash access", "");
+diff --git a/sysdrv/source/uboot/u-boot/cmd/Kconfig b/sysdrv/source/uboot/u-boot/cmd/Kconfig
+index 5b359ff..e80f8a4 100755
+--- a/sysdrv/source/uboot/u-boot/cmd/Kconfig
++++ b/sysdrv/source/uboot/u-boot/cmd/Kconfig
+@@ -1083,0 +1084,7 @@ config CMD_SCRIPT_UPDATE
++config CMD_AB_SD_UPDATE
++	bool "ab_sd_update - validate RV1106 A/B images on SD"
++	depends on CMD_MMC && CMD_FAT
++	help
++	  Scan and validate optional RV1106 update images on the SD FAT root.
++	  Flash programming and slot activation are handled separately.
++
+diff --git a/sysdrv/source/uboot/u-boot/cmd/Makefile b/sysdrv/source/uboot/u-boot/cmd/Makefile
+index 9a2d5f8..3fe8a5e 100755
+--- a/sysdrv/source/uboot/u-boot/cmd/Makefile
++++ b/sysdrv/source/uboot/u-boot/cmd/Makefile
+@@ -151,0 +152 @@ obj-$(CONFIG_CMD_SCRIPT_UPDATE) += script_update.o
++obj-$(CONFIG_CMD_AB_SD_UPDATE) += ab_sd_update.o
+diff --git a/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig b/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig
+index f19190a..cdccb57 100755
+--- a/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig
++++ b/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig
+@@ -68,0 +69 @@ CONFIG_CMD_MTD=y
++CONFIG_CMD_AB_SD_UPDATE=y
