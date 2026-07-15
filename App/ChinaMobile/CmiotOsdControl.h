@@ -7,26 +7,24 @@
 extern "C" {
 #endif
 
-/* Text OSD index 0..4 maps to hardware RGN 1..5. RGN 6/7 are reserved. */
+/* 文本索引 0..4 映射硬件 RGN 1..5，RGN 6/7 保留。 */
 #define CMIOT_APP_OSD_TEXT_MAX 5
 
-/* Returns CMIOT_APP_OSD_TEXT_MAX. */
+/* 返回 CMIOT_APP_OSD_TEXT_MAX。 */
 int cmiot_osd_get_text_capacity(void);
 
-/*
- * Applies cmiotOSDInfo_t through the existing media OSD path.
- * Returns 0 on success, -1 for invalid input, or the media apply error.
- */
+/* 加载持久化配置，并仅在当前平台为 CMIOT 时恢复启用的水印。 */
+int cmiot_osd_initialize(void);
+
+/* 当前平台为 CMIOT 且持久化 osdSwitch=1 时返回 1。 */
+int cmiot_osd_is_override_active(void);
+
+/* 独立保存并应用 cmiotOSDInfo_t，失败返回负值或媒体层错误码。 */
 int cmiot_osd_set_config(const cmiotOSDInfo_t *info);
 
 /*
- * Reads the last cmiot-applied OSD config, or converts current media OSD state
- * to custom mode when cmiot has not set one yet.
- *
- * To read text content, caller should set info->mode and provide the matching
- * text pointer plus textNum as capacity before calling. If no buffer is
- * supplied, textNum returns the required item count. Returns -2 when the
- * supplied buffer is too small and partial data was copied.
+ * 读取持久化的 cmiot OSD。调用方通过 mode、text 指针和 textNum 容量提供
+ * 输出缓冲区；缓冲区不足时复制可容纳部分并返回 -2。
  */
 int cmiot_osd_get_config(cmiotOSDInfo_t *info);
 

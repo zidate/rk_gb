@@ -1,66 +1,66 @@
+/* 保存并应用 cmiot 独立 OSD 配置，不复用国标 OSD 中间态。 */
 #include "CmiotOsdControl.h"
 
 #include <pthread.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
-#include <algorithm>
 #include <string>
 
-#include "ExchangeAL/ExchangeKind.h"
-#include "ExchangeAL/MediaExchange.h"
-#include "Manager/ConfigManager.h"
-#include "Media/VideoOsdControl.h"
-#include "PAL/Capture.h"
+#include "Common.h"
+#include "Manager/CloudPlatformControl.h"
+#include "Media/AVManager.h"
+#include "Media/NormalizedOsdControl.h"
 
 namespace
 {
 
-static const int kCoordinateMax = 10000;
-static const int kDefaultMainStreamWidth = 1920;
-static const int kDefaultMainStreamHeight = 1080;
-static const cmiot_uint8_t kCmiotOsdModeCustom = 1;
-static const cmiot_uint8_t kCmiotOsdModeGb = 2;
+const int kCoordinateMax = 10000;
+const int kDeviceTextMax = 7;
+const cmiot_uint8_t kCmiotOsdModeCustom = 1;
+const cmiot_uint8_t kCmiotOsdModeGb = 2;
 
-struct CachedCmiotOsd
+struct StoredCmiotOsd
 {
     bool valid;
-    cmiotOSDInfo_t info;
+    cmiot_bool_t osdSwitch;
+    cmiot_uint8_t mode;
+    cmiotOsdDateInfo_t date;
+    cmiot_uint32_t fontSize;
+    char fontColor[16];
+    cmiot_uint32_t customCount;
     cmiotOsdTextInfo_t customText[CMIOT_APP_OSD_TEXT_MAX];
+    cmiot_uint32_t districtCount;
     cmiotGBOsdTextInfo_t districtText[CMIOT_APP_OSD_TEXT_MAX];
+    cmiotGBOsdPosInfo_t districtPos;
+    cmiot_uint32_t additionCount;
     cmiotGBOsdTextInfo_t additionText[CMIOT_APP_OSD_TEXT_MAX];
+    cmiotGBOsdPosInfo_t additionPos;
 
-    CachedCmiotOsd()
-        : valid(false)
+    StoredCmiotOsd()
+        : valid(false),
+          osdSwitch(CMIOT_FALSE),
+          mode(kCmiotOsdModeCustom),
+          fontSize(32),
+          customCount(0),
+          districtCount(0),
+          additionCount(0)
     {
-        memset(&info, 0, sizeof(info));
+        memset(&date, 0, sizeof(date));
+        memset(fontColor, 0, sizeof(fontColor));
         memset(customText, 0, sizeof(customText));
         memset(districtText, 0, sizeof(districtText));
+        memset(&districtPos, 0, sizeof(districtPos));
         memset(additionText, 0, sizeof(additionText));
+        memset(&additionPos, 0, sizeof(additionPos));
     }
 };
 
-static pthread_mutex_t g_cmiot_osd_cache_mutex = PTHREAD_MUTEX_INITIALIZER;
-static CachedCmiotOsd g_cmiot_osd_cache;
+pthread_mutex_t g_cmiot_osd_mutex = PTHREAD_MUTEX_INITIALIZER;
+StoredCmiotOsd g_cmiot_osd;
+bool g_cmiot_osd_loaded = false;
 
-static int ClampInt(int value, int minValue, int maxValue)
-{
-    if (value < minValue) {
-        return minValue;
-    }
-    if (value > maxValue) {
-        return maxValue;
-    }
-    return value;
-}
-
-static cmiot_uint32_t ClampCoordinate(cmiot_uint32_t value)
-{
-    return (value > (cmiot_uint32_t)kCoordinateMax) ? (cmiot_uint32_t)kCoordinateMax : value;
-}
-
-static size_t BoundedStringLength(const char* text, size_t maxLen)
+size_t BoundedStringLength(const char* text, size_t maxLen)
 {
     if (text == NULL) {
         return 0;
@@ -72,12 +72,12 @@ static size_t BoundedStringLength(const char* text, size_t maxLen)
     return len;
 }
 
-static std::string SafeString(const char* text, size_t maxLen)
+std::string SafeString(const char* text, size_t maxLen)
 {
     return std::string(text ? text : "", BoundedStringLength(text, maxLen));
 }
 
-static void CopyString(char* dst, size_t dstSize, const std::string& src)
+void CopyString(char* dst, size_t dstSize, const std::string& src)
 {
     if (dst == NULL || dstSize == 0) {
         return;
@@ -85,30 +85,7 @@ static void CopyString(char* dst, size_t dstSize, const std::string& src)
     snprintf(dst, dstSize, "%s", src.c_str());
 }
 
-static std::string HexEncodeString(const std::string& input)
-{
-    static const char kHex[] = "0123456789ABCDEF";
-    std::string output;
-    output.reserve(input.size() * 2);
-    for (size_t i = 0; i < input.size(); ++i) {
-        const unsigned char value = (unsigned char)input[i];
-        output.push_back(kHex[(value >> 4) & 0x0f]);
-        output.push_back(kHex[value & 0x0f]);
-    }
-    return output;
-}
-
-static std::string HexDecodeString(const std::string& input)
-{
-    std::string output;
-    for (size_t i = 0; i + 1 < input.size(); i += 2) {
-        char byteText[3] = {input[i], input[i + 1], '\0'};
-        output.push_back((char)strtol(byteText, NULL, 16));
-    }
-    return output;
-}
-
-static std::string ToLowerCopy(const std::string& text)
+std::string ToLowerCopy(const std::string& text)
 {
     std::string out = text;
     for (size_t i = 0; i < out.size(); ++i) {
@@ -119,751 +96,538 @@ static std::string ToLowerCopy(const std::string& text)
     return out;
 }
 
-static std::string TrimCopy(const std::string& text)
-{
-    size_t begin = 0;
-    while (begin < text.size() &&
-           (text[begin] == ' ' || text[begin] == '\t' ||
-            text[begin] == '\r' || text[begin] == '\n')) {
-        ++begin;
-    }
-
-    size_t end = text.size();
-    while (end > begin &&
-           (text[end - 1] == ' ' || text[end - 1] == '\t' ||
-            text[end - 1] == '\r' || text[end - 1] == '\n')) {
-        --end;
-    }
-
-    return text.substr(begin, end - begin);
-}
-
-static bool IsHexDigit(char value)
+bool IsHexDigit(char value)
 {
     return (value >= '0' && value <= '9') ||
            (value >= 'a' && value <= 'f') ||
            (value >= 'A' && value <= 'F');
 }
 
-static bool NormalizeRgbColor(const std::string& input, std::string* out)
+bool IsFiniteNonNegative(float value)
 {
-    if (out == NULL) {
-        return false;
-    }
+    return value == value && value >= 0.0f;
+}
 
-    std::string color = TrimCopy(input);
-    if (color.size() >= 2 && color[0] == '0' && (color[1] == 'x' || color[1] == 'X')) {
-        color = color.substr(2);
+bool IsPositionValid(const cmiotOsdPosInfo_t& pos)
+{
+    return pos.x <= static_cast<cmiot_uint32_t>(kCoordinateMax) &&
+           pos.y <= static_cast<cmiot_uint32_t>(kCoordinateMax) &&
+           pos.alignSet >= CMIOT_OSD_POS_ALIGN_NOT_SET &&
+           pos.alignSet <= CMIOT_OSD_POS_ALIGN_RIGHT &&
+           IsFiniteNonNegative(pos.alignPos);
+}
+
+bool IsGbPositionValid(const cmiotGBOsdPosInfo_t& pos)
+{
+    return IsFiniteNonNegative(pos.sideSpace) &&
+           IsFiniteNonNegative(pos.vertSpace) &&
+           IsFiniteNonNegative(pos.lineSpace);
+}
+
+bool IsFontSizeValid(cmiot_uint32_t fontSize)
+{
+    return fontSize >= 16 && fontSize <= 128 && (fontSize % 8) == 0;
+}
+
+bool IsFontColorValid(const char* colorText)
+{
+    const std::string color = SafeString(colorText, 16);
+    const std::string lower = ToLowerCopy(color);
+    if (lower == "black" || lower == "white" || lower == "auto") {
+        return true;
     }
-    if (!color.empty() && color[0] == '#') {
-        color = color.substr(1);
-    }
-    if (color.size() != 6) {
+    if (color.size() != 7 || color[0] != '#') {
         return false;
     }
-    for (size_t i = 0; i < color.size(); ++i) {
+    for (size_t i = 1; i < color.size(); ++i) {
         if (!IsHexDigit(color[i])) {
             return false;
         }
-        if (color[i] >= 'A' && color[i] <= 'F') {
-            color[i] = static_cast<char>(color[i] - 'A' + 'a');
-        }
     }
-
-    *out = "#" + color;
     return true;
 }
 
-static int NormalizeFontSize(int value)
+bool IsDateFormatValid(const char* dateFormat)
 {
-    if (value <= 0) {
-        return 32;
-    }
-    if (value <= 24) {
-        return 16;
-    }
-    if (value <= 48) {
-        return 32;
-    }
-    return 64;
+    const std::string value = SafeString(dateFormat, 24);
+    return value == "YYYY-MM-DD" || value == "YYYY.MM.DD" ||
+           value == "YYYY/MM/DD" || value == "YYYY年MM月DD日";
 }
 
-static bool NormalizeFontColor(const char* colorText,
-                               std::string* modeOut,
-                               std::string* colorOut,
-                               std::string* cmiotColorOut)
+bool IsDateStatusValid(const char* status)
 {
-    if (modeOut == NULL || colorOut == NULL || cmiotColorOut == NULL) {
-        return false;
-    }
-
-    const std::string raw = TrimCopy(SafeString(colorText, 16));
-    const std::string lower = ToLowerCopy(raw);
-    if (lower.empty() || lower == "white") {
-        *modeOut = "customize";
-        *colorOut = "#ffffff";
-        *cmiotColorOut = "white";
-        return true;
-    }
-    if (lower == "black") {
-        *modeOut = "customize";
-        *colorOut = "#000000";
-        *cmiotColorOut = "black";
-        return true;
-    }
-    if (lower == "auto") {
-        *modeOut = "auto";
-        *colorOut = "#ffffff";
-        *cmiotColorOut = "auto";
-        return true;
-    }
-
-    std::string normalizedColor;
-    if (!NormalizeRgbColor(raw, &normalizedColor)) {
-        return false;
-    }
-    *modeOut = "customize";
-    *colorOut = normalizedColor;
-    *cmiotColorOut = normalizedColor;
-    return true;
+    const std::string value = ToLowerCopy(SafeString(status, 4));
+    return value == "on" || value == "off";
 }
 
-static bool IsStatusOn(const cmiot_char_t status[4])
+int ValidateInput(const cmiotOSDInfo_t& info)
 {
-    const std::string value = ToLowerCopy(TrimCopy(SafeString(status, 4)));
-    return value == "on" || value == "1" || value == "true";
-}
-
-static void SetStatus(cmiot_char_t status[4], bool enabled)
-{
-    CopyString(status, 4, enabled ? "On" : "Off");
-}
-
-static std::string BuildTimeFormat(const cmiotOsdDateInfo_t& date)
-{
-    std::string dateFormat = TrimCopy(SafeString(date.dateFormat, sizeof(date.dateFormat)));
-    if (dateFormat.empty()) {
-        dateFormat = "YYYY-MM-DD";
-    }
-    return dateFormat + ((date.timeFormat == 12) ? " 12hour" : " 24hour");
-}
-
-static std::string BuildDateFormatFromState(const media::VideoOsdState& state)
-{
-    if (state.has_date_style) {
-        const std::string style = ToLowerCopy(state.date_style);
-        if (style.find("yyyy.mm.dd") != std::string::npos) {
-            return "YYYY.MM.DD";
-        }
-        if (style.find("yyyy/mm/dd") != std::string::npos) {
-            return "YYYY/MM/DD";
-        }
-    }
-    return "YYYY-MM-DD";
-}
-
-static cmiot_uint16_t BuildTimeFormatFromState(const media::VideoOsdState& state)
-{
-    return (state.has_time_style && ToLowerCopy(state.time_style).find("12") != std::string::npos) ? 12 : 24;
-}
-
-static void QueryMainStreamResolution(int* width, int* height)
-{
-    int streamWidth = 0;
-    int streamHeight = 0;
-    if (CaptureGetResolution(0, &streamWidth, &streamHeight) != 0 ||
-        streamWidth <= 0 || streamHeight <= 0) {
-        streamWidth = kDefaultMainStreamWidth;
-        streamHeight = kDefaultMainStreamHeight;
-    }
-
-    if (width != NULL) {
-        *width = streamWidth;
-    }
-    if (height != NULL) {
-        *height = streamHeight;
-    }
-}
-
-static int CharMarginToCoordinate(float chars, int fontSize, int canvasSize)
-{
-    if (chars <= 0.0f || fontSize <= 0 || canvasSize <= 0) {
+    if (info.osdSwitch == 0) {
         return 0;
     }
-    const float pixels = chars * (float)fontSize;
-    return ClampInt((int)(pixels * (float)kCoordinateMax / (float)canvasSize + 0.5f),
-                    0,
-                    kCoordinateMax);
-}
-
-static int ScaleCoordinateXToDevice(int value)
-{
-    int width = 0;
-    int height = 0;
-    QueryMainStreamResolution(&width, &height);
-    return (ClampInt(value, 0, kCoordinateMax) * width + kCoordinateMax / 2) /
-        kCoordinateMax;
-}
-
-static int ScaleCoordinateYToDevice(int value)
-{
-    int width = 0;
-    int height = 0;
-    QueryMainStreamResolution(&width, &height);
-    return (ClampInt(value, 0, kCoordinateMax) * height + kCoordinateMax / 2) /
-        kCoordinateMax;
-}
-
-static int ScaleCoordinateXFromDevice(int value)
-{
-    int width = 0;
-    int height = 0;
-    QueryMainStreamResolution(&width, &height);
-    if (value <= 0 || width <= 0) {
-        return 0;
-    }
-    return ClampInt((value * kCoordinateMax + width / 2) / width, 0, kCoordinateMax);
-}
-
-static int ScaleCoordinateYFromDevice(int value)
-{
-    int width = 0;
-    int height = 0;
-    QueryMainStreamResolution(&width, &height);
-    if (value <= 0 || height <= 0) {
-        return 0;
-    }
-    return ClampInt((value * kCoordinateMax + height / 2) / height, 0, kCoordinateMax);
-}
-
-static int LineStepToCoordinate(float lineSpace, int fontSize, int canvasHeight)
-{
-    const float gap = (lineSpace > 0.0f) ? lineSpace : 0.0f;
-    return CharMarginToCoordinate(1.0f + gap, fontSize, canvasHeight);
-}
-
-static std::string AlignmentFromCmiot(cmiotOsdPosAlignSetting_e alignSet)
-{
-    return (alignSet == CMIOT_OSD_POS_ALIGN_RIGHT) ? "right" : "left";
-}
-
-static int XFromCmiotPosition(const cmiotOsdPosInfo_t& pos, int fontSize, int canvasWidth)
-{
-    if (pos.alignSet == CMIOT_OSD_POS_ALIGN_LEFT) {
-        return CharMarginToCoordinate(pos.alignPos, fontSize, canvasWidth);
-    }
-    if (pos.alignSet == CMIOT_OSD_POS_ALIGN_RIGHT) {
-        return kCoordinateMax - CharMarginToCoordinate(pos.alignPos, fontSize, canvasWidth);
-    }
-    return (int)ClampCoordinate(pos.x);
-}
-
-static void FillTextItemPosition(media::VideoOsdTextItem* item,
-                                 const cmiotOsdPosInfo_t& pos,
-                                 int fontSize)
-{
-    if (item == NULL) {
-        return;
-    }
-
-    int canvasWidth = 0;
-    int canvasHeight = 0;
-    QueryMainStreamResolution(&canvasWidth, &canvasHeight);
-
-    item->has_position = true;
-    item->x = XFromCmiotPosition(pos, fontSize, canvasWidth);
-    item->y = (int)ClampCoordinate(pos.y);
-    item->has_alignment = true;
-    item->alignment = AlignmentFromCmiot(pos.alignSet);
-}
-
-static void FillCmiotPositionFromTextItem(cmiotOsdPosInfo_t* pos,
-                                          const media::VideoOsdTextItem& item)
-{
-    if (pos == NULL) {
-        return;
-    }
-    memset(pos, 0, sizeof(*pos));
-    pos->x = item.has_position ? (cmiot_uint32_t)ClampInt(item.x, 0, kCoordinateMax) : 0;
-    pos->y = item.has_position ? (cmiot_uint32_t)ClampInt(item.y, 0, kCoordinateMax) : 0;
-    if (item.has_alignment && ToLowerCopy(item.alignment) == "right") {
-        pos->alignSet = CMIOT_OSD_POS_ALIGN_RIGHT;
-    } else {
-        pos->alignSet = CMIOT_OSD_POS_ALIGN_NOT_SET;
-    }
-    pos->alignPos = 0.0f;
-}
-
-static int AppendTextItem(media::VideoOsdState* state,
-                          const std::string& text,
-                          const cmiotOsdPosInfo_t& pos,
-                          int fontSize)
-{
-    if (state == NULL || text.empty()) {
-        return 0;
-    }
-    if (state->text_items.size() >= CMIOT_APP_OSD_TEXT_MAX) {
-        return 0;
-    }
-
-    media::VideoOsdTextItem item;
-    item.has_text = true;
-    item.text = text;
-    FillTextItemPosition(&item, pos, fontSize);
-    state->text_items.push_back(item);
-    state->has_text_items = true;
-    return 1;
-}
-
-static void BuildGbDatePosition(const cmiotGBOsdPosInfo_t& gbPos,
-                                int fontSize,
-                                int* x,
-                                int* y)
-{
-    int canvasWidth = 0;
-    int canvasHeight = 0;
-    QueryMainStreamResolution(&canvasWidth, &canvasHeight);
-    *x = kCoordinateMax - CharMarginToCoordinate(gbPos.sideSpace, fontSize, canvasWidth);
-    *y = CharMarginToCoordinate(gbPos.vertSpace, fontSize, canvasHeight);
-}
-
-static void AppendGbTextList(media::VideoOsdState* state,
-                             const cmiotOsdGBTextInfoList_t& list,
-                             bool rightAlign,
-                             int fontSize)
-{
-    if (state == NULL || list.text == NULL || list.textNum == 0) {
-        return;
-    }
-
-    int canvasWidth = 0;
-    int canvasHeight = 0;
-    QueryMainStreamResolution(&canvasWidth, &canvasHeight);
-
-    const cmiot_uint32_t remaining =
-        (state->text_items.size() >= CMIOT_APP_OSD_TEXT_MAX) ?
-            0U :
-            (cmiot_uint32_t)(CMIOT_APP_OSD_TEXT_MAX - state->text_items.size());
-    const cmiot_uint32_t count = std::min(list.textNum, remaining);
-    const int xMargin = CharMarginToCoordinate(list.textPos.sideSpace, fontSize, canvasWidth);
-    const int yBottomMargin = CharMarginToCoordinate(list.textPos.vertSpace, fontSize, canvasHeight);
-    const int lineStep = std::max(1, LineStepToCoordinate(list.textPos.lineSpace, fontSize, canvasHeight));
-    const int blockHeight = (count > 0) ? (int)(lineStep * (int)count) : 0;
-    const int firstY = ClampInt(kCoordinateMax - yBottomMargin - blockHeight, 0, kCoordinateMax);
-
-    for (cmiot_uint32_t i = 0; i < count; ++i) {
-        const std::string text = TrimCopy(SafeString(list.text[i].content, sizeof(list.text[i].content)));
-        if (text.empty()) {
-            continue;
-        }
-
-        media::VideoOsdTextItem item;
-        item.has_text = true;
-        item.text = text;
-        item.has_position = true;
-        item.x = rightAlign ? (kCoordinateMax - xMargin) : xMargin;
-        item.y = ClampInt(firstY + (int)i * lineStep, 0, kCoordinateMax);
-        item.has_alignment = true;
-        item.alignment = rightAlign ? "right" : "left";
-        state->text_items.push_back(item);
-        state->has_text_items = true;
-        if (state->text_items.size() >= CMIOT_APP_OSD_TEXT_MAX) {
-            break;
-        }
-    }
-}
-
-static int BuildMediaStateFromCmiot(const cmiotOSDInfo_t& info,
-                                    media::VideoOsdState* state,
-                                    CachedCmiotOsd* cache)
-{
-    if (state == NULL || cache == NULL) {
+    if (info.osdSwitch != 1 ||
+        (info.mode != kCmiotOsdModeCustom && info.mode != kCmiotOsdModeGb) ||
+        !IsDateStatusValid(info.date.status) ||
+        !IsDateFormatValid(info.date.dateFormat) ||
+        (info.date.timeFormat != 12 && info.date.timeFormat != 24) ||
+        info.date.weekday > 1 ||
+        !IsFontSizeValid(info.fontSize) ||
+        !IsFontColorValid(info.fontColor)) {
         return -1;
     }
 
-    *state = media::VideoOsdState();
-    *cache = CachedCmiotOsd();
-
-    const bool osdEnabled = (info.osdSwitch != 0);
-    if (info.mode != kCmiotOsdModeCustom && info.mode != kCmiotOsdModeGb) {
-        return -1;
-    }
-    const int fontSize = NormalizeFontSize((int)info.fontSize);
-    std::string fontColorMode;
-    std::string fontColor;
-    std::string cmiotFontColor;
-    if (!NormalizeFontColor(info.fontColor, &fontColorMode, &fontColor, &cmiotFontColor)) {
+    if ((info.mode == kCmiotOsdModeCustom && !IsPositionValid(info.date.pos)) ||
+        (info.mode == kCmiotOsdModeGb && !IsGbPositionValid(info.date.gbPos))) {
         return -1;
     }
 
-    state->has_font_size = true;
-    state->font_size = fontSize;
-    state->has_font_color_mode = true;
-    state->font_color_mode = fontColorMode;
-    state->has_font_color = true;
-    state->font_color = fontColor;
-    state->has_time_enabled = true;
-    state->time_enabled = osdEnabled && IsStatusOn(info.date.status) ? 1 : 0;
-    state->has_text_enabled = true;
-    state->text_enabled = 0;
-    state->has_time_format = true;
-    state->time_format = BuildTimeFormat(info.date);
-    state->has_time_display_week_enabled = true;
-    state->time_display_week_enabled = (info.date.weekday != 0) ? 1 : 0;
-
-    cache->valid = true;
-    cache->info.osdSwitch = osdEnabled ? CMIOT_TRUE : CMIOT_FALSE;
-    cache->info.mode = (info.mode == kCmiotOsdModeGb) ? kCmiotOsdModeGb : kCmiotOsdModeCustom;
-    cache->info.date = info.date;
-    cache->info.fontSize = (cmiot_uint32_t)fontSize;
-    CopyString(cache->info.fontColor, sizeof(cache->info.fontColor), cmiotFontColor);
-
-    if (!osdEnabled) {
-        state->text_items.clear();
-        state->has_text_items = true;
-        state->text_enabled = 0;
-        if (cache->info.mode == kCmiotOsdModeGb) {
-            cache->info.osdText.gbText.districtText.text = cache->districtText;
-            cache->info.osdText.gbText.districtText.textNum = 0;
-            cache->info.osdText.gbText.additionText.text = cache->additionText;
-            cache->info.osdText.gbText.additionText.textNum = 0;
-        } else {
-            cache->info.osdText.customText.text = cache->customText;
-            cache->info.osdText.customText.textNum = 0;
-        }
-        return 0;
-    }
-
-    if (info.mode == kCmiotOsdModeGb) {
-        const cmiot_uint32_t districtCount = std::min(info.osdText.gbText.districtText.textNum,
-                                                      (cmiot_uint32_t)CMIOT_APP_OSD_TEXT_MAX);
-        cmiot_uint32_t additionCapacity = CMIOT_APP_OSD_TEXT_MAX - districtCount;
-        const cmiot_uint32_t additionCount = std::min(info.osdText.gbText.additionText.textNum,
-                                                      additionCapacity);
-        if ((districtCount > 0 && info.osdText.gbText.districtText.text == NULL) ||
-            (additionCount > 0 && info.osdText.gbText.additionText.text == NULL)) {
+    if (info.mode == kCmiotOsdModeCustom) {
+        if (info.osdText.customText.textNum > CMIOT_APP_OSD_TEXT_MAX ||
+            (info.osdText.customText.textNum > 0 &&
+             info.osdText.customText.text == NULL)) {
             return -1;
         }
-
-        int timeX = kCoordinateMax;
-        int timeY = 0;
-        BuildGbDatePosition(info.date.gbPos, fontSize, &timeX, &timeY);
-        state->has_time_position = true;
-        state->time_x = timeX;
-        state->time_y = timeY;
-        state->has_time_alignment = true;
-        state->time_alignment = "right";
-
-        AppendGbTextList(state, info.osdText.gbText.districtText, true, fontSize);
-        AppendGbTextList(state, info.osdText.gbText.additionText, false, fontSize);
-        state->text_enabled = state->text_items.empty() ? 0 : 1;
-
-        for (cmiot_uint32_t i = 0; i < districtCount; ++i) {
-            cache->districtText[i] = info.osdText.gbText.districtText.text[i];
+        for (cmiot_uint32_t i = 0; i < info.osdText.customText.textNum; ++i) {
+            const cmiotOsdTextInfo_t& text = info.osdText.customText.text[i];
+            if (BoundedStringLength(text.content, sizeof(text.content)) >= sizeof(text.content) ||
+                !IsPositionValid(text.pos)) {
+                return -1;
+            }
         }
-        for (cmiot_uint32_t i = 0; i < additionCount; ++i) {
-            cache->additionText[i] = info.osdText.gbText.additionText.text[i];
-        }
-        cache->info.osdText.gbText.districtText.textNum = districtCount;
-        cache->info.osdText.gbText.districtText.text = cache->districtText;
-        cache->info.osdText.gbText.districtText.textPos = info.osdText.gbText.districtText.textPos;
-        cache->info.osdText.gbText.additionText.textNum = additionCount;
-        cache->info.osdText.gbText.additionText.text = cache->additionText;
-        cache->info.osdText.gbText.additionText.textPos = info.osdText.gbText.additionText.textPos;
         return 0;
     }
 
-    state->has_time_position = true;
-    int canvasWidth = 0;
-    QueryMainStreamResolution(&canvasWidth, NULL);
-    state->time_x = XFromCmiotPosition(info.date.pos, fontSize, canvasWidth);
-    state->time_y = (int)ClampCoordinate(info.date.pos.y);
-    state->has_time_alignment = true;
-    state->time_alignment = AlignmentFromCmiot(info.date.pos.alignSet);
-
-    if (info.osdText.customText.textNum > 0 && info.osdText.customText.text == NULL) {
+    const cmiot_uint32_t district = info.osdText.gbText.districtText.textNum;
+    const cmiot_uint32_t addition = info.osdText.gbText.additionText.textNum;
+    if (district + addition > CMIOT_APP_OSD_TEXT_MAX ||
+        (district > 0 && info.osdText.gbText.districtText.text == NULL) ||
+        (addition > 0 && info.osdText.gbText.additionText.text == NULL) ||
+        !IsGbPositionValid(info.osdText.gbText.districtText.textPos) ||
+        !IsGbPositionValid(info.osdText.gbText.additionText.textPos)) {
         return -1;
     }
-
-    const cmiot_uint32_t textCount =
-        std::min(info.osdText.customText.textNum, (cmiot_uint32_t)CMIOT_APP_OSD_TEXT_MAX);
-    cmiot_uint32_t appliedCount = 0;
-    for (cmiot_uint32_t i = 0; i < textCount; ++i) {
-        const cmiotOsdTextInfo_t& textInfo = info.osdText.customText.text[i];
-        cache->customText[appliedCount] = textInfo;
-        const std::string text = TrimCopy(SafeString(textInfo.content, sizeof(textInfo.content)));
-        if (AppendTextItem(state, text, textInfo.pos, fontSize) > 0) {
-            ++appliedCount;
+    for (cmiot_uint32_t i = 0; i < district; ++i) {
+        const cmiotGBOsdTextInfo_t& text = info.osdText.gbText.districtText.text[i];
+        if (BoundedStringLength(text.content, sizeof(text.content)) >= sizeof(text.content)) {
+            return -1;
         }
     }
-    state->text_enabled = state->text_items.empty() ? 0 : 1;
-    cache->info.osdText.customText.textNum = appliedCount;
-    cache->info.osdText.customText.text = cache->customText;
+    for (cmiot_uint32_t i = 0; i < addition; ++i) {
+        const cmiotGBOsdTextInfo_t& text = info.osdText.gbText.additionText.text[i];
+        if (BoundedStringLength(text.content, sizeof(text.content)) >= sizeof(text.content)) {
+            return -1;
+        }
+    }
     return 0;
 }
 
-static int NormalizeAlignmentValue(const std::string& alignment)
-{
-    return (ToLowerCopy(TrimCopy(alignment)) == "right") ? 1 : 0;
-}
-
-static bool IsCmiotTextConfigChanged(const OSDTextAllConf_S& left,
-                                     const OSDTextAllConf_S& right)
-{
-    for (int i = 0; i < CMIOT_APP_OSD_TEXT_MAX; ++i) {
-        if (left.osd_text[i].text != right.osd_text[i].text ||
-            left.osd_text[i].x != right.osd_text[i].x ||
-            left.osd_text[i].y != right.osd_text[i].y ||
-            left.osd_text[i].show != right.osd_text[i].show ||
-            left.osd_text[i].alignment != right.osd_text[i].alignment) {
-            return true;
-        }
-    }
-    return false;
-}
-
-static int ApplyCmiotTextConfig(const media::VideoOsdState& state)
-{
-    CConfigTable table;
-    if (!g_configManager.getConfig(getConfigName(CFG_OSD_TEXT), table)) {
-        return -1;
-    }
-
-    OSDTextAllConf_S curTextConfig;
-    OSDTextAllConf_S nextTextConfig;
-    TExchangeAL<OSDTextAllConf_S>::getConfig(table, curTextConfig);
-    nextTextConfig = curTextConfig;
-
-    if (state.has_text_items) {
-        int i = 0;
-        for (i = 0;
-             i < CMIOT_APP_OSD_TEXT_MAX && i < (int)state.text_items.size();
-             ++i) {
-            const media::VideoOsdTextItem& item = state.text_items[i];
-            if (item.has_text) {
-                nextTextConfig.osd_text[i].text = HexEncodeString(item.text);
-            }
-            if (item.has_position) {
-                nextTextConfig.osd_text[i].x = ScaleCoordinateXToDevice(item.x);
-                nextTextConfig.osd_text[i].y = ScaleCoordinateYToDevice(item.y);
-            }
-            if (item.has_alignment) {
-                nextTextConfig.osd_text[i].alignment = NormalizeAlignmentValue(item.alignment);
-            }
-            const bool hasText = !nextTextConfig.osd_text[i].text.empty();
-            nextTextConfig.osd_text[i].show =
-                ((!state.has_text_enabled || state.text_enabled != 0) && hasText) ? 1 : 0;
-        }
-        for (; i < CMIOT_APP_OSD_TEXT_MAX; ++i) {
-            nextTextConfig.osd_text[i].show = 0;
-        }
-    } else if (state.has_text_enabled) {
-        for (int i = 0; i < CMIOT_APP_OSD_TEXT_MAX; ++i) {
-            nextTextConfig.osd_text[i].show =
-                (state.text_enabled != 0 && !nextTextConfig.osd_text[i].text.empty()) ? 1 : 0;
-        }
-    }
-
-    if (!IsCmiotTextConfigChanged(curTextConfig, nextTextConfig)) {
-        return 0;
-    }
-
-    table.clear();
-    TExchangeAL<OSDTextAllConf_S>::setConfig(nextTextConfig, table);
-    const int ret = g_configManager.setConfig(getConfigName(CFG_OSD_TEXT),
-                                              table,
-                                              0,
-                                              IConfigManager::applyOK);
-    return (ret == IConfigManager::applyOK) ? 0 : ret;
-}
-
-static cmiot_uint32_t FillCmiotCustomTextFromConfig(cmiotOSDInfo_t* out,
-                                                    cmiotOsdTextInfo_t* textOut,
-                                                    cmiot_uint32_t textCapacity)
+void CopyInput(const cmiotOSDInfo_t& info, StoredCmiotOsd* out)
 {
     if (out == NULL) {
-        return 0;
+        return;
+    }
+    if (info.osdSwitch == 0) {
+        out->valid = true;
+        out->osdSwitch = CMIOT_FALSE;
+        return;
     }
 
-    cmiot_uint32_t availableCount = 0;
-    cmiot_uint32_t copiedCount = 0;
-    CConfigTable table;
-    OSDTextAllConf_S curTextConfig;
-    if (g_configManager.getConfig(getConfigName(CFG_OSD_TEXT), table)) {
-        TExchangeAL<OSDTextAllConf_S>::getConfig(table, curTextConfig);
-        for (int i = 0; i < CMIOT_APP_OSD_TEXT_MAX; ++i) {
-            if (!curTextConfig.osd_text[i].show) {
-                continue;
-            }
+    StoredCmiotOsd next;
+    next.valid = true;
+    next.osdSwitch = CMIOT_TRUE;
+    next.mode = info.mode;
+    next.date = info.date;
+    next.date.status[sizeof(next.date.status) - 1] = '\0';
+    next.date.dateFormat[sizeof(next.date.dateFormat) - 1] = '\0';
+    next.fontSize = info.fontSize;
+    CopyString(next.fontColor, sizeof(next.fontColor),
+               SafeString(info.fontColor, sizeof(info.fontColor)));
 
-            if (textOut != NULL && copiedCount < textCapacity) {
-                cmiotOsdTextInfo_t& item = textOut[copiedCount];
-                memset(&item, 0, sizeof(item));
-                CopyString(item.content,
-                           sizeof(item.content),
-                           HexDecodeString(curTextConfig.osd_text[i].text));
-                item.pos.x = (cmiot_uint32_t)ScaleCoordinateXFromDevice(curTextConfig.osd_text[i].x);
-                item.pos.y = (cmiot_uint32_t)ScaleCoordinateYFromDevice(curTextConfig.osd_text[i].y);
-                item.pos.alignSet =
-                    (curTextConfig.osd_text[i].alignment == 1) ?
-                        CMIOT_OSD_POS_ALIGN_RIGHT :
-                        CMIOT_OSD_POS_ALIGN_NOT_SET;
-                item.pos.alignPos = 0.0f;
-                ++copiedCount;
-            }
-            ++availableCount;
+    if (info.mode == kCmiotOsdModeCustom) {
+        next.customCount = info.osdText.customText.textNum;
+        for (cmiot_uint32_t i = 0; i < next.customCount; ++i) {
+            next.customText[i] = info.osdText.customText.text[i];
+            next.customText[i].content[sizeof(next.customText[i].content) - 1] = '\0';
+        }
+    } else {
+        next.districtCount = info.osdText.gbText.districtText.textNum;
+        next.districtPos = info.osdText.gbText.districtText.textPos;
+        for (cmiot_uint32_t i = 0; i < next.districtCount; ++i) {
+            next.districtText[i] = info.osdText.gbText.districtText.text[i];
+            next.districtText[i].content[sizeof(next.districtText[i].content) - 1] = '\0';
+        }
+        next.additionCount = info.osdText.gbText.additionText.textNum;
+        next.additionPos = info.osdText.gbText.additionText.textPos;
+        for (cmiot_uint32_t i = 0; i < next.additionCount; ++i) {
+            next.additionText[i] = info.osdText.gbText.additionText.text[i];
+            next.additionText[i].content[sizeof(next.additionText[i].content) - 1] = '\0';
         }
     }
-
-    out->osdText.customText.text = textOut;
-    out->osdText.customText.textNum =
-        (textOut == NULL || textCapacity == 0) ? availableCount : copiedCount;
-    return availableCount;
+    *out = next;
 }
 
-static void StoreCache(const CachedCmiotOsd& cache)
+void PositionToJson(const cmiotOsdPosInfo_t& pos, Json::Value* value)
 {
-    pthread_mutex_lock(&g_cmiot_osd_cache_mutex);
-    g_cmiot_osd_cache = cache;
-    if (g_cmiot_osd_cache.info.mode == kCmiotOsdModeGb) {
-        g_cmiot_osd_cache.info.osdText.gbText.districtText.text = g_cmiot_osd_cache.districtText;
-        g_cmiot_osd_cache.info.osdText.gbText.additionText.text = g_cmiot_osd_cache.additionText;
-    } else {
-        g_cmiot_osd_cache.info.osdText.customText.text = g_cmiot_osd_cache.customText;
-    }
-    pthread_mutex_unlock(&g_cmiot_osd_cache_mutex);
+    (*value)["x"] = pos.x;
+    (*value)["y"] = pos.y;
+    (*value)["align_set"] = static_cast<int>(pos.alignSet);
+    (*value)["align_pos"] = pos.alignPos;
 }
 
-static cmiot_uint32_t CopyCustomTextList(cmiotOsdTextInfo_t* dst,
-                                         cmiot_uint32_t capacity,
-                                         const cmiotOsdTextInfo_t* src,
-                                         cmiot_uint32_t count)
+void GbPositionToJson(const cmiotGBOsdPosInfo_t& pos, Json::Value* value)
 {
-    if (dst == NULL || capacity == 0 || src == NULL || count == 0) {
-        return 0;
-    }
-    const cmiot_uint32_t copyCount = std::min(capacity, count);
-    for (cmiot_uint32_t i = 0; i < copyCount; ++i) {
-        dst[i] = src[i];
-    }
-    return copyCount;
+    (*value)["side_space"] = pos.sideSpace;
+    (*value)["vert_space"] = pos.vertSpace;
+    (*value)["line_space"] = pos.lineSpace;
 }
 
-static cmiot_uint32_t CopyGbTextList(cmiotGBOsdTextInfo_t* dst,
-                                     cmiot_uint32_t capacity,
-                                     const cmiotGBOsdTextInfo_t* src,
-                                     cmiot_uint32_t count)
+void PositionFromJson(const Json::Value& value, cmiotOsdPosInfo_t* pos)
 {
-    if (dst == NULL || capacity == 0 || src == NULL || count == 0) {
-        return 0;
-    }
-    const cmiot_uint32_t copyCount = std::min(capacity, count);
-    for (cmiot_uint32_t i = 0; i < copyCount; ++i) {
-        dst[i] = src[i];
-    }
-    return copyCount;
+    pos->x = value["x"].asUInt();
+    pos->y = value["y"].asUInt();
+    pos->alignSet = static_cast<cmiotOsdPosAlignSetting_e>(value["align_set"].asInt());
+    pos->alignPos = static_cast<float>(value["align_pos"].asDouble());
 }
 
-static int CopyCacheToOutput(const CachedCmiotOsd& cache, cmiotOSDInfo_t* out)
+void GbPositionFromJson(const Json::Value& value, cmiotGBOsdPosInfo_t* pos)
 {
-    if (out == NULL || !cache.valid) {
+    pos->sideSpace = static_cast<float>(value["side_space"].asDouble());
+    pos->vertSpace = static_cast<float>(value["vert_space"].asDouble());
+    pos->lineSpace = static_cast<float>(value["line_space"].asDouble());
+}
+
+int SaveStoredConfig(const StoredCmiotOsd& config)
+{
+    CConfigTable table;
+    table["valid"] = config.valid;
+    table["osd_switch"] = static_cast<int>(config.osdSwitch);
+    table["mode"] = config.mode;
+    table["date"]["status"] = SafeString(config.date.status, sizeof(config.date.status));
+    table["date"]["date_format"] = SafeString(config.date.dateFormat,
+                                                sizeof(config.date.dateFormat));
+    table["date"]["time_format"] = config.date.timeFormat;
+    table["date"]["weekday"] = config.date.weekday;
+    PositionToJson(config.date.pos, &table["date"]["pos"]);
+    GbPositionToJson(config.date.gbPos, &table["date"]["gb_pos"]);
+    table["font_size"] = config.fontSize;
+    table["font_color"] = SafeString(config.fontColor, sizeof(config.fontColor));
+
+    table["custom_text"] = Json::arrayValue;
+    for (cmiot_uint32_t i = 0; i < config.customCount; ++i) {
+        Json::Value item;
+        item["content"] = SafeString(config.customText[i].content,
+                                      sizeof(config.customText[i].content));
+        PositionToJson(config.customText[i].pos, &item["pos"]);
+        table["custom_text"].append(item);
+    }
+
+    table["district_text"] = Json::arrayValue;
+    for (cmiot_uint32_t i = 0; i < config.districtCount; ++i) {
+        Json::Value item;
+        item["content"] = SafeString(config.districtText[i].content,
+                                      sizeof(config.districtText[i].content));
+        table["district_text"].append(item);
+    }
+    GbPositionToJson(config.districtPos, &table["district_pos"]);
+
+    table["addition_text"] = Json::arrayValue;
+    for (cmiot_uint32_t i = 0; i < config.additionCount; ++i) {
+        Json::Value item;
+        item["content"] = SafeString(config.additionText[i].content,
+                                      sizeof(config.additionText[i].content));
+        table["addition_text"].append(item);
+    }
+    GbPositionToJson(config.additionPos, &table["addition_pos"]);
+
+    const int ret = g_configManager.setConfig(getConfigName(CFG_CMIOT_OSD),
+                                              table, 0, IConfigManager::applyOK);
+    return ret == IConfigManager::applyOK ? 0 : ret;
+}
+
+int LoadStoredConfig(StoredCmiotOsd* config)
+{
+    if (config == NULL) {
+        return -1;
+    }
+    CConfigTable table;
+    if (!g_configManager.getConfig(getConfigName(CFG_CMIOT_OSD), table)) {
         return -1;
     }
 
-    const cmiot_uint8_t requestedMode = out->mode;
-    cmiotOsdTextInfo_t* customTextOut = NULL;
-    cmiot_uint32_t customCapacity = 0;
-    cmiotGBOsdTextInfo_t* districtTextOut = NULL;
-    cmiot_uint32_t districtCapacity = 0;
-    cmiotGBOsdTextInfo_t* additionTextOut = NULL;
-    cmiot_uint32_t additionCapacity = 0;
-
-    if (requestedMode == kCmiotOsdModeGb) {
-        districtTextOut = out->osdText.gbText.districtText.text;
-        districtCapacity = out->osdText.gbText.districtText.textNum;
-        additionTextOut = out->osdText.gbText.additionText.text;
-        additionCapacity = out->osdText.gbText.additionText.textNum;
-    } else if (requestedMode == kCmiotOsdModeCustom) {
-        customTextOut = out->osdText.customText.text;
-        customCapacity = out->osdText.customText.textNum;
+    StoredCmiotOsd loaded;
+    loaded.valid = table["valid"].asBool();
+    loaded.osdSwitch = table["osd_switch"].asInt() ? CMIOT_TRUE : CMIOT_FALSE;
+    loaded.mode = static_cast<cmiot_uint8_t>(table["mode"].asUInt());
+    if (!loaded.valid) {
+        *config = loaded;
+        return 0;
     }
 
-    *out = cache.info;
+    CopyString(loaded.date.status, sizeof(loaded.date.status),
+               table["date"]["status"].asString());
+    CopyString(loaded.date.dateFormat, sizeof(loaded.date.dateFormat),
+               table["date"]["date_format"].asString());
+    loaded.date.timeFormat = static_cast<cmiot_uint16_t>(
+        table["date"]["time_format"].asUInt());
+    loaded.date.weekday = static_cast<cmiot_uint16_t>(table["date"]["weekday"].asUInt());
+    PositionFromJson(table["date"]["pos"], &loaded.date.pos);
+    GbPositionFromJson(table["date"]["gb_pos"], &loaded.date.gbPos);
+    loaded.fontSize = table["font_size"].asUInt();
+    CopyString(loaded.fontColor, sizeof(loaded.fontColor), table["font_color"].asString());
 
-    if (cache.info.mode == kCmiotOsdModeGb) {
-        const cmiot_uint32_t districtCount = cache.info.osdText.gbText.districtText.textNum;
-        const cmiot_uint32_t additionCount = cache.info.osdText.gbText.additionText.textNum;
-        const cmiot_uint32_t districtCopied =
-            CopyGbTextList(districtTextOut, districtCapacity, cache.districtText, districtCount);
-        const cmiot_uint32_t additionCopied =
-            CopyGbTextList(additionTextOut, additionCapacity, cache.additionText, additionCount);
-        out->osdText.gbText.districtText.text = districtTextOut;
-        out->osdText.gbText.districtText.textNum =
-            (districtTextOut == NULL || districtCapacity == 0) ? districtCount : districtCopied;
-        out->osdText.gbText.additionText.text = additionTextOut;
-        out->osdText.gbText.additionText.textNum =
-            (additionTextOut == NULL || additionCapacity == 0) ? additionCount : additionCopied;
-        return ((districtTextOut != NULL && districtCopied < districtCount) ||
-                (additionTextOut != NULL && additionCopied < additionCount)) ? -2 : 0;
+    const Json::Value& custom = table["custom_text"];
+    const Json::Value& district = table["district_text"];
+    const Json::Value& addition = table["addition_text"];
+    if (custom.size() > CMIOT_APP_OSD_TEXT_MAX ||
+        district.size() + addition.size() > CMIOT_APP_OSD_TEXT_MAX) {
+        return -1;
+    }
+    loaded.customCount = static_cast<cmiot_uint32_t>(custom.size());
+    for (cmiot_uint32_t i = 0; i < loaded.customCount; ++i) {
+        CopyString(loaded.customText[i].content, sizeof(loaded.customText[i].content),
+                   custom[i]["content"].asString());
+        PositionFromJson(custom[i]["pos"], &loaded.customText[i].pos);
+    }
+    loaded.districtCount = static_cast<cmiot_uint32_t>(district.size());
+    for (cmiot_uint32_t i = 0; i < loaded.districtCount; ++i) {
+        CopyString(loaded.districtText[i].content, sizeof(loaded.districtText[i].content),
+                   district[i]["content"].asString());
+    }
+    GbPositionFromJson(table["district_pos"], &loaded.districtPos);
+    loaded.additionCount = static_cast<cmiot_uint32_t>(addition.size());
+    for (cmiot_uint32_t i = 0; i < loaded.additionCount; ++i) {
+        CopyString(loaded.additionText[i].content, sizeof(loaded.additionText[i].content),
+                   addition[i]["content"].asString());
+    }
+    GbPositionFromJson(table["addition_pos"], &loaded.additionPos);
+
+    if (loaded.osdSwitch) {
+        cmiotOSDInfo_t view;
+        memset(&view, 0, sizeof(view));
+        view.osdSwitch = loaded.osdSwitch;
+        view.mode = loaded.mode;
+        view.date = loaded.date;
+        view.fontSize = loaded.fontSize;
+        CopyString(view.fontColor, sizeof(view.fontColor), loaded.fontColor);
+        if (loaded.mode == kCmiotOsdModeCustom) {
+            view.osdText.customText.textNum = loaded.customCount;
+            view.osdText.customText.text = loaded.customText;
+        } else {
+            view.osdText.gbText.districtText.textNum = loaded.districtCount;
+            view.osdText.gbText.districtText.text = loaded.districtText;
+            view.osdText.gbText.districtText.textPos = loaded.districtPos;
+            view.osdText.gbText.additionText.textNum = loaded.additionCount;
+            view.osdText.gbText.additionText.text = loaded.additionText;
+            view.osdText.gbText.additionText.textPos = loaded.additionPos;
+        }
+        if (ValidateInput(view) != 0) {
+            return -1;
+        }
     }
 
-    const cmiot_uint32_t customCount = cache.info.osdText.customText.textNum;
-    const cmiot_uint32_t customCopied =
-        CopyCustomTextList(customTextOut, customCapacity, cache.customText, customCount);
-    out->osdText.customText.text = customTextOut;
-    out->osdText.customText.textNum =
-        (customTextOut == NULL || customCapacity == 0) ? customCount : customCopied;
-    return (customTextOut != NULL && customCopied < customCount) ? -2 : 0;
+    *config = loaded;
+    return 0;
 }
 
-static void FillCmiotFromMediaState(cmiotOSDInfo_t* out,
-                                    const media::VideoOsdState& state,
-                                    cmiotOsdTextInfo_t* textOut,
-                                    cmiot_uint32_t textCapacity)
+int EnsureLoadedLocked()
 {
-    memset(out, 0, sizeof(*out));
-    out->osdSwitch =
-        ((state.has_time_enabled && state.time_enabled != 0) ||
-         (state.has_text_enabled && state.text_enabled != 0)) ? CMIOT_TRUE : CMIOT_FALSE;
-    out->mode = kCmiotOsdModeCustom;
-    SetStatus(out->date.status, state.has_time_enabled && state.time_enabled != 0);
-    CopyString(out->date.dateFormat, sizeof(out->date.dateFormat), BuildDateFormatFromState(state));
-    out->date.timeFormat = BuildTimeFormatFromState(state);
-    out->date.weekday =
-        (state.has_time_display_week_enabled && state.time_display_week_enabled != 0) ? 1 : 0;
-    out->date.pos.x = state.has_time_position ? (cmiot_uint32_t)ClampInt(state.time_x, 0, kCoordinateMax) : 0;
-    out->date.pos.y = state.has_time_position ? (cmiot_uint32_t)ClampInt(state.time_y, 0, kCoordinateMax) : 0;
-    out->date.pos.alignSet =
-        (state.has_time_alignment && ToLowerCopy(state.time_alignment) == "right") ?
-            CMIOT_OSD_POS_ALIGN_RIGHT :
-            CMIOT_OSD_POS_ALIGN_NOT_SET;
-    out->fontSize = state.has_font_size ? (cmiot_uint32_t)state.font_size : 32;
-    if (state.has_font_color_mode && ToLowerCopy(state.font_color_mode) == "auto") {
-        CopyString(out->fontColor, sizeof(out->fontColor), "auto");
-    } else if (state.has_font_color && ToLowerCopy(state.font_color) == "#000000") {
-        CopyString(out->fontColor, sizeof(out->fontColor), "black");
-    } else if (state.has_font_color && ToLowerCopy(state.font_color) == "#ffffff") {
-        CopyString(out->fontColor, sizeof(out->fontColor), "white");
-    } else if (state.has_font_color) {
-        CopyString(out->fontColor, sizeof(out->fontColor), state.font_color);
+    if (g_cmiot_osd_loaded) {
+        return 0;
+    }
+    const int ret = LoadStoredConfig(&g_cmiot_osd);
+    if (ret == 0) {
+        g_cmiot_osd_loaded = true;
+    }
+    return ret;
+}
+
+int DateTypeFromConfig(const char* dateFormat)
+{
+    const std::string format = SafeString(dateFormat, 24);
+    if (format == "YYYY.MM.DD") {
+        return 1;
+    }
+    if (format == "YYYY/MM/DD") {
+        return 2;
+    }
+    if (format == "YYYY年MM月DD日") {
+        return 3;
+    }
+    return 0;
+}
+
+bool IsStatusOn(const char* status)
+{
+    return ToLowerCopy(SafeString(status, 4)) == "on";
+}
+
+int ClampCoordinate(int value)
+{
+    if (value < 0) {
+        return 0;
+    }
+    return value > kCoordinateMax ? kCoordinateMax : value;
+}
+
+int PositionX(const cmiotOsdPosInfo_t& pos, int fontSize, int* alignment)
+{
+    if (pos.alignSet == CMIOT_OSD_POS_ALIGN_LEFT) {
+        *alignment = 0;
+        return ClampCoordinate(OsdCharacterMarginToNormalized(pos.alignPos, fontSize, 1));
+    }
+    if (pos.alignSet == CMIOT_OSD_POS_ALIGN_RIGHT) {
+        *alignment = 1;
+        const int margin = OsdCharacterMarginToNormalized(pos.alignPos, fontSize, 1);
+        return ClampCoordinate(kCoordinateMax - margin);
+    }
+    *alignment = 0;
+    return static_cast<int>(pos.x);
+}
+
+void BuildColor(const StoredCmiotOsd& config,
+                std::string* mode, std::string* color)
+{
+    const std::string raw = SafeString(config.fontColor, sizeof(config.fontColor));
+    const std::string lower = ToLowerCopy(raw);
+    if (lower == "auto") {
+        *mode = "auto";
+        *color = "#ffffff";
+    } else if (lower == "black") {
+        *mode = "customize";
+        *color = "#000000";
+    } else if (lower == "white") {
+        *mode = "customize";
+        *color = "#ffffff";
     } else {
-        CopyString(out->fontColor, sizeof(out->fontColor), "white");
+        *mode = "customize";
+        *color = raw;
+    }
+}
+
+int ApplyTextItem(int index, const char* content, int x, int y, int alignment)
+{
+    const std::string text = SafeString(content, CMIOT_MAX_OSD_CONTENT_LEN + 1);
+    return ApplyNormalizedOsdText(index, text.c_str(), x, y,
+                                  text.empty() ? 0 : 1, alignment);
+}
+
+int ApplyStoredCmiotOsd(const StoredCmiotOsd& config)
+{
+    std::string colorMode;
+    std::string color;
+    BuildColor(config, &colorMode, &color);
+    int ret = ApplyNormalizedOsdCommon(static_cast<int>(config.fontSize),
+                                       colorMode.c_str(), color.c_str());
+    if (ret != 0) {
+        return ret;
     }
 
-    const cmiot_uint32_t availableCount =
-        (state.has_text_items && state.has_text_enabled && state.text_enabled != 0) ?
-            (cmiot_uint32_t)std::min(state.text_items.size(), (size_t)CMIOT_APP_OSD_TEXT_MAX) :
-            0U;
-    const cmiot_uint32_t copyCount = std::min(availableCount, textCapacity);
-    const cmiot_uint32_t safeCopyCount = (textOut == NULL) ? 0 : copyCount;
-    for (cmiot_uint32_t i = 0; i < safeCopyCount; ++i) {
-        memset(&textOut[i], 0, sizeof(textOut[i]));
-        CopyString(textOut[i].content, sizeof(textOut[i].content), state.text_items[i].text);
-        FillCmiotPositionFromTextItem(&textOut[i].pos, state.text_items[i]);
+    int timeX = 0;
+    int timeY = 0;
+    int timeAlignment = 0;
+    if (config.mode == kCmiotOsdModeCustom) {
+        timeX = PositionX(config.date.pos, static_cast<int>(config.fontSize),
+                          &timeAlignment);
+        timeY = static_cast<int>(config.date.pos.y);
+    } else {
+        const int side = OsdCharacterMarginToNormalized(
+            config.date.gbPos.sideSpace, static_cast<int>(config.fontSize), 1);
+        const int top = OsdCharacterMarginToNormalized(
+            config.date.gbPos.vertSpace, static_cast<int>(config.fontSize), 0);
+        timeX = ClampCoordinate(kCoordinateMax - side);
+        timeY = ClampCoordinate(top);
+        timeAlignment = 1;
     }
-    out->osdText.customText.text = textOut;
-    out->osdText.customText.textNum =
-        (textOut == NULL || textCapacity == 0) ? availableCount : safeCopyCount;
+    ret = ApplyNormalizedOsdTime(DateTypeFromConfig(config.date.dateFormat),
+                                  config.date.timeFormat == 12 ? 1 : 0,
+                                  config.date.weekday ? 1 : 0,
+                                  timeX, timeY,
+                                  IsStatusOn(config.date.status) ? 1 : 0,
+                                  timeAlignment);
+    if (ret != 0) {
+        return ret;
+    }
+
+    int textIndex = 0;
+    if (config.mode == kCmiotOsdModeCustom) {
+        for (cmiot_uint32_t i = 0; i < config.customCount; ++i) {
+            int alignment = 0;
+            const int x = PositionX(config.customText[i].pos,
+                                    static_cast<int>(config.fontSize), &alignment);
+            ret = ApplyTextItem(textIndex++, config.customText[i].content,
+                                x, static_cast<int>(config.customText[i].pos.y),
+                                alignment);
+            if (ret != 0) {
+                return ret;
+            }
+        }
+    } else {
+        const int districtSide = OsdCharacterMarginToNormalized(
+            config.districtPos.sideSpace, static_cast<int>(config.fontSize), 1);
+        const int districtBottom = OsdCharacterMarginToNormalized(
+            config.districtPos.vertSpace, static_cast<int>(config.fontSize), 0);
+        const int districtStep = OsdCharacterMarginToNormalized(
+            1.0f + config.districtPos.lineSpace,
+            static_cast<int>(config.fontSize), 0);
+        int y = ClampCoordinate(kCoordinateMax - districtBottom -
+                                districtStep * static_cast<int>(config.districtCount));
+        for (cmiot_uint32_t i = 0; i < config.districtCount; ++i) {
+            ret = ApplyTextItem(textIndex++, config.districtText[i].content,
+                                ClampCoordinate(kCoordinateMax - districtSide),
+                                ClampCoordinate(y + districtStep * static_cast<int>(i)), 1);
+            if (ret != 0) {
+                return ret;
+            }
+        }
+
+        const int additionSide = OsdCharacterMarginToNormalized(
+            config.additionPos.sideSpace, static_cast<int>(config.fontSize), 1);
+        const int additionBottom = OsdCharacterMarginToNormalized(
+            config.additionPos.vertSpace, static_cast<int>(config.fontSize), 0);
+        const int additionStep = OsdCharacterMarginToNormalized(
+            1.0f + config.additionPos.lineSpace,
+            static_cast<int>(config.fontSize), 0);
+        y = ClampCoordinate(kCoordinateMax - additionBottom -
+                            additionStep * static_cast<int>(config.additionCount));
+        for (cmiot_uint32_t i = 0; i < config.additionCount; ++i) {
+            ret = ApplyTextItem(textIndex++, config.additionText[i].content,
+                                ClampCoordinate(additionSide),
+                                ClampCoordinate(y + additionStep * static_cast<int>(i)), 0);
+            if (ret != 0) {
+                return ret;
+            }
+        }
+    }
+
+    while (textIndex < kDeviceTextMax) {
+        ret = ApplyNormalizedOsdText(textIndex++, "", 0, 0, 0, 0);
+        if (ret != 0) {
+            return ret;
+        }
+    }
+    return 0;
+}
+
+cmiot_uint32_t CopyCustomText(cmiotOsdTextInfo_t* dst, cmiot_uint32_t capacity,
+                              const StoredCmiotOsd& stored)
+{
+    cmiot_uint32_t copied = 0;
+    while (dst != NULL && copied < capacity && copied < stored.customCount) {
+        dst[copied] = stored.customText[copied];
+        ++copied;
+    }
+    return copied;
+}
+
+cmiot_uint32_t CopyGbText(cmiotGBOsdTextInfo_t* dst, cmiot_uint32_t capacity,
+                          const cmiotGBOsdTextInfo_t* src, cmiot_uint32_t count)
+{
+    cmiot_uint32_t copied = 0;
+    while (dst != NULL && copied < capacity && copied < count) {
+        dst[copied] = src[copied];
+        ++copied;
+    }
+    return copied;
 }
 
 } // namespace
@@ -873,67 +637,124 @@ extern "C" int cmiot_osd_get_text_capacity(void)
     return CMIOT_APP_OSD_TEXT_MAX;
 }
 
-extern "C" int cmiot_osd_set_config(const cmiotOSDInfo_t *info)
+extern "C" int cmiot_osd_initialize(void)
 {
-    if (info == NULL) {
-        return -1;
+    pthread_mutex_lock(&g_cmiot_osd_mutex);
+    const int loadRet = EnsureLoadedLocked();
+    const StoredCmiotOsd current = g_cmiot_osd;
+    pthread_mutex_unlock(&g_cmiot_osd_mutex);
+    if (loadRet != 0) {
+        return loadRet;
     }
-
-    media::VideoOsdState state;
-    CachedCmiotOsd cache;
-    const int buildRet = BuildMediaStateFromCmiot(*info, &state, &cache);
-    if (buildRet != 0) {
-        return buildRet;
+    if (GetCloudPlatform() != CLOUD_PLATFORM_CMIOT ||
+        !current.valid || !current.osdSwitch) {
+        return 0;
     }
-
-    media::VideoOsdState timeState = state;
-    timeState.has_text_enabled = false;
-    timeState.has_text_items = false;
-    timeState.text_items.clear();
-
-    const int applyRet = media::ApplyVideoOsdConfig(timeState);
-    if (applyRet != 0) {
-        return applyRet;
-    }
-
-    const int textRet = ApplyCmiotTextConfig(state);
-    if (textRet != 0) {
-        return textRet;
-    }
-
-    StoreCache(cache);
-    return 0;
+    return ApplyStoredCmiotOsd(current);
 }
 
-extern "C" int cmiot_osd_get_config(cmiotOSDInfo_t *info)
+extern "C" int cmiot_osd_is_override_active(void)
 {
-    if (info == NULL) {
+    if (GetCloudPlatform() != CLOUD_PLATFORM_CMIOT) {
+        return 0;
+    }
+    pthread_mutex_lock(&g_cmiot_osd_mutex);
+    const int loadRet = EnsureLoadedLocked();
+    const bool active = loadRet == 0 && g_cmiot_osd.valid && g_cmiot_osd.osdSwitch;
+    pthread_mutex_unlock(&g_cmiot_osd_mutex);
+    return active ? 1 : 0;
+}
+
+extern "C" int cmiot_osd_set_config(const cmiotOSDInfo_t* info)
+{
+    if (info == NULL || ValidateInput(*info) != 0) {
         return -1;
     }
 
-    pthread_mutex_lock(&g_cmiot_osd_cache_mutex);
-    const CachedCmiotOsd cache = g_cmiot_osd_cache;
-    pthread_mutex_unlock(&g_cmiot_osd_cache_mutex);
+    pthread_mutex_lock(&g_cmiot_osd_mutex);
+    StoredCmiotOsd next;
+    if (EnsureLoadedLocked() == 0) {
+        next = g_cmiot_osd;
+    }
+    CopyInput(*info, &next);
+    const int saveRet = SaveStoredConfig(next);
+    if (saveRet == 0) {
+        g_cmiot_osd = next;
+        g_cmiot_osd_loaded = true;
+    }
+    pthread_mutex_unlock(&g_cmiot_osd_mutex);
+    if (saveRet != 0) {
+        return saveRet;
+    }
+    if (GetCloudPlatform() != CLOUD_PLATFORM_CMIOT) {
+        return 0;
+    }
+    return next.osdSwitch ? ApplyStoredCmiotOsd(next)
+                          : g_AVManager.ApplyLocalOsdConfig();
+}
 
-    if (cache.valid) {
-        return CopyCacheToOutput(cache, info);
+extern "C" int cmiot_osd_get_config(cmiotOSDInfo_t* info)
+{
+    if (info == NULL) {
+        return -1;
     }
 
     const cmiot_uint8_t requestedMode = info->mode;
-    cmiotOsdTextInfo_t* customTextOut = NULL;
+    cmiotOsdTextInfo_t* customOut = NULL;
     cmiot_uint32_t customCapacity = 0;
+    cmiotGBOsdTextInfo_t* districtOut = NULL;
+    cmiot_uint32_t districtCapacity = 0;
+    cmiotGBOsdTextInfo_t* additionOut = NULL;
+    cmiot_uint32_t additionCapacity = 0;
     if (requestedMode == kCmiotOsdModeCustom) {
-        customTextOut = info->osdText.customText.text;
+        customOut = info->osdText.customText.text;
         customCapacity = info->osdText.customText.textNum;
+    } else if (requestedMode == kCmiotOsdModeGb) {
+        districtOut = info->osdText.gbText.districtText.text;
+        districtCapacity = info->osdText.gbText.districtText.textNum;
+        additionOut = info->osdText.gbText.additionText.text;
+        additionCapacity = info->osdText.gbText.additionText.textNum;
     }
 
-    media::VideoOsdState state;
-    if (!media::QueryVideoOsdState(&state)) {
-        return -1;
+    pthread_mutex_lock(&g_cmiot_osd_mutex);
+    const int loadRet = EnsureLoadedLocked();
+    const StoredCmiotOsd stored = g_cmiot_osd;
+    pthread_mutex_unlock(&g_cmiot_osd_mutex);
+    if (loadRet != 0) {
+        return loadRet;
     }
-    FillCmiotFromMediaState(info, state, NULL, 0);
-    const cmiot_uint32_t availableCount =
-        FillCmiotCustomTextFromConfig(info, customTextOut, customCapacity);
-    return (customTextOut != NULL &&
-            info->osdText.customText.textNum < availableCount) ? -2 : 0;
+
+    memset(info, 0, sizeof(*info));
+    info->osdSwitch = stored.osdSwitch;
+    info->mode = stored.mode;
+    info->date = stored.date;
+    info->fontSize = stored.fontSize;
+    CopyString(info->fontColor, sizeof(info->fontColor), stored.fontColor);
+    if (!stored.valid) {
+        info->mode = kCmiotOsdModeCustom;
+        return 0;
+    }
+
+    if (stored.mode == kCmiotOsdModeCustom) {
+        const cmiot_uint32_t copied = CopyCustomText(customOut, customCapacity, stored);
+        info->osdText.customText.text = customOut;
+        info->osdText.customText.textNum =
+            customOut == NULL || customCapacity == 0 ? stored.customCount : copied;
+        return customOut != NULL && copied < stored.customCount ? -2 : 0;
+    }
+
+    const cmiot_uint32_t districtCopied = CopyGbText(
+        districtOut, districtCapacity, stored.districtText, stored.districtCount);
+    const cmiot_uint32_t additionCopied = CopyGbText(
+        additionOut, additionCapacity, stored.additionText, stored.additionCount);
+    info->osdText.gbText.districtText.text = districtOut;
+    info->osdText.gbText.districtText.textNum =
+        districtOut == NULL || districtCapacity == 0 ? stored.districtCount : districtCopied;
+    info->osdText.gbText.districtText.textPos = stored.districtPos;
+    info->osdText.gbText.additionText.text = additionOut;
+    info->osdText.gbText.additionText.textNum =
+        additionOut == NULL || additionCapacity == 0 ? stored.additionCount : additionCopied;
+    info->osdText.gbText.additionText.textPos = stored.additionPos;
+    return (districtOut != NULL && districtCopied < stored.districtCount) ||
+           (additionOut != NULL && additionCopied < stored.additionCount) ? -2 : 0;
 }

@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import re
-
-
 ROOT = Path(__file__).resolve().parents[2]
 CMIOT_DEFINE = (ROOT / "Include/ChinaMobile/cmiot_define.h").read_text(
     encoding="utf-8-sig", errors="ignore"
@@ -38,28 +35,51 @@ def main() -> int:
     ):
         require(token in CMIOT_H, f"CmiotOsdControl.h should expose {token}.")
 
+    for forbidden in (
+        "VideoOsdState",
+        "ApplyVideoOsdConfig",
+        "QueryVideoOsdState",
+        "Media/VideoOsdControl.h",
+        "CaptureGetResolution",
+        "ScaleCoordinateXToDevice",
+        "ScaleCoordinateYToDevice",
+    ):
+        require(forbidden not in CMIOT_CPP,
+                f"cmiot parsing must not depend on {forbidden}")
+
+    for token in (
+        "CFG_CMIOT_OSD",
+        "cmiot_osd_initialize",
+        "cmiot_osd_is_override_active",
+        "ApplyNormalizedOsdCommon",
+        "ApplyNormalizedOsdTime",
+        "ApplyNormalizedOsdText",
+        '"custom_text"',
+        '"district_text"',
+        '"addition_text"',
+    ):
+        require(token in CMIOT_CPP + CMIOT_H,
+                f"missing persistent cmiot OSD behavior {token}")
     require(
-        "media::ApplyVideoOsdConfig" in CMIOT_CPP,
-        "cmiot OSD set should reuse the media OSD apply path for time/common settings.",
+        "textNum > CMIOT_APP_OSD_TEXT_MAX" in CMIOT_CPP and
+        "district + addition > CMIOT_APP_OSD_TEXT_MAX" in CMIOT_CPP,
+        "cmiot OSD must reject over-capacity text instead of truncating it.",
+    )
+    require("std::min" not in CMIOT_CPP,
+            "cmiot input and output counts must be handled explicitly without silent truncation")
+    require(
+        "info.mode == kCmiotOsdModeCustom && !IsPositionValid(info.date.pos)" in CMIOT_CPP,
+        "custom mode must validate only its active date position",
     )
     require(
-        "ApplyCmiotTextConfig" in CMIOT_CPP and "timeState.has_text_items = false" in CMIOT_CPP,
-        "cmiot OSD text should be applied by the cmiot-limited text path.",
-    )
-    require(
-        "media::QueryVideoOsdState" in CMIOT_CPP,
-        "cmiot OSD get should reuse the media OSD query path.",
-    )
-    require(
-        "CMIOT_APP_OSD_TEXT_MAX" in CMIOT_CPP and
-        re.search(r"(?<!CMIOT_APP_)OSD_TEXT_MAX", CMIOT_CPP) is None,
-        "cmiot OSD should enforce its own text capacity instead of consuming every GB text slot.",
+        "info.mode == kCmiotOsdModeGb && !IsGbPositionValid(info.date.gbPos)" in CMIOT_CPP,
+        "cmiot GB layout mode must validate only its active date margin",
     )
     require(
         "CMIOT_OSD_POS_ALIGN_RIGHT" in CMIOT_CPP and "CMIOT_OSD_POS_ALIGN_LEFT" in CMIOT_CPP,
         "cmiot OSD should map cmiot alignment definitions.",
     )
-    print("PASS: cmiot OSD adapter is wired to media OSD with reserved RGN capacity")
+    print("PASS: cmiot OSD is persisted independently and applied without VideoOsdState")
     return 0
 
 
