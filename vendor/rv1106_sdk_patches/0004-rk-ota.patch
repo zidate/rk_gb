@@ -1,0 +1,387 @@
+diff --git a/sysdrv/tools/board/rk_ota/src/bootloader.h b/sysdrv/tools/board/rk_ota/src/bootloader.h
+index 070951b..4964037 100755
+--- a/sysdrv/tools/board/rk_ota/src/bootloader.h
++++ b/sysdrv/tools/board/rk_ota/src/bootloader.h
+@@ -48,9 +48,9 @@ static const int BOOTLOADER_MESSAGE_OFFSET_IN_MISC = 16 * 1024;
+ #define CMD_WIPE_USERDATA "cmd_wipe_userdata"
+ 
+ #define BLOCK_WRITE_LEN (16 * 1024)
+-#define AB_UBOOT_NAME "uboot"
+ #define AB_BOOT_NAME "boot"
+-#define AB_ROOTFS_NAME "system"
++#define AB_ROOTFS_NAME "rootfs"
++#define AB_OEM_NAME "oem"
+ #define UPDATE_TAR_PATH "/mnt/sdcard/update_ota.tar"
+ #define UPDATE_TAR_DIRECTRY "/mnt/sdcard/rk_update"
+ 
+@@ -139,7 +139,7 @@ int setSlotSucceed();
+ int readMisc(struct AvbABData *info);
+ void display(struct AvbABData info);
+ void miscDisplay() ;
+-int miscUpdate(char *tar_path, char *save_dir, char *update_partition, char *extra_partition);
++int miscUpdate(char *tar_path, char *save_dir, char *update_partition);
+ int wipe_userdata(int auto_reboot);
+ int writeCustomMiscCmdline(void);
+ int readCustomMiscCmdline(void);
+diff --git a/sysdrv/tools/board/rk_ota/src/bootloader.cpp b/sysdrv/tools/board/rk_ota/src/bootloader.cpp
+index 5a00170..bf65866 100755
+--- a/sysdrv/tools/board/rk_ota/src/bootloader.cpp
++++ b/sysdrv/tools/board/rk_ota/src/bootloader.cpp
+@@ -23,8 +23,10 @@
+ #include <fcntl.h>
+ #include <errno.h>
+ #include <sys/reboot.h>
++#include <sys/ioctl.h>
+ #include <sys/stat.h>
+ #include <sys/types.h>
++#include <mtd/mtd-user.h>
+ 
+ #include "md5sum.h"
+ #include "mtdutils.h"
+@@ -366,25 +368,70 @@ int set_bootloader_message(const struct bootloader_message *in){
+ static int mtd_write(char *src_path, long long size, char *dest_path) {
+     LOGI("mtd_write src=%s dest=%s.\n", src_path, dest_path);
+ 
+-    struct stat sb;
+-    char mtd_write_erase_cmd[256] = {0};
+-    stat(dest_path, &sb);
++    const char *partition_name = strrchr(dest_path, '/');
++    const MtdPartition *partition;
++    MtdWriteContext *write_ctx = NULL;
++    char data_buf[BLOCK_WRITE_LEN];
++    long long remain = size;
++    int src_fd = -1;
++    int ret = -1;
+ 
+-    if ((sb.st_mode & S_IFMT) == S_IFCHR) {
+-        memset(mtd_write_erase_cmd, 0, sizeof(mtd_write_erase_cmd)/sizeof(mtd_write_erase_cmd[0]));
+-        sprintf(mtd_write_erase_cmd, "flash_erase %s 0 0", dest_path);
+-        system(mtd_write_erase_cmd);
++    if (!partition_name || !partition_name[1]) {
++        LOGE("Invalid MTD path %s.\n", dest_path);
++        return -1;
++    }
++    partition_name++;
+ 
+-        // e.g. nandwrite -p /dev/block/by-name/system_b /mnt/sdcard/rk_update/system.img
+-        memset(mtd_write_erase_cmd, 0, sizeof(mtd_write_erase_cmd)/sizeof(mtd_write_erase_cmd[0]));
+-        sprintf(mtd_write_erase_cmd, "nandwrite -p %s %s", dest_path, src_path);
+-        system(mtd_write_erase_cmd);
+-    } else {
+-        LOGE("flash_erase: can't erase MTD \"%s\"\n", dest_path);
++    if (mtd_scan_partitions() < 0) {
++        LOGE("Scan MTD partitions failed.\n");
++        return -1;
++    }
++    partition = mtd_find_partition_by_name(partition_name);
++    if (!partition) {
++        LOGE("Can't find MTD partition %s.\n", partition_name);
+         return -1;
+     }
+ 
+-    return 0;
++    src_fd = open(src_path, O_RDONLY);
++    if (src_fd < 0) {
++        LOGE("Can't open %s.\n", src_path);
++        return -1;
++    }
++    write_ctx = mtd_write_partition(partition);
++    if (!write_ctx) {
++        LOGE("Can't open MTD partition %s for writing.\n", partition_name);
++        goto out;
++    }
++
++    while (remain > 0) {
++        size_t chunk = remain > (long long)sizeof(data_buf) ?
++                       sizeof(data_buf) : (size_t)remain;
++        ssize_t count = read(src_fd, data_buf, chunk);
++
++        if (count != (ssize_t)chunk) {
++            LOGE("Read %s failed.\n", src_path);
++            goto out;
++        }
++        if (mtd_write_data(write_ctx, data_buf, chunk) != (ssize_t)chunk) {
++            LOGE("Write MTD partition %s failed.\n", partition_name);
++            goto out;
++        }
++        remain -= chunk;
++    }
++
++    if (mtd_erase_blocks(write_ctx, -1) == (off_t)-1) {
++        LOGE("Erase MTD partition %s tail failed.\n", partition_name);
++        goto out;
++    }
++    ret = 0;
++
++out:
++    if (write_ctx && mtd_write_close(write_ctx))
++        ret = -1;
++    if (src_fd >= 0)
++        close(src_fd);
++
++    return ret;
+ }
+ 
+ /*
+@@ -670,87 +717,133 @@ static int flash_write_partition(char *src_path, char *dest_path) {
+ }
+ 
+ /*
+- * 只支持ENV方案，升级boot和system分区
++ * Write selected images to the inactive A/B slot.
+  */
+-static int flash_write(char *image_dir, char *partition, char *extra_partition) {
++static int flash_write(const char *image_dir, const char *partition) {
+     int slot;
+-    char src_path[64];
+-    char dest_uboot_path[64] = {0};
+-    char dest_boot_path[64] = {0};
+-    char dest_rootfs_path[64] = {0};
+-    char dest_extra_path[64] = {0};
++    int control_fd = -1;
++    int lock_state;
++    int ret = -1;
++    bool write_boot = false;
++    bool write_rootfs = false;
++    bool write_oem = false;
++    bool mtd_device;
++    char src_boot_path[128];
++    char src_rootfs_path[128];
++    char src_oem_path[128];
++    char src_uboot_path[128];
++    char dest_boot_path[64];
++    char dest_rootfs_path[64];
++    char dest_oem_path[64];
++    const char *control_path;
++    struct stat control_stat;
++    struct mtd_info_user mtd_info;
++    struct erase_info_user lock_range;
+     struct AvbABData info;
+ 
+-    if (readABMisc(&info) == -1)
+-        return -1;
+-
+-    slot = get_current_slot(&info);
+-    if (slot == -1)
+-        return -1;
+-
+     if (!strcmp(partition, "all")) {
+-        sprintf(dest_uboot_path, "/dev/block/by-name/%s_%c", AB_UBOOT_NAME, (slot == 0) ? 'b' : 'a');
+-        sprintf(dest_boot_path, "/dev/block/by-name/%s_%c", AB_BOOT_NAME, (slot == 0) ? 'b' : 'a');
+-        sprintf(dest_rootfs_path, "/dev/block/by-name/%s_%c", AB_ROOTFS_NAME, (slot == 0) ? 'b' : 'a');
+-    } else if (!strcmp(partition, AB_UBOOT_NAME)) {
+-        sprintf(dest_uboot_path, "/dev/block/by-name/%s_%c", AB_UBOOT_NAME, (slot == 0) ? 'b' : 'a');
++        write_boot = true;
++        write_rootfs = true;
++        write_oem = true;
+     } else if (!strcmp(partition, AB_BOOT_NAME)) {
+-        sprintf(dest_boot_path, "/dev/block/by-name/%s_%c", AB_BOOT_NAME, (slot == 0) ? 'b' : 'a');
++        write_boot = true;
+     } else if (!strcmp(partition, AB_ROOTFS_NAME)) {
+-        sprintf(dest_rootfs_path, "/dev/block/by-name/%s_%c", AB_ROOTFS_NAME, (slot == 0) ? 'b' : 'a');
++        write_rootfs = true;
++    } else if (!strcmp(partition, AB_OEM_NAME)) {
++        write_oem = true;
+     } else {
+         LOGE("Invalid parameter setting: --partition=%s.\n", partition);
+         return -1;
+     }
+ 
+-    if (dest_uboot_path[0]) {
+-        memset(src_path, 0, sizeof(src_path));
+-        sprintf(src_path, "%s/%s.img", image_dir, AB_UBOOT_NAME);
+-        if (!access(src_path, F_OK) && flash_write_partition(src_path, dest_uboot_path)) {
+-            LOGE("Write %s failed.\n", dest_uboot_path);
+-            return -1;
+-        }
++    snprintf(src_boot_path, sizeof(src_boot_path), "%s/%s.img", image_dir, AB_BOOT_NAME);
++    snprintf(src_rootfs_path, sizeof(src_rootfs_path), "%s/%s.img", image_dir, AB_ROOTFS_NAME);
++    snprintf(src_oem_path, sizeof(src_oem_path), "%s/%s.img", image_dir, AB_OEM_NAME);
++    snprintf(src_uboot_path, sizeof(src_uboot_path), "%s/uboot.img", image_dir);
++    if (!access(src_uboot_path, F_OK)) {
++        LOGE("Network OTA does not support uboot.img.\n");
++        return -1;
+     }
+-    if (dest_boot_path[0]) {
+-        memset(src_path, 0, sizeof(src_path));
+-        sprintf(src_path, "%s/%s.img", image_dir, AB_BOOT_NAME);
+-        if (!access(src_path, F_OK) && flash_write_partition(src_path, dest_boot_path)) {
+-            LOGE("Write %s failed.\n", dest_boot_path);
+-            return -1;
+-        }
++    if ((write_boot && access(src_boot_path, F_OK)) ||
++        (write_rootfs && access(src_rootfs_path, F_OK)) ||
++        (write_oem && access(src_oem_path, F_OK))) {
++        LOGE("Selected update image set is incomplete.\n");
++        return -1;
+     }
+-    if (dest_rootfs_path[0]) {
+-        memset(src_path, 0, sizeof(src_path));
+-        sprintf(src_path, "%s/%s.img", image_dir, AB_ROOTFS_NAME);
+-        if (!access(src_path, F_OK) && flash_write_partition(src_path, dest_rootfs_path)) {
+-            LOGE("Write %s failed.\n", dest_rootfs_path);
++
++    if (readABMisc(&info) == -1)
++        return -1;
++    slot = get_current_slot(&info);
++    if (slot == -1)
++        return -1;
++
++    snprintf(dest_boot_path, sizeof(dest_boot_path), "/dev/block/by-name/%s_%c",
++             AB_BOOT_NAME, (slot == 0) ? 'b' : 'a');
++    snprintf(dest_rootfs_path, sizeof(dest_rootfs_path), "/dev/block/by-name/%s_%c",
++             AB_ROOTFS_NAME, (slot == 0) ? 'b' : 'a');
++    snprintf(dest_oem_path, sizeof(dest_oem_path), "/dev/block/by-name/%s_%c",
++             AB_OEM_NAME, (slot == 0) ? 'b' : 'a');
++    control_path = write_boot ? dest_boot_path :
++                   (write_rootfs ? dest_rootfs_path : dest_oem_path);
++
++    mtd_device = isMtdDevice();
++    if (mtd_device) {
++        if (stat(control_path, &control_stat) ||
++            (control_stat.st_mode & S_IFMT) != S_IFCHR) {
++            LOGE("MTD control path %s is not a character device.\n", control_path);
+             return -1;
+         }
++        control_fd = open(control_path, O_RDWR);
++        if (control_fd < 0 || ioctl(control_fd, MEMGETINFO, &mtd_info) < 0) {
++            LOGE("Open MTD control path %s failed.\n", control_path);
++            goto out;
++        }
++        lock_range.start = 0;
++        lock_range.length = mtd_info.size;
++        if (ioctl(control_fd, MEMUNLOCK, &lock_range) < 0) {
++            LOGE("Unlock SPI NAND protection failed.\n");
++            goto relock;
++        }
+     }
+-    if (extra_partition) {
+-        sprintf(dest_extra_path, "/dev/block/by-name/%s_%c", extra_partition, (slot == 0) ? 'b' : 'a');
+-        memset(src_path, 0, sizeof(src_path));
+-        sprintf(src_path, "%s/%s.img", image_dir, extra_partition);
+-        if (!access(src_path, F_OK)) {
+-            if (flash_write_partition(src_path, dest_extra_path)) {
+-                LOGE("Write %s failed.\n", dest_extra_path);
+-                return -1;
+-            }
+-        } else {
+-            LOGE("No found %s, skip.\n", src_path);
++
++    if (write_boot && flash_write_partition(src_boot_path, dest_boot_path))
++        goto relock;
++    if (write_rootfs && flash_write_partition(src_rootfs_path, dest_rootfs_path))
++        goto relock;
++    if (write_oem && flash_write_partition(src_oem_path, dest_oem_path))
++        goto relock;
++    if (mtd_device && fsync(control_fd)) {
++        LOGE("Sync MTD updates failed.\n");
++        goto relock;
++    }
++    ret = 0;
++
++relock:
++    if (mtd_device) {
++        if (ioctl(control_fd, MEMLOCK, &lock_range) < 0) {
++            LOGE("Restore SPI NAND protection failed.\n");
++            ret = -1;
++        }
++        lock_state = ioctl(control_fd, MEMISLOCKED, &lock_range);
++        if (lock_state != 1) {
++            LOGE("SPI NAND protection verification failed (%d).\n", lock_state);
++            ret = -1;
+         }
+     }
+ 
+-    return 0;
++out:
++    if (control_fd >= 0)
++        close(control_fd);
++    return ret;
+ }
+ 
+ /*
+  * AB系统OTA升级，同时更新MISC
+  */
+-int miscUpdate(char *tar_path, char *save_dir, char *update_partition, char *extra_partition) {
++int miscUpdate(char *tar_path, char *save_dir, char *update_partition) {
+     char savedir[64];
+-    char partition[16];
+     char unpack_tar_cmd[128];
++    const char *partition;
+     struct AvbABData info;
+ 
+     if (tar_path == NULL) {
+@@ -764,10 +857,7 @@ int miscUpdate(char *tar_path, char *save_dir, char *update_partition, char *ext
+         snprintf(savedir, 64, "%s", save_dir);
+     }
+ 
+-    if (update_partition == NULL)
+-        sprintf(partition, "all");
+-    else
+-        sprintf(partition, "%s", update_partition);
++    partition = update_partition == NULL ? "all" : update_partition;
+ 
+     if (access(savedir, F_OK))
+         mkdir(savedir, 0755);
+@@ -781,7 +871,7 @@ int miscUpdate(char *tar_path, char *save_dir, char *update_partition, char *ext
+     LOGI("tar path = %s\n", tar_path);
+     LOGI("save path = %s\n", savedir);
+ 
+-    if (flash_write(savedir, partition, extra_partition)) {
++    if (flash_write(savedir, partition)) {
+         LOGE("Write flash error, exit upgrading.\n");
+         return -1;
+     }
+diff --git a/sysdrv/tools/board/rk_ota/src/main.cpp b/sysdrv/tools/board/rk_ota/src/main.cpp
+index 6dfa7b7..4029049 100755
+--- a/sysdrv/tools/board/rk_ota/src/main.cpp
++++ b/sysdrv/tools/board/rk_ota/src/main.cpp
+@@ -28,8 +28,7 @@ void display() {
+     LOGI("--misc=display                       Display misc info.\n");
+     LOGI("--tar_path=<path>                    Set upgrade firmware path.\n");
+     LOGI("--save_dir=<path>                    Set the path for saving the image.\n");
+-    LOGI("--partition=<uboot/boot/system/all>  Set the partition to be upgraded.('all' means 'uboot', 'boot' and 'system' are included.)\n");
+-    LOGI("--extra_part=<name>                  Set the extra partition to be upgraded.\n");
++    LOGI("--partition=<boot/rootfs/oem/all>    Set the partition to be upgraded.('all' means 'boot', 'rootfs' and 'oem' are included.)\n");
+     LOGI("--reboot                             Restart the machine at the end of the program.\n");
+     // LOGI("--misc=wipe_userdata   Format data partition.\n");
+     // LOGI("--misc_custom= < op >  Operation on misc for custom cmdline");
+@@ -66,7 +65,6 @@ static const struct option engine_options[] = {
+   { "tar_path", required_argument, NULL, 't' + 'p'},
+   { "save_dir", required_argument, NULL, 's' + 'p'},
+   { "partition", required_argument, NULL, 'p' },
+-  { "extra_part", required_argument, NULL, 'e' + 'p' },
+   { "reboot", no_argument, NULL, 'r' },
+   { "help", no_argument, NULL, 'h' },
+   { NULL, 0, NULL, 0 },
+@@ -79,7 +77,6 @@ int main(int argc, char *argv[]) {
+     char *save_dir = NULL;
+     char *misc_func = NULL;
+     char *partition = NULL;
+-    char *extra_part = NULL;
+     bool is_reboot = false;
+ 
+ 
+@@ -89,12 +86,11 @@ int main(int argc, char *argv[]) {
+         case 't' + 'p': tar_path = optarg; continue;
+         case 's' + 'p': save_dir = optarg; continue;
+         case 'p': partition = optarg; continue;
+-        case 'e' + 'p': extra_part = optarg; continue;
+         case 'r': is_reboot = true; continue;
+         case 'h': display(); break;
+         case '?':
+             LOGE("Invalid command argument\n");
+-            continue;
++            return RK_UPGRADE_ERR;
+         }
+     }
+ 
+@@ -108,7 +104,7 @@ int main(int argc, char *argv[]) {
+                 m_status = RK_UPGRADE_FINISHED;
+             }
+         } else if (strcmp(misc_func, "update") == 0) {
+-            if (miscUpdate(tar_path, save_dir, partition, extra_part) == 0) {
++            if (miscUpdate(tar_path, save_dir, partition) == 0) {
+                 m_status = RK_UPGRADE_FINISHED;
+             }
+         } else if (strcmp(misc_func, "display") == 0) {
