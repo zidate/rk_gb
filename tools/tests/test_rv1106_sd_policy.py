@@ -44,7 +44,7 @@ BASELINE_INPUTS = {
     CMD_MAKEFILE: (PLAN_BASELINE, "c3550590185aa6591614318560c012b5bbdcc172048dcd56422e38b1e955f074"),
 }
 POST_SHA256 = {
-    COMMAND: "091aabbdfd2ac7fb0bf6e3d17b9ff903c5e13c234accb4fbdf6ac81ab9fa80ee",
+    COMMAND: "664eb59eb544b55eb23a9ecd573c1bcbb076ee0e27c545b35661981709750835",
     CMD_KCONFIG: "835bf2ebc533dc5c4c359441d566076b1c85023c268811c3f41b9476a669ed9f",
     CMD_MAKEFILE: "89ed26b3e1eaea7914970174262cf0887f2a586ef473ad886cc58f0da7234d14",
     DEFCONFIG: "c239063d8188eec1126d0b322443c33bfd6ff564d9055c3af7c7a6dd0433d1e8",
@@ -217,6 +217,38 @@ class SdPolicyPatchTest(unittest.TestCase):
             "if (ret || size <= 0 || size > image->max_size)",
         ):
             self.assertIn(snippet, self.command)
+
+    def test_fs_lifecycle_reselects_fat_before_exists_and_size(self):
+        select_fat = 'fs_set_blk_dev("mmc", "1", FS_TYPE_FAT)'
+        loop_start = self.command.index(
+            "for (i = 0; i < ARRAY_SIZE(ab_sd_images); i++)"
+        )
+        loop_end = self.command.index('\n\tprintf("SD slot trio', loop_start)
+        loop = self.command[loop_start:loop_end]
+
+        self.assertNotIn(select_fat, self.command[:loop_start])
+        self.assertEqual(self.command.count(select_fat), 2)
+        self.assertEqual(loop.count(select_fat), 2)
+        self.assertIn(
+            "fs_exists() closes the filesystem and resets fs_type", loop
+        )
+        self.assertIn("Failed to select SD FAT before probing %s", loop)
+        self.assertIn("Failed to select SD FAT before sizing %s", loop)
+
+        first_select = loop.index(select_fat)
+        exists = loop.index("exists = fs_exists(image->filename);")
+        absence = loop.index("if (!exists)")
+        second_select = loop.index(select_fat, first_select + 1)
+        size = loop.index("ret = fs_size(image->filename, &size);")
+        self.assertLess(first_select, exists)
+        self.assertLess(exists, absence)
+        self.assertLess(absence, second_select)
+        self.assertLess(second_select, size)
+        self.assertRegex(
+            loop[second_select:size],
+            r"(?s)fs_set_blk_dev\([^;]+;\s+if \(ret\) \{.*"
+            r"return CMD_RET_FAILURE;\s+\}\s+$",
+        )
 
     def test_runtime_slot_mapping_is_bounded_and_defaults_invalid_to_a(self):
         for snippet in (

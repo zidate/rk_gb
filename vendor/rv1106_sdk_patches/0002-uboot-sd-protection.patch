@@ -54,10 +54,10 @@ index c4f0d34..114613a 100755
 +		     SPINAND_HAS_QE_BIT | SPINAND_HAS_BLOCK_PROTECTION,
 diff --git a/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c b/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
 new file mode 100644
-index 0000000..ea9a04b
+index 0000000..9a1f8be
 --- /dev/null
 +++ b/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
-@@ -0,0 +1,121 @@
+@@ -0,0 +1,133 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/* Validate RV1106 A/B update images on the SD card before flash access. */
 +
@@ -135,18 +135,23 @@ index 0000000..ea9a04b
 +	(void)argc;
 +	(void)argv;
 +
-+	ret = fs_set_blk_dev("mmc", "1", FS_TYPE_FAT);
-+	if (ret) {
-+		printf("Failed to select SD FAT root (err = %d)\n", ret);
-+		return CMD_RET_FAILURE;
-+	}
-+
 +	ab_sd_get_target_suffix(target_suffix, sizeof(target_suffix));
 +	for (i = 0; i < ARRAY_SIZE(ab_sd_images); i++) {
 +		const struct ab_sd_image *image = &ab_sd_images[i];
 +		char target[sizeof("rootfs_b")];
 +		loff_t size = 0;
 +		int exists;
++
++		/*
++		 * fs_exists() closes the filesystem and resets fs_type, so select
++		 * the FAT partition again before every filesystem operation.
++		 */
++		ret = fs_set_blk_dev("mmc", "1", FS_TYPE_FAT);
++		if (ret) {
++			printf("Failed to select SD FAT before probing %s (err = %d)\n",
++			       image->filename, ret);
++			return CMD_RET_FAILURE;
++		}
 +
 +		exists = fs_exists(image->filename);
 +		if (exists < 0) {
@@ -156,6 +161,13 @@ index 0000000..ea9a04b
 +		}
 +		if (!exists)
 +			continue;
++
++		ret = fs_set_blk_dev("mmc", "1", FS_TYPE_FAT);
++		if (ret) {
++			printf("Failed to select SD FAT before sizing %s (err = %d)\n",
++			       image->filename, ret);
++			return CMD_RET_FAILURE;
++		}
 +
 +		ret = fs_size(image->filename, &size);
 +		if (ret || size <= 0 || size > image->max_size) {
