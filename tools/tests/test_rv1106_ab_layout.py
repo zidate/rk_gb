@@ -2,6 +2,7 @@
 
 import configparser
 import pathlib
+import re
 import shlex
 import unittest
 
@@ -9,6 +10,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 IMAGE_DIR = ROOT / "packaging" / "image"
 PATCH_PATH = ROOT / "vendor" / "rv1106_sdk_patches" / "0001-ab-layout.patch"
+LINKMOUNT_PATH = ROOT / "packaging" / "rootfs_pub" / "etc" / "init.d" / "S20linkmount"
 ALIGNMENT = 0x20000
 FLASH_SIZE = 0x8000000
 EXPECTED = {
@@ -55,6 +57,19 @@ BOARD_CONFIG_RELATIVE_PATH = (
     "project/cfg/BoardConfig_IPC/"
     "BoardConfig-SPI_NAND-NONE-RV1106_IPC38_DEMO_V10-IPC-XWR60440.mk"
 )
+DEFCONFIG_RELATIVE_PATH = (
+    "sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig"
+)
+ANDROID_AB_RELATIVE_PATH = "sysdrv/source/uboot/u-boot/common/android_ab.c"
+AVB_AB_FLOW_RELATIVE_PATH = (
+    "sysdrv/source/uboot/u-boot/lib/avb/libavb_ab/avb_ab_flow.c"
+)
+PATCH_TARGETS = [
+    BOARD_CONFIG_RELATIVE_PATH,
+    DEFCONFIG_RELATIVE_PATH,
+    ANDROID_AB_RELATIVE_PATH,
+    AVB_AB_FLOW_RELATIVE_PATH,
+]
 
 
 def read_ini(filename):
@@ -74,9 +89,8 @@ def makefile_references_upgrade_ini(makefile_text):
 
 
 def parse_git_patch(patch_text):
-    headers = []
-    added_lines = []
-    deleted_lines = []
+    changes = {}
+    current_target = None
     in_hunk = False
 
     for line in patch_text.splitlines():
@@ -84,16 +98,32 @@ def parse_git_patch(patch_text):
             paths = shlex.split(line.removeprefix("diff --git "))
             if len(paths) != 2:
                 raise ValueError(f"malformed diff header: {line}")
-            headers.append(tuple(paths))
+            current_target = tuple(paths)
+            if current_target in changes:
+                raise ValueError(f"duplicate diff target: {line}")
+            changes[current_target] = {"added": [], "deleted": []}
             in_hunk = False
         elif line.startswith("@@"):
+            if current_target is None:
+                raise ValueError("hunk found before diff header")
             in_hunk = True
         elif in_hunk and line.startswith("+"):
-            added_lines.append(line[1:])
+            changes[current_target]["added"].append(line[1:])
         elif in_hunk and line.startswith("-"):
-            deleted_lines.append(line[1:])
+            changes[current_target]["deleted"].append(line[1:])
 
-    return headers, added_lines, deleted_lines
+    return changes
+
+
+def target_changes(changes, relative_path):
+    target = (f"a/{relative_path}", f"b/{relative_path}")
+    if target not in changes:
+        raise AssertionError(f"missing patch target: {relative_path}")
+    return changes[target]
+
+
+def stripped(lines):
+    return [line.strip() for line in lines]
 
 
 class FullPhysicalLayoutTest(unittest.TestCase):
@@ -183,18 +213,19 @@ class BoardConfigPatchTest(unittest.TestCase):
     def test_patch_locks_partition_command_and_a_slot_build_inputs(self):
         self.assertTrue(PATCH_PATH.is_file(), f"missing patch: {PATCH_PATH}")
         patch_text = PATCH_PATH.read_text(encoding="utf-8")
-        headers, added_lines, deleted_lines = parse_git_patch(patch_text)
+        changes = parse_git_patch(patch_text)
 
         self.assertEqual(
-            headers,
+            list(changes),
             [
-                (
-                    f"a/{BOARD_CONFIG_RELATIVE_PATH}",
-                    f"b/{BOARD_CONFIG_RELATIVE_PATH}",
-                )
+                (f"a/{path}", f"b/{path}")
+                for path in PATCH_TARGETS
             ],
         )
-        self.assert_expected_layout_changes(added_lines, deleted_lines)
+        board_changes = target_changes(changes, BOARD_CONFIG_RELATIVE_PATH)
+        self.assert_expected_layout_changes(
+            board_changes["added"], board_changes["deleted"]
+        )
 
     def test_layout_change_guard_rejects_unrelated_exports(self):
         expected_added = [PARTITION_COMMAND, FILESYSTEM_CONFIG]
@@ -219,11 +250,133 @@ diff --git a/project/example.mk b/project/example.mk
 -export EXAMPLE=old
 +export EXAMPLE=new
 """
-        headers, added_lines, deleted_lines = parse_git_patch(patch_text)
+        changes = parse_git_patch(patch_text)
 
-        self.assertEqual(headers, [("a/project/example.mk", "b/project/example.mk")])
-        self.assertEqual(added_lines, ["export EXAMPLE=new"])
-        self.assertEqual(deleted_lines, ["export EXAMPLE=old"])
+        self.assertEqual(
+            changes,
+            {
+                ("a/project/example.mk", "b/project/example.mk"): {
+                    "added": ["export EXAMPLE=new"],
+                    "deleted": ["export EXAMPLE=old"],
+                }
+            },
+        )
+
+
+class BootSelectionPatchTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.changes = parse_git_patch(PATCH_PATH.read_text(encoding="utf-8"))
+
+    def test_libavb_invalid_metadata_defaults_to_a_only(self):
+        change = target_changes(self.changes, AVB_AB_FLOW_RELATIVE_PATH)
+        added = stripped(change["added"])
+        deleted = stripped(change["deleted"])
+
+        self.assertIn("data->slots[1].priority = 0;", added)
+        self.assertIn("data->slots[1].tries_remaining = 0;", added)
+        self.assertNotIn("data->slots[1].successful_boot = 0;", deleted)
+        self.assertIn("data->slots[1].priority = AVB_AB_MAX_PRIORITY - 1;", deleted)
+        self.assertIn(
+            "data->slots[1].tries_remaining = AVB_AB_MAX_TRIES_REMAINING;",
+            deleted,
+        )
+        self.assertFalse(any("slots[0]" in line for line in change["deleted"]))
+
+    def test_android_invalid_metadata_defaults_to_a_only(self):
+        change = target_changes(self.changes, ANDROID_AB_RELATIVE_PATH)
+        added = stripped(change["added"])
+        deleted = stripped(change["deleted"])
+
+        self.assertIn("memset(abc->slot_info, 0, sizeof(abc->slot_info));", added)
+        self.assertIn("abc->slot_info[0].priority = 15;", added)
+        self.assertIn("abc->slot_info[0].tries_remaining = 7;", added)
+        self.assertIn("abc->slot_info[0].successful_boot = 0;", added)
+        self.assertTrue(any("android_slot_metadata metadata" in line for line in deleted))
+        self.assertTrue(any("for (i = 0;" in line for line in deleted))
+        self.assertFalse(any("android_boot_control_compute_crc" in line for line in added))
+        self.assertFalse(any("android_boot_control_compute_crc" in line for line in deleted))
+
+    def test_selected_slot_updates_bootarg_and_rootfs_partition_together(self):
+        change = target_changes(self.changes, ANDROID_AB_RELATIVE_PATH)
+        added = stripped(change["added"])
+
+        self.assertIn("char slot_suffix[3] = {0};", added)
+        self.assertIn("if (ab_get_slot_suffix(slot_suffix)) {", added)
+        self.assertIn(
+            'snprintf(slot_arg, sizeof(slot_arg), "androidboot.slot_suffix=%s", slot_suffix);',
+            added,
+        )
+        self.assertEqual(added.count('env_update("bootargs", slot_arg);'), 1)
+        self.assertIn(
+            'snprintf(root_part_name, sizeof(root_part_name), "rootfs%s", slot_suffix);',
+            added,
+        )
+        self.assertTrue(
+            any(
+                "part_get_info_by_name(dev_desc, root_part_name" in line
+                for line in added
+            )
+        )
+        self.assertFalse(any("system_a" in line or "system_b" in line for line in added))
+        self.assertFalse(any("ANDROID_PARTITION_SYSTEM" in line for line in added))
+        self.assertFalse(
+            any(
+                "ubi.mtd=%d root=/dev/ubiblock0_0" in line
+                for line in change["deleted"]
+            )
+        )
+
+    def test_defconfig_enables_ab_and_disables_legacy_update_command(self):
+        change = target_changes(self.changes, DEFCONFIG_RELATIVE_PATH)
+        added = stripped(change["added"])
+
+        self.assertIn("CONFIG_AVB_LIBAVB_AB=y", added)
+        self.assertIn('CONFIG_ROCKCHIP_CMD="ab_sd_update -"', added)
+        self.assertIn("# CONFIG_CMD_SCRIPT_UPDATE is not set", added)
+        self.assertNotIn('CONFIG_ROCKCHIP_CMD="sd_update -"', added)
+
+
+class LinkMountSlotSelectionTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.script = LINKMOUNT_PATH.read_text(encoding="utf-8")
+
+    def test_script_maps_all_physical_partitions_to_exact_mtd_indices(self):
+        physical_links = {
+            name: int(index)
+            for index, name in re.findall(r"ln -sf /dev/mtd(\d+) (\w+)", self.script)
+        }
+        self.assertEqual(
+            physical_links,
+            {
+                "env": 0,
+                "idblock": 1,
+                "uboot": 2,
+                "boot_a": 3,
+                "boot_b": 4,
+                "rootfs_a": 5,
+                "rootfs_b": 6,
+                "oem_a": 7,
+                "oem_b": 8,
+                "reserved": 9,
+                "misc": 10,
+                "userdata": 11,
+            },
+        )
+        self.assertIn("mkdir -p /dev/block/by-name", self.script)
+
+    def test_script_accepts_only_exact_slot_suffix_tokens_and_defaults_to_a(self):
+        self.assertIn("slot_suffix=_a", self.script)
+        self.assertIn("androidboot.slot_suffix=_a)", self.script)
+        self.assertIn("androidboot.slot_suffix=_b)", self.script)
+        self.assertRegex(self.script, r"for \w+ in \$\(cat /proc/cmdline\)")
+        self.assertNotIn("androidboot.slot_suffix=*)", self.script)
+
+    def test_logical_links_and_oem_mount_use_the_selected_slot(self):
+        for name in ("boot", "rootfs", "oem"):
+            self.assertIn(f'ln -sf "{name}${{slot_suffix}}" {name}', self.script)
+        self.assertIn("mount_part oem /oem squashfs", self.script)
 
 
 if __name__ == "__main__":
