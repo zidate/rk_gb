@@ -12,10 +12,13 @@ diff --git a/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig b/sysd
 index f1d2207..846a495 100755
 --- a/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig
 +++ b/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig
-@@ -14 +14,2 @@
+@@ -14 +14,5 @@
 -CONFIG_ROCKCHIP_CMD="sd_update -"
 +CONFIG_ROCKCHIP_CMD="ab_sd_update -"
 +CONFIG_AVB_LIBAVB_AB=y
++CONFIG_AVB_LIBAVB_USER=y
++CONFIG_ANDROID_AB=y
++CONFIG_PARTITION_UUIDS=y
 @@ -69 +70 @@
 -CONFIG_CMD_SCRIPT_UPDATE=y
 +# CONFIG_CMD_SCRIPT_UPDATE is not set

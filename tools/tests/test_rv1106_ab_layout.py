@@ -545,6 +545,9 @@ class BootSelectionPatchTest(unittest.TestCase):
             [
                 'CONFIG_ROCKCHIP_CMD="ab_sd_update -"',
                 "CONFIG_AVB_LIBAVB_AB=y",
+                "CONFIG_AVB_LIBAVB_USER=y",
+                "CONFIG_ANDROID_AB=y",
+                "CONFIG_PARTITION_UUIDS=y",
                 "# CONFIG_CMD_SCRIPT_UPDATE is not set",
             ],
         )
