@@ -1,6 +1,7 @@
 """Lock the RV1106 XWR60440 SPI NAND A/B partition layout."""
 
 import configparser
+import hashlib
 import os
 import pathlib
 import re
@@ -77,6 +78,12 @@ PATCH_TARGETS = [
 SDK_BASELINE_ROOT = pathlib.Path(
     os.environ.get("RV1106_SDK_BASELINE", "/tmp/rk_dual_backup_ref/RV1106_IPC_SDK")
 )
+SDK_BASELINE_SHA256 = {
+    BOARD_CONFIG_RELATIVE_PATH: "05a466237c9c0f8dc9a9769efb291e5ddb8c80a29e0066347806350ef81ed8d2",
+    DEFCONFIG_RELATIVE_PATH: "e762bccd96ebd1be962fe845f5da24471c2301e4abc73ba0d236c7580bfea697",
+    ANDROID_AB_RELATIVE_PATH: "95a848a050e0e85948f8ae5fc8f5a169c82aee101920e6dc77adca51f9675d73",
+    AVB_AB_FLOW_RELATIVE_PATH: "581520340c3b06169755b3192a74d339738524119af9c61cbfd71b479b7a48f1",
+}
 
 
 def read_ini(filename):
@@ -355,6 +362,11 @@ class BootSelectionPatchTest(unittest.TestCase):
             missing,
             f"missing pinned SDK sources below {SDK_BASELINE_ROOT}: {missing}",
         )
+        for relative_path, expected_sha256 in SDK_BASELINE_SHA256.items():
+            actual_sha256 = hashlib.sha256(
+                (SDK_BASELINE_ROOT / relative_path).read_bytes()
+            ).hexdigest()
+            self.assertEqual(actual_sha256, expected_sha256, relative_path)
 
         with tempfile.TemporaryDirectory(prefix="rv1106-ab-layout-") as tempdir:
             sdk_root = pathlib.Path(tempdir)
@@ -503,7 +515,7 @@ class LinkMountSlotSelectionTest(unittest.TestCase):
     def test_logical_links_and_oem_mount_use_the_selected_slot(self):
         for name in ("boot", "rootfs", "oem"):
             self.assertIn(f'make_link "{name}${{slot_suffix}}" {name}', self.script)
-        self.assertIn("mount_part oem /oem squashfs", self.script)
+        self.assertIn('mount_part oem "$OEM_MOUNTPOINT" squashfs', self.script)
 
     def invoke_linkdev(self, cmdline, existing_file=None, existing_link=None):
         tempdir = tempfile.TemporaryDirectory()
@@ -596,12 +608,66 @@ class LinkMountSlotSelectionTest(unittest.TestCase):
         for command in (
             "linkdev || exit 1",
             "mount_part rootfs IGNORE squashfs || exit 1",
-            "mount_part oem /oem squashfs || exit 1",
-            "mount_part userdata /userdata ubifs || exit 1",
+            'mount_part oem "$OEM_MOUNTPOINT" squashfs || exit 1',
+            'mount_part userdata "$USERDATA_MOUNTPOINT" ubifs || exit 1',
         ):
             self.assertIn(command, self.script)
         self.assertIn("printf '%s\\n' \"stop $0 finished\"", self.script)
         self.assertIn("printf 'Usage: %s {start|linkdev|stop}\\n' \"$0\" >&2", self.script)
+
+    def test_start_reaches_oem_and_userdata_after_spi_nand_rootfs_probe(self):
+        with tempfile.TemporaryDirectory(prefix="rv1106-linkmount-start-") as tempdir:
+            root = pathlib.Path(tempdir)
+            cmdline_path = root / "cmdline"
+            by_name = root / "by-name"
+            oem_mountpoint = root / "oem"
+            userdata_mountpoint = root / "userdata"
+            stub_bin = root / "bin"
+            cmdline_path.write_text("androidboot.slot_suffix=_a\n", encoding="utf-8")
+            oem_mountpoint.mkdir()
+            userdata_mountpoint.mkdir()
+            stub_bin.mkdir()
+
+            stubs = {
+                "mountpoint": "#!/bin/sh\nprintf '/dev/ubiblock5_0 / squashfs rw 0 0\\n'\n",
+                "realpath": """#!/bin/sh
+case "$1" in
+    */oem) printf '/dev/mtd7\\n' ;;
+    */userdata) printf '/dev/mtd11\\n' ;;
+    *) exit 1 ;;
+esac
+""",
+                "mount": """#!/bin/sh
+printf '/dev/ubiblock7_0 on oem type squashfs\\n'
+printf '/dev/ubi11_0 on userdata type ubifs\\n'
+""",
+            }
+            for name, content in stubs.items():
+                path = stub_bin / name
+                path.write_text(content, encoding="utf-8")
+                path.chmod(0o755)
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "CMDLINE_FILE": str(cmdline_path),
+                    "BY_NAME_DIR": str(by_name),
+                    "OEM_MOUNTPOINT": str(oem_mountpoint),
+                    "USERDATA_MOUNTPOINT": str(userdata_mountpoint),
+                    "PATH": f"{stub_bin}:{env['PATH']}",
+                }
+            )
+            result = subprocess.run(
+                ["sh", str(LINKMOUNT_PATH), "start"],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("rootfs mount on /dev/ubiblock5_0", result.stdout)
+            self.assertIn("oem has been mounted", result.stdout)
+            self.assertIn("userdata has been mounted", result.stdout)
 
 
 if __name__ == "__main__":

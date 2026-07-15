@@ -2,6 +2,8 @@
 bootmedium=spi_nand
 CMDLINE_FILE=${CMDLINE_FILE:-/proc/cmdline}
 BY_NAME_DIR=${BY_NAME_DIR:-/dev/block/by-name}
+OEM_MOUNTPOINT=${OEM_MOUNTPOINT:-/oem}
+USERDATA_MOUNTPOINT=${USERDATA_MOUNTPOINT:-/userdata}
 
 select_slot(){
 slot_suffix=
@@ -75,10 +77,16 @@ fi
 root_dev=$(mountpoint -n /)
 root_dev=${root_dev%% *}
 partname=$1
-part_dev=/dev/block/by-name/$1
+part_dev=$BY_NAME_DIR/$1
 mountpt=$2
 part_fstype=$3
-part_realdev=$(realpath $part_dev)
+case "$bootmedium:$partname:$mountpt" in
+	spi_nand:rootfs:IGNORE|slc_nand:rootfs:IGNORE)
+		echo "rootfs mount on $root_dev"
+		return 0
+		;;
+esac
+part_realdev=$(realpath "$part_dev") || return 1
 if [ ! -d $mountpt ]; then
 	if [ "$mountpt" = "IGNORE" -a "emmc" = "$bootmedium" ];then
 		if [ "$root_dev" = "$part_realdev" ];then
@@ -212,8 +220,8 @@ case "$1" in
 start)
 	linkdev || exit 1
 	mount_part rootfs IGNORE squashfs || exit 1
-	mount_part oem /oem squashfs || exit 1
-	mount_part userdata /userdata ubifs || exit 1
+	mount_part oem "$OEM_MOUNTPOINT" squashfs || exit 1
+	mount_part userdata "$USERDATA_MOUNTPOINT" ubifs || exit 1
 	;;
 linkdev)
 	linkdev || exit 1
