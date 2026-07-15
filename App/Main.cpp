@@ -4,6 +4,7 @@
 #include "Protocol/ProtocolManager.h"
 #include "Protocol/config/LocalConfigProvider.h"
 #include "DM/DmClientService.h"
+#include "Manager/CloudPlatformControl.h"
 #include "ProduceNew/Produce.h"
 #include "ProduceNew/NetWifi.h"
 #include "config/ProtocolExternalConfig.h"
@@ -11,9 +12,6 @@
 #include "Base64Coder.h"
 
 #include "web_server.h"
-
-
-static bool s_bStartCmiot = true;
 
 
 #if 01
@@ -1569,12 +1567,22 @@ bool CSofia::start()
 		g_IndicatorLight.setLightStatus(CIndicatorLight::ENUM_POWER_INDICATOR_LIGHT_ALWAYS_ON);
 		g_IndicatorLight.setLightStatus(CIndicatorLight::ENUM_LINK_INDICATOR_LIGHT_ALWAYS_OFF);
 
-		if (s_bStartCmiot)
+		const CloudPlatformType cloudPlatform = GetCloudPlatform();
+		AppErr("cloud_platform=%s\n", GetCloudPlatformName(cloudPlatform));
+		if (cloudPlatform == CLOUD_PLATFORM_CMIOT)
 		{
 			g_NetConfigHook.SetQrcodeEnable(false);
-			cmiot_start();
+			const int cmiotRet = cmiot_start();
+			if (cmiotRet != 0)
+			{
+				AppErr("cmiot_start failed ret=%d\n", cmiotRet);
+				return false;
+			}
+			while (1)
+			{
+				sleep(1);
+			}
 		}
-		while (1) sleep(1);
 
 
 		
