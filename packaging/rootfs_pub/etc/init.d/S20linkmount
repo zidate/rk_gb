@@ -1,30 +1,71 @@
 #!/bin/sh
 bootmedium=spi_nand
-slot_suffix=_a
-for bootarg in $(cat /proc/cmdline); do
+CMDLINE_FILE=${CMDLINE_FILE:-/proc/cmdline}
+BY_NAME_DIR=${BY_NAME_DIR:-/dev/block/by-name}
+
+select_slot(){
+slot_suffix=
+slot_seen=0
+cmdline=$(cat "$CMDLINE_FILE") || return 1
+for bootarg in $cmdline; do
 case "$bootarg" in
-	androidboot.slot_suffix=_a) slot_suffix=_a ;;
-	androidboot.slot_suffix=_b) slot_suffix=_b ;;
+	androidboot.slot_suffix=_a)
+		new_slot_suffix=_a
+		;;
+	androidboot.slot_suffix=_b)
+		new_slot_suffix=_b
+		;;
+	androidboot.slot_suffix=*)
+		printf 'Invalid androidboot.slot_suffix: %s\n' "$bootarg" >&2
+		return 1
+		;;
+	*)
+		continue
+		;;
 esac
+if [ "$slot_seen" -eq 1 ] && [ "$slot_suffix" != "$new_slot_suffix" ]; then
+	printf 'Conflicting androidboot.slot_suffix values\n' >&2
+	return 1
+fi
+slot_suffix=$new_slot_suffix
+slot_seen=1
 done
+if [ "$slot_seen" -eq 0 ]; then
+	slot_suffix=_a
+fi
+}
+
+make_link(){
+link_target=$1
+link_name=$2
+if [ -L "$link_name" ]; then
+	rm -f "$link_name" || return 1
+elif [ -e "$link_name" ]; then
+	printf 'Refusing to replace non-symlink: %s/%s\n' "$BY_NAME_DIR" "$link_name" >&2
+	return 1
+fi
+ln -s "$link_target" "$link_name" || return 1
+}
+
 linkdev(){
-mkdir -p /dev/block/by-name
-cd /dev/block/by-name
-ln -sf /dev/mtd0 env
-ln -sf /dev/mtd1 idblock
-ln -sf /dev/mtd2 uboot
-ln -sf /dev/mtd3 boot_a
-ln -sf /dev/mtd4 boot_b
-ln -sf /dev/mtd5 rootfs_a
-ln -sf /dev/mtd6 rootfs_b
-ln -sf /dev/mtd7 oem_a
-ln -sf /dev/mtd8 oem_b
-ln -sf /dev/mtd9 reserved
-ln -sf /dev/mtd10 misc
-ln -sf /dev/mtd11 userdata
-ln -sf "boot${slot_suffix}" boot
-ln -sf "rootfs${slot_suffix}" rootfs
-ln -sf "oem${slot_suffix}" oem
+select_slot || return 1
+mkdir -p "$BY_NAME_DIR" || return 1
+cd "$BY_NAME_DIR" || return 1
+make_link /dev/mtd0 env || return 1
+make_link /dev/mtd1 idblock || return 1
+make_link /dev/mtd2 uboot || return 1
+make_link /dev/mtd3 boot_a || return 1
+make_link /dev/mtd4 boot_b || return 1
+make_link /dev/mtd5 rootfs_a || return 1
+make_link /dev/mtd6 rootfs_b || return 1
+make_link /dev/mtd7 oem_a || return 1
+make_link /dev/mtd8 oem_b || return 1
+make_link /dev/mtd9 reserved || return 1
+make_link /dev/mtd10 misc || return 1
+make_link /dev/mtd11 userdata || return 1
+make_link "boot${slot_suffix}" boot || return 1
+make_link "rootfs${slot_suffix}" rootfs || return 1
+make_link "oem${slot_suffix}" oem || return 1
 }
 mount_part(){
 if [ -z "$1" -o -z "$2" -o -z "$3" ];then
@@ -167,9 +208,21 @@ case $bootmedium in
 esac
 fi
 }
-case $1 in start) linkdev;
-mount_part rootfs IGNORE squashfs ;
-mount_part oem /oem squashfs ;
-mount_part userdata /userdata ubifs ;
-;; linkdev) linkdev ;
-;; stop) printf stop $0 finished\n ;; *) echo Usage: $0 {start|stop} exit 1 ;; esac
+case "$1" in
+start)
+	linkdev || exit 1
+	mount_part rootfs IGNORE squashfs || exit 1
+	mount_part oem /oem squashfs || exit 1
+	mount_part userdata /userdata ubifs || exit 1
+	;;
+linkdev)
+	linkdev || exit 1
+	;;
+stop)
+	printf '%s\n' "stop $0 finished"
+	;;
+*)
+	printf 'Usage: %s {start|linkdev|stop}\n' "$0" >&2
+	exit 1
+	;;
+esac
