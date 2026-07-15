@@ -30,8 +30,8 @@ PATCH_CASES = {
 }
 REQUIRED_HEADER_LINES = (
     "#define SPINAND_HAS_BLOCK_PROTECTION BIT(2)",
-    "#define BL_ALL_UNLOCKED 0x00",
-    "#define BL_LOWER_3_4_LOCKED 0x2a",
+    "#define BL_ALL_UNLOCKED\t\t0x00",
+    "#define BL_LOWER_3_4_LOCKED\t0x2a",
     "int spinand_get_block_lock(struct spinand_device *spinand, u8 *lock);",
     "int spinand_set_block_lock(struct spinand_device *spinand, u8 lock);",
 )
@@ -44,11 +44,11 @@ BASELINE_SHA256 = {
     f"{KERNEL_PREFIX}/drivers/mtd/nand/spi/chucun.c": "9b0ed01599eff032899e076c0c4b6a092f57e88f0919329e954b9d491265ab8c",
 }
 PATCHED_SHA256 = {
-    f"{UBOOT_PREFIX}/include/linux/mtd/spinand.h": "6a052bdce15783d481fd99a310cccf60217e0227621ea44c2d34019756a9c7a5",
-    f"{UBOOT_PREFIX}/drivers/mtd/nand/spi/core.c": "3c71aaa7de382ea4fb195fd289bcb74271dcfd1d961142db25645551e56ec0bd",
+    f"{UBOOT_PREFIX}/include/linux/mtd/spinand.h": "6204d6ee13675f64bbcfe5f7fe23deb333ca276d9ef3877f8d65669967b13ef2",
+    f"{UBOOT_PREFIX}/drivers/mtd/nand/spi/core.c": "a30b5e4ac4898469c0f074ff863dde623d24d1ea9a636f79107beea2badda823",
     f"{UBOOT_PREFIX}/drivers/mtd/nand/spi/chucun.c": "1a2c9bee7d42c04c4488bcfacd11aa26a99076a72dd032ca77854a8426c48c18",
-    f"{KERNEL_PREFIX}/include/linux/mtd/spinand.h": "a1e1c72d3c523dc80a4f9f39a5a78df92eff204b55c84dc970d0c99a9bd0693e",
-    f"{KERNEL_PREFIX}/drivers/mtd/nand/spi/core.c": "8ae5de7d2b6558a1cd69fe67f5ba0a875c6ae0d2dd0c68222027a8c3efbfe807",
+    f"{KERNEL_PREFIX}/include/linux/mtd/spinand.h": "fc63df2d1ad068cf9233add92da2c9bf8145cd8eca11a32102d1442f46bf04c2",
+    f"{KERNEL_PREFIX}/drivers/mtd/nand/spi/core.c": "eb9a0df8271eee30c56b4ff2bb48835155526e7473cc1a10fda032c0dac3cbe7",
     f"{KERNEL_PREFIX}/drivers/mtd/nand/spi/chucun.c": "a934235549a8743dcd191bce77918b22d891c262259822d96cc93536912aac35",
 }
 
@@ -229,12 +229,22 @@ class ProtectionPatchTest(unittest.TestCase):
         )
         self.assertIn("for (i = 0; i < nand->memorg.ntargets; i++)", core)
         self.assertIn("spinand_lock_block(spinand, HWP_EN)", core)
-        self.assertIn("spinand_set_block_lock(spinand, BL_ALL_UNLOCKED)", core)
-        self.assertRegex(
+        init = re.search(
+            r"static int spinand_init\(struct spinand_device \*spinand\)"
+            r".*?(?=\nstatic void spinand_cleanup)",
             core,
-            r"if \(spinand->flags & SPINAND_HAS_BLOCK_PROTECTION\)\s*\{?\s*"
-            r"ret = spinand_set_block_lock\(spinand, BL_LOWER_3_4_LOCKED\);",
+            re.DOTALL,
+        ).group(0)
+        policy = init[init.index("/* After power up") : init.index("nand->bbt.option")]
+        self.assertRegex(
+            policy,
+            r"if \(spinand->flags & SPINAND_HAS_BLOCK_PROTECTION\) \{\s*"
+            r"ret = spinand_set_block_lock\(spinand, BL_LOWER_3_4_LOCKED\);"
+            r"\s*} else \{\s*"
+            r"ret = spinand_set_block_lock\(spinand, BL_ALL_UNLOCKED\);\s*}",
         )
+        flagged_branch = policy.split("} else {", 1)[0]
+        self.assertNotIn("BL_ALL_UNLOCKED", flagged_branch)
 
     def test_kernel_helpers_callbacks_init_and_resume_enforce_exact_a0(self):
         core = self.sources[KERNEL_PREFIX]["drivers/mtd/nand/spi/core.c"]
@@ -250,6 +260,8 @@ class ProtectionPatchTest(unittest.TestCase):
         self.assertIn(
             "if (ofs < 0 || len > mtd->size || ofs > mtd->size - len)", core
         )
+        self.assertIn("A0 protection is device-global", core)
+        self.assertIn("ofs and len only validate the master MTD", core)
         self.assertIn("spinand_set_block_lock(spinand, BL_LOWER_3_4_LOCKED)", core)
         self.assertIn("spinand_set_block_lock(spinand, BL_ALL_UNLOCKED)", core)
         self.assertIn("ret = spinand_get_block_lock(spinand, &lock);", core)
@@ -276,16 +288,38 @@ class ProtectionPatchTest(unittest.TestCase):
             r"static void spinand_mtd_resume\(.*?\n}\n", core, re.DOTALL
         ).group(0)
         self.assertIn("spinand_init_flash(spinand)", resume)
+        self.assertRegex(
+            resume,
+            r"if \(ret\) \{\s*dev_err\([\s\S]*?ret\);\s*return;\s*}",
+        )
+        init_flash = re.search(
+            r"static int spinand_init_flash\(struct spinand_device \*spinand\)"
+            r".*?(?=\nstatic void spinand_mtd_resume)",
+            core,
+            re.DOTALL,
+        ).group(0)
+        policy = init_flash[
+            init_flash.index("/* After power up") : init_flash.rindex("\n\tif (ret)\n")
+        ]
+        self.assertRegex(
+            policy,
+            r"if \(spinand->flags & SPINAND_HAS_BLOCK_PROTECTION\) \{\s*"
+            r"ret = spinand_set_block_lock\(spinand, BL_LOWER_3_4_LOCKED\);"
+            r"\s*} else \{\s*"
+            r"ret = spinand_set_block_lock\(spinand, BL_ALL_UNLOCKED\);\s*}",
+        )
+        flagged_branch = policy.split("} else {", 1)[0]
+        self.assertNotIn("BL_ALL_UNLOCKED", flagged_branch)
 
     def test_added_lines_do_not_touch_forbidden_register_policies(self):
         forbidden = ("REG_CFG", "0xb0", "BPL", "WP#")
         for patch_name, changes in self.patch_changes.items():
             added = "\n".join(
                 line for change in changes.values() for line in change["added"]
-            )
+            ).casefold()
             for token in forbidden:
                 with self.subTest(patch=patch_name, token=token):
-                    self.assertNotIn(token, added)
+                    self.assertNotIn(token.casefold(), added)
 
 
 if __name__ == "__main__":

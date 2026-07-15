@@ -1,21 +1,19 @@
 diff --git a/sysdrv/source/kernel/include/linux/mtd/spinand.h b/sysdrv/source/kernel/include/linux/mtd/spinand.h
-index d9b814c..ec3959c 100755
+index d9b814c..43389a9 100755
 --- a/sysdrv/source/kernel/include/linux/mtd/spinand.h
 +++ b/sysdrv/source/kernel/include/linux/mtd/spinand.h
-@@ -151 +151,2 @@
--#define BL_ALL_UNLOCKED		0x00
-+#define BL_ALL_UNLOCKED 0x00
-+#define BL_LOWER_3_4_LOCKED 0x2a
+@@ -151,0 +152 @@
++#define BL_LOWER_3_4_LOCKED	0x2a
 @@ -312,0 +314 @@ struct spinand_ecc_info {
 +#define SPINAND_HAS_BLOCK_PROTECTION BIT(2)
 @@ -516,0 +519,2 @@ int spinand_select_target(struct spinand_device *spinand, unsigned int target);
 +int spinand_get_block_lock(struct spinand_device *spinand, u8 *lock);
 +int spinand_set_block_lock(struct spinand_device *spinand, u8 lock);
 diff --git a/sysdrv/source/kernel/drivers/mtd/nand/spi/core.c b/sysdrv/source/kernel/drivers/mtd/nand/spi/core.c
-index 8e61aa5..33c694a 100755
+index 8e61aa5..e74ae5e 100755
 --- a/sysdrv/source/kernel/drivers/mtd/nand/spi/core.c
 +++ b/sysdrv/source/kernel/drivers/mtd/nand/spi/core.c
-@@ -532,0 +533,81 @@ static int spinand_lock_block(struct spinand_device *spinand, u8 lock)
+@@ -532,0 +533,85 @@ static int spinand_lock_block(struct spinand_device *spinand, u8 lock)
 +int spinand_get_block_lock(struct spinand_device *spinand, u8 *lock)
 +{
 +	return spinand_read_reg_op(spinand, REG_BLOCK_LOCK, lock);
@@ -40,6 +38,10 @@ index 8e61aa5..33c694a 100755
 +static int spinand_mtd_check_lock_range(struct mtd_info *mtd, loff_t ofs,
 +					uint64_t len)
 +{
++	/*
++	 * A0 protection is device-global; ofs and len only validate the master MTD
++	 * request.
++	 */
 +	if (ofs < 0 || len > mtd->size || ofs > mtd->size - len)
 +		return -EINVAL;
 +
@@ -97,17 +99,21 @@ index 8e61aa5..33c694a 100755
 +	return lock == BL_LOWER_3_4_LOCKED ? 1 : 0;
 +}
 +
-@@ -1222 +1303 @@ static int spinand_init_flash(struct spinand_device *spinand)
+@@ -1222 +1307,5 @@ static int spinand_init_flash(struct spinand_device *spinand)
 -		ret = spinand_lock_block(spinand, BL_ALL_UNLOCKED);
-+		ret = spinand_set_block_lock(spinand, BL_ALL_UNLOCKED);
-@@ -1224,0 +1306,6 @@ static int spinand_init_flash(struct spinand_device *spinand)
-+
 +		if (spinand->flags & SPINAND_HAS_BLOCK_PROTECTION) {
 +			ret = spinand_set_block_lock(spinand, BL_LOWER_3_4_LOCKED);
-+			if (ret)
-+				break;
++		} else {
++			ret = spinand_set_block_lock(spinand, BL_ALL_UNLOCKED);
 +		}
-@@ -1318,0 +1406,5 @@ static int spinand_init(struct spinand_device *spinand)
+@@ -1243 +1332,3 @@ static void spinand_mtd_resume(struct mtd_info *mtd)
+-	if (ret)
++	if (ret) {
++		dev_err(&spinand->spimem->spi->dev,
++			"Failed to initialize SPI NAND on resume (err = %d)\n", ret);
+@@ -1244,0 +1336 @@ static void spinand_mtd_resume(struct mtd_info *mtd)
++	}
+@@ -1318,0 +1411,5 @@ static int spinand_init(struct spinand_device *spinand)
 +	if (spinand->flags & SPINAND_HAS_BLOCK_PROTECTION) {
 +		mtd->_lock = spinand_mtd_lock;
 +		mtd->_unlock = spinand_mtd_unlock;

@@ -1,18 +1,16 @@
 diff --git a/sysdrv/source/uboot/u-boot/include/linux/mtd/spinand.h b/sysdrv/source/uboot/u-boot/include/linux/mtd/spinand.h
-index b00a1e8..68c6b7c 100755
+index b00a1e8..4470d1d 100755
 --- a/sysdrv/source/uboot/u-boot/include/linux/mtd/spinand.h
 +++ b/sysdrv/source/uboot/u-boot/include/linux/mtd/spinand.h
-@@ -158 +158,2 @@
--#define BL_ALL_UNLOCKED		0x00
-+#define BL_ALL_UNLOCKED 0x00
-+#define BL_LOWER_3_4_LOCKED 0x2a
+@@ -158,0 +159 @@
++#define BL_LOWER_3_4_LOCKED	0x2a
 @@ -319,0 +321 @@ struct spinand_ecc_info {
 +#define SPINAND_HAS_BLOCK_PROTECTION BIT(2)
 @@ -512,0 +515,2 @@ int spinand_select_target(struct spinand_device *spinand, unsigned int target);
 +int spinand_get_block_lock(struct spinand_device *spinand, u8 *lock);
 +int spinand_set_block_lock(struct spinand_device *spinand, u8 lock);
 diff --git a/sysdrv/source/uboot/u-boot/drivers/mtd/nand/spi/core.c b/sysdrv/source/uboot/u-boot/drivers/mtd/nand/spi/core.c
-index 46b028d..f0bfe82 100755
+index 46b028d..cd0570c 100755
 --- a/sysdrv/source/uboot/u-boot/drivers/mtd/nand/spi/core.c
 +++ b/sysdrv/source/uboot/u-boot/drivers/mtd/nand/spi/core.c
 @@ -495,0 +496,21 @@ static int spinand_lock_block(struct spinand_device *spinand, u8 lock)
@@ -37,15 +35,12 @@ index 46b028d..f0bfe82 100755
 +	return readback == lock ? 0 : -EIO;
 +}
 +
-@@ -1275 +1296 @@ static int spinand_init(struct spinand_device *spinand)
+@@ -1275 +1296,5 @@ static int spinand_init(struct spinand_device *spinand)
 -		ret = spinand_lock_block(spinand, BL_ALL_UNLOCKED);
-+		ret = spinand_set_block_lock(spinand, BL_ALL_UNLOCKED);
-@@ -1277,0 +1299,6 @@ static int spinand_init(struct spinand_device *spinand)
-+
 +		if (spinand->flags & SPINAND_HAS_BLOCK_PROTECTION) {
 +			ret = spinand_set_block_lock(spinand, BL_LOWER_3_4_LOCKED);
-+			if (ret)
-+				goto err_free_bufs;
++		} else {
++			ret = spinand_set_block_lock(spinand, BL_ALL_UNLOCKED);
 +		}
 diff --git a/sysdrv/source/uboot/u-boot/drivers/mtd/nand/spi/chucun.c b/sysdrv/source/uboot/u-boot/drivers/mtd/nand/spi/chucun.c
 index c4f0d34..114613a 100755
