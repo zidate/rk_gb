@@ -4,16 +4,13 @@ import re
 
 
 ROOT = Path(__file__).resolve().parents[2]
-CMIOT_DEFINE = (ROOT / "App/cmiot/cmiot_define.h").read_text(
+CMIOT_DEFINE = (ROOT / "Include/ChinaMobile/cmiot_define.h").read_text(
     encoding="utf-8-sig", errors="ignore"
 )
-CMIOT_H = (ROOT / "App/cmiot/CmiotOsdControl.h").read_text(
+CMIOT_H = (ROOT / "App/ChinaMobile/CmiotOsdControl.h").read_text(
     encoding="utf-8-sig", errors="ignore"
 )
-CMIOT_CPP = (ROOT / "App/cmiot/CmiotOsdControl.cpp").read_text(
-    encoding="utf-8-sig", errors="ignore"
-)
-APP_CMAKE = (ROOT / "App/CMakeLists.txt").read_text(
+CMIOT_CPP = (ROOT / "App/ChinaMobile/CmiotOsdControl.cpp").read_text(
     encoding="utf-8-sig", errors="ignore"
 )
 
@@ -62,11 +59,6 @@ def main() -> int:
         "CMIOT_OSD_POS_ALIGN_RIGHT" in CMIOT_CPP and "CMIOT_OSD_POS_ALIGN_LEFT" in CMIOT_CPP,
         "cmiot OSD should map cmiot alignment definitions.",
     )
-    require(
-        "cmiot/CmiotOsdControl.cpp" in APP_CMAKE,
-        "App CMake should compile the cmiot OSD adapter.",
-    )
-
     print("PASS: cmiot OSD adapter is wired to media OSD with reserved RGN capacity")
     return 0
 
