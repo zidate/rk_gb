@@ -17,6 +17,7 @@ public:
 	void onConfigVideo(const CConfigTable &table, int &ret);
 	void onConfigOSDTime(const CConfigTable &table, int &ret);
 	void onConfigOSDText(const CConfigTable &table, int &ret);
+	int ApplyLocalOsdConfig();
 	bool VideoParamInit();
 	bool VideoInit();
 	bool VideoDeInit();

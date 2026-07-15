@@ -1,5 +1,7 @@
 #include "Common.h"
 
+#include "ChinaMobile/CmiotOsdControl.h"
+
 
 extern "C" {
 int gb_rkipc_osd_common_set(int font_size, const char *font_color_mode, const char *font_color);
@@ -61,6 +63,12 @@ void CAVManager::onConfigOSDTime(const CConfigTable &table, int &ret)
 {
 	OSDTimeConf_S OSDTimeConfig;
     TExchangeAL<OSDTimeConf_S>::getConfig(table, OSDTimeConfig);
+	if (cmiot_osd_is_override_active())
+	{
+		AppInfo("cmiot OSD override active, cache local OSD without applying\n");
+		m_OSDTimeConf = OSDTimeConfig;
+		return;
+	}
 
 	gb_rkipc_osd_common_set(OSDTimeConfig.font_size,
 							OSDTimeConfig.font_color_mode.c_str(),
@@ -79,6 +87,12 @@ void CAVManager::onConfigOSDText(const CConfigTable &table, int &ret)
 {
 	OSDTextAllConf_S OSDTextAllConfig;
     TExchangeAL<OSDTextAllConf_S>::getConfig(table, OSDTextAllConfig);
+	if (cmiot_osd_is_override_active())
+	{
+		AppInfo("cmiot OSD override active, cache local text OSD without applying\n");
+		m_OSDTextAllConf = OSDTextAllConfig;
+		return;
+	}
 
 	for (int i = 0; i < OSD_TEXT_MAX; i++)
 	{
@@ -101,6 +115,39 @@ void CAVManager::onConfigOSDText(const CConfigTable &table, int &ret)
 	m_OSDTextAllConf = OSDTextAllConfig;
 }
 
+int CAVManager::ApplyLocalOsdConfig()
+{
+	int ret = gb_rkipc_osd_common_set(m_OSDTimeConf.font_size,
+									  m_OSDTimeConf.font_color_mode.c_str(),
+									  m_OSDTimeConf.font_color.c_str());
+	if (ret != 0)
+		return ret;
+
+	ret = gb_rkipc_osd_time_set(m_OSDTimeConf.date_type,
+								m_OSDTimeConf.time_type,
+								m_OSDTimeConf.display_week_enabled,
+								m_OSDTimeConf.x,
+								m_OSDTimeConf.y,
+								m_OSDTimeConf.show,
+								m_OSDTimeConf.alignment);
+	if (ret != 0)
+		return ret;
+
+	for (int i = 0; i < OSD_TEXT_MAX; ++i)
+	{
+		const std::string text = hexToStr(m_OSDTextAllConf.osd_text[i].text);
+		ret = gb_rkipc_osd_text_set(i,
+								 text.c_str(),
+								 m_OSDTextAllConf.osd_text[i].x,
+								 m_OSDTextAllConf.osd_text[i].y,
+								 m_OSDTextAllConf.osd_text[i].show,
+								 m_OSDTextAllConf.osd_text[i].alignment);
+		if (ret != 0)
+			return ret;
+	}
+	return 0;
+}
+
 bool CAVManager::VideoParamInit()
 {
 	CConfigTable table;
@@ -119,33 +166,12 @@ bool CAVManager::VideoParamInit()
     TExchangeAL<OSDTimeConf_S>::getConfig(table, m_OSDTimeConf);
 	g_configManager.attach(getConfigName(CFG_OSD_TIME), IConfigManager::Proc(&CAVManager::onConfigOSDTime, this));
 
-	gb_rkipc_osd_common_set(m_OSDTimeConf.font_size,
-							m_OSDTimeConf.font_color_mode.c_str(),
-							m_OSDTimeConf.font_color.c_str());
-	gb_rkipc_osd_time_set(m_OSDTimeConf.date_type,
-						  m_OSDTimeConf.time_type,
-						  m_OSDTimeConf.display_week_enabled,
-						  m_OSDTimeConf.x,
-						  m_OSDTimeConf.y,
-						  m_OSDTimeConf.show,
-						  m_OSDTimeConf.alignment);
-	
 	table.clear();
 	g_configManager.getConfig(getConfigName(CFG_OSD_TEXT), table);
     TExchangeAL<OSDTextAllConf_S>::getConfig(table, m_OSDTextAllConf);
 	g_configManager.attach(getConfigName(CFG_OSD_TEXT), IConfigManager::Proc(&CAVManager::onConfigOSDText, this));
-	
-	for (int i = 0; i < OSD_TEXT_MAX; i++)
-	{
-		printf("VideoParamInit -> [%s]\n", m_OSDTextAllConf.osd_text[i].text.c_str());
-		std::string src_str = hexToStr(m_OSDTextAllConf.osd_text[i].text);
-		gb_rkipc_osd_text_set(i,
-							  src_str.c_str(),
-							  m_OSDTextAllConf.osd_text[i].x,
-							  m_OSDTextAllConf.osd_text[i].y,
-							  m_OSDTextAllConf.osd_text[i].show,
-							  m_OSDTextAllConf.osd_text[i].alignment);
-	}
+	if (!cmiot_osd_is_override_active() && ApplyLocalOsdConfig() != 0)
+		return false;
 	return true;
 }
 

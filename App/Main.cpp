@@ -5,6 +5,7 @@
 #include "Protocol/config/LocalConfigProvider.h"
 #include "DM/DmClientService.h"
 #include "Manager/CloudPlatformControl.h"
+#include "ChinaMobile/CmiotOsdControl.h"
 #include "ProduceNew/Produce.h"
 #include "ProduceNew/NetWifi.h"
 #include "config/ProtocolExternalConfig.h"
@@ -1571,6 +1572,9 @@ bool CSofia::start()
 		AppErr("cloud_platform=%s\n", GetCloudPlatformName(cloudPlatform));
 		if (cloudPlatform == CLOUD_PLATFORM_CMIOT)
 		{
+			const int osdRet = cmiot_osd_initialize();
+			if (osdRet != 0)
+				AppErr("cmiot_osd_initialize failed ret=%d\n", osdRet);
 			g_NetConfigHook.SetQrcodeEnable(false);
 			const int cmiotRet = cmiot_start();
 			if (cmiotRet != 0)

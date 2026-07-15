@@ -1,6 +1,8 @@
 /* 在调用 RV1106 RK OSD 接口前完成坐标和字符边距换算。 */
 #include "NormalizedOsdControl.h"
 
+#include <stdint.h>
+
 #include "PAL/Capture.h"
 
 extern "C" {
