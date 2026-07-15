@@ -140,7 +140,10 @@ set(Media_SRC
 #set(Media_SRC ${Media_SRC} Media/AnBaoLightManager.cpp)
 
 #Manager模块
-set(Manager_SRC Manager/ManagerDefaultConfig.cpp)
+set(Manager_SRC
+	Manager/ManagerDefaultConfig.cpp
+	Manager/CloudPlatformControl.cpp
+)
 #Tuya模块
 set(Tuya_SRC tuya/Tuya.cpp
 	tuya/Tuya_common.cpp

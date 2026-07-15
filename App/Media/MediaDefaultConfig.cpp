@@ -1,5 +1,7 @@
 #include "MediaDefaultConfig.h"
 
+#include "Manager/CloudPlatformControl.h"
+
 extern int g_nCapture;
 extern int g_nDecorder;
 extern int g_nDigital;
@@ -29,6 +31,8 @@ bool CMediaDefaultConfig::start()
 	setOSDText();
 	setCmiot();
 	setCmiotIntrude();
+	setCloudPlatform();
+	setCmiotOsd();
 	return true;
 }
 
@@ -323,6 +327,25 @@ void CMediaDefaultConfig::setCmiotIntrude()
 	table["intrude_sound_light_alarm"] = 0;
 	g_configManager.setDefault(getConfigName(CFG_CMIOT_INTRUDE), table);
  }
+
+void CMediaDefaultConfig::setCloudPlatform()
+{
+	CConfigTable table;
+	table["platform"] = CLOUD_PLATFORM_GB28181;
+	g_configManager.setDefault(getConfigName(CFG_CLOUD_PLATFORM), table);
+}
+
+void CMediaDefaultConfig::setCmiotOsd()
+{
+	CConfigTable table;
+	table["valid"] = false;
+	table["osd_switch"] = 0;
+	table["mode"] = 1;
+	table["custom_text"] = Json::arrayValue;
+	table["district_text"] = Json::arrayValue;
+	table["addition_text"] = Json::arrayValue;
+	g_configManager.setDefault(getConfigName(CFG_CMIOT_OSD), table);
+}
 
 
 

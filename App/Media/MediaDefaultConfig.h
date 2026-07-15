@@ -28,6 +28,8 @@ public:
 	void setOSDText();
 	void setCmiot();
 	void setCmiotIntrude();
+	void setCloudPlatform();
+	void setCmiotOsd();
 private:
 	void SetEventHandler(CConfigTable &table);
 };
