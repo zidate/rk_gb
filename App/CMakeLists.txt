@@ -165,7 +165,7 @@ set(Tuya_SRC tuya/Tuya.cpp
 )
 
 #ChinaMobile模块
-set(CM_SRC ChinaMobile/cmiot_demo.cpp ChinaMobile/demo_callback.cpp ChinaMobile/demo_socket.cpp ChinaMobile/dev_log.cpp ChinaMobile/dev_log_test.cpp
+set(CM_SRC ChinaMobile/cmiot_demo.cpp ChinaMobile/demo_callback.cpp ChinaMobile/CmiotOsdControl.cpp ChinaMobile/demo_socket.cpp ChinaMobile/dev_log.cpp ChinaMobile/dev_log_test.cpp
 	ChinaMobile/ntp/ntp.cpp ChinaMobile/ntp/TPUdp.c ChinaMobile/ntp/TPSocket.c)
 
 #Net模块

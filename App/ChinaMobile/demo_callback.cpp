@@ -1,5 +1,6 @@
 #include "demo_public.h"
 #include "dev_log.h"
+#include "CmiotOsdControl.h"
 #include "Common.h"
 #include <sys/vfs.h>    /* or <sys/statfs.h> */
 #include <resolv.h>
@@ -940,62 +941,16 @@ next:
 
         case CMIOT_CMD_SET_OSD:
         {
-            int i = 0;
-            cmiotOSDInfo_t *info = (cmiotOSDInfo_t *)input;
-            DEMO_PRINT("get cmd ********** CMIOT_CMD_SET_OSD switch=%d **********\n", info->osdSwitch);
-            if(info->osdSwitch)
+            if (input == NULL)
             {
-                DEMO_PRINT("OSD date status:%s, date format:%s, time format:%u, weekday:%u\n", info->date.status, info->date.dateFormat, \
-                info->date.timeFormat, info->date.weekday);
-                if(info->mode == 1)
-                {
-                    if(info->date.pos.alignSet == CMIOT_OSD_POS_ALIGN_LEFT)
-                    {
-                        DEMO_PRINT("OSD date left align, pos y:(%u) ,align pos:(%.1f)\n", info->date.pos.y, info->date.pos.alignPos);
-                    }
-                    else if(info->date.pos.alignSet == CMIOT_OSD_POS_ALIGN_RIGHT)
-                    {
-                        DEMO_PRINT("OSD date right align, pos y:(%u) ,align pos:(%.1f)\n", info->date.pos.y, info->date.pos.alignPos);
-                    }
-                    else
-                    {
-                        DEMO_PRINT("OSD date pos:(%u, %u)\n", info->date.pos.x, info->date.pos.y);
-                    }
-                    for(i = 0; i < info->osdText.customText.textNum; i++)
-                    {
-                        DEMO_PRINT("OSD text[%d] content:%s\n", i, info->osdText.customText.text[i].content);
-                        if(info->osdText.customText.text[i].pos.alignSet == CMIOT_OSD_POS_ALIGN_LEFT)
-                        {
-                            DEMO_PRINT("OSD text[%d] left align, pos y:(%u) ,align pos:(%.1f)\n", i, info->osdText.customText.text[i].pos.y, info->osdText.customText.text[i].pos.alignPos);
-                        }
-                        else if(info->osdText.customText.text[i].pos.alignSet == CMIOT_OSD_POS_ALIGN_RIGHT)
-                        {
-                            DEMO_PRINT("OSD text[%d] right align, pos y:(%u) ,align pos:(%.1f)\n", i, info->osdText.customText.text[i].pos.y, info->osdText.customText.text[i].pos.alignPos);
-                        }
-                        else
-                        {
-                            DEMO_PRINT("OSD text[%d] pos:(%u, %u)\n", i, info->osdText.customText.text[i].pos.x, info->osdText.customText.text[i].pos.y);
-                        }
-                    }
-                }
-                else if(info->mode == 2)
-                {
-                    DEMO_PRINT("GB OSD date pos:[↗](%.1f, %.1f)\n", info->date.gbPos.sideSpace, info->date.gbPos.vertSpace);
-                    for(i = 0; i < info->osdText.gbText.districtText.textNum; i++)
-                    {
-                        DEMO_PRINT("GB OSD District text[%d] content:%s\n", i, info->osdText.gbText.districtText.text[i].content);
-                    }
-                    DEMO_PRINT("GB OSD District Text pos:[↘](side=%.1f, vert=%.1f, line=%.1f)\n", info->osdText.gbText.districtText.textPos.sideSpace, info->osdText.gbText.districtText.textPos.vertSpace, info->osdText.gbText.districtText.textPos.lineSpace);
-                    for(i = 0; i < info->osdText.gbText.additionText.textNum; i++)
-                    {
-                        DEMO_PRINT("GB OSD Addition Text text[%d] content:%s\n", i, info->osdText.gbText.additionText.text[i].content);
-                    }
-                    DEMO_PRINT("GB OSD Addition Text pos:[↙](side=%.1f, vert=%.1f, line=%.1f)\n", info->osdText.gbText.additionText.textPos.sideSpace, info->osdText.gbText.additionText.textPos.vertSpace, info->osdText.gbText.additionText.textPos.lineSpace);
-                }
-                
-                DEMO_PRINT("OSD font size:%u, font color:%s\n", info->fontSize, info->fontColor);
+                DEMO_PRINT("CMIOT_CMD_SET_OSD invalid input\n");
+                return -1;
             }
-            break;
+            cmiotOSDInfo_t* info = static_cast<cmiotOSDInfo_t*>(input);
+            const int ret = cmiot_osd_set_config(info);
+            DEMO_PRINT("CMIOT_CMD_SET_OSD switch=%d mode=%u ret=%d\n",
+                       info->osdSwitch, info->mode, ret);
+            return ret;
         }
 
         case CMIOT_CMD_SET_AI_MASK_DETECTION_STATUS:
