@@ -10,7 +10,7 @@ namespace protocol
 
 static const char* const kGbRegisterModeStandard = "standard";
 static const char* const kGbRegisterModeZeroConfig = "zero_config";
-static const char* const kProtocolDefaultVersion = "1.0.6";
+static const char* const kProtocolDefaultVersion = "1.0.7";
 static const char* const kGbDefaultCustomProtocolVersion = "3.0";
 static const char* const kGbDefaultManufacturer = "CMIoT";
 static const char* const kGbDefaultModel = "C4611";

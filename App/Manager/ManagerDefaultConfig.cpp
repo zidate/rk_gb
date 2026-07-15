@@ -62,6 +62,7 @@ void CDefaultConfig::NetWork()
 	NetWifi[Json::StaticString("HostIP")] = Json::StaticString("");
 	NetWifi[Json::StaticString("Submask")] = Json::StaticString("");	
 	NetWifi[Json::StaticString("DNS")] = Json::StaticString("");	
+	NetWifi[Json::StaticString("Bind")] = false;
 	g_configManager.setDefault(getConfigName(CFG_WIFI), NetWifi);
 
 	//AP模式配置
@@ -96,6 +97,7 @@ void CDefaultConfig::Camera()		// HI3518平台摄像头参数
 		table[i]["RotateAttr"] = RA_NONE;		
 		table[i]["WDRSwitch"] = 0;
         table[i]["OSDSwitch"] = 1;
+        table[i]["nightVisionSwitch"] = 1;
         table[i]["NightVisionMode"] = 0;
         table[i]["AntiFlicker"] = 0;
         table[i]["mirror"] = 0;

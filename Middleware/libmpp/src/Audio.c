@@ -41,6 +41,11 @@ int AudioDestory(void)
 
 }
 
+void AudioMicEnable(int en)
+{
+	rk_audio_set_mic_enable(en);
+}
+
 int AudioSwitch(unsigned int dwType, unsigned int dwChannel)
 {
 	return 0;

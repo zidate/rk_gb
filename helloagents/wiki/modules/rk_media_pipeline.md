@@ -6,7 +6,7 @@
 ## 模块概述
 - **职责:** 说明视频/音频数据如何从 RK 媒体抽象层进入实时预览、录像、回放和协议发送
 - **状态:** ✅稳定
-- **最后更新:** 2026-07-08
+- **最后更新:** 2026-07-13
 - **代码真实来源:** `Middleware/Include/PAL/Capture.h`、`Middleware/Include/PAL/libdmc.h`、`App/Media/*`、`App/Storage/*`、`App/Protocol/ProtocolManager.cpp`
 
 ## 规范
@@ -124,6 +124,7 @@ flowchart TD
 | 时间 OSD | `CFG_OSD_TIME` | `AVManager::VideoParamInit()` / `onConfigOSDTime()` 先调 `gb_rkipc_osd_common_set()`，再调 `gb_rkipc_osd_time_set()` |
 | 文本 OSD | `CFG_OSD_TEXT` | `AVManager::VideoParamInit()` / `onConfigOSDText()` 调 `gb_rkipc_osd_text_set()`，RV1106 侧使用 `1-7` 号区域显示最多 `7` 条文本 |
 | GB/外部 OSD 状态 | `VideoOsdControl` 承载多文本、日期/时间格式、星期、字体、颜色、坐标和对齐 | 外部 x/y 统一为 `0-10000` 归一化坐标，媒体层按主码流分辨率换算到底层像素 |
+| cmiot OSD 适配 | `App/cmiot/CmiotOsdControl.*` 对外提供 `cmiot_osd_set_config()` / `cmiot_osd_get_config()` | 时间/字体复用 `VideoOsdControl`；文本只更新 `CFG_OSD_TEXT` 的 `0-4` 槽，避免占用下层映射到硬件 RGN `6/7` 的文本区域 |
 | 翻转 | `CFG_CAMERA_PARAM -> CameraParamAll.vCameraParamAll[0].mirror/flip` | `VideoImageControl::ApplyVideoImageFlipMode()` 写配置并触发 `applyOK` |
 
 RV1106 的 OSD 字体仍走 ARGB8888 FreeType 位图路径。`font_color_mode=auto` 时，RK 层会从 `VIDEO_PIPE_1` 取一帧 NV12，按 Y 平面下采样生成亮/暗 map，再在 `font_factory` 逐字符回调里选择黑色或白色；取不到帧或格式不匹配时不阻塞刷新，字符颜色回退为白色。
@@ -156,6 +157,7 @@ RV1106 的 OSD 字体仍走 ARGB8888 FreeType 位图路径。`font_color_mode=au
 - `App/Protocol/gb28181/GB28181RtpPsSender.*`
 
 ## 变更历史
+- 2026-07-13: 增加 cmiot OSD 适配记录：接口位于 `App/cmiot`，复用既有 OSD 配置链路，同时在 cmiot 应用逻辑中保留 RGN 6/7 给后续位图叠加。
 - 2026-07-08: 补齐 RV1106 OSD 自动黑白：`font_color_mode=auto` 从子码流 VI NV12 Y 平面采样亮度，并在 ARGB8888 FreeType 绘制中逐字符选择黑/白，失败时白色兜底。
 - 2026-05-16: 补充 GB 回放单文件 EOF 主动 EOS 口径，明确 Storage NULL 回调到 `MediaStatus 121/eos` 的链路。
 - 2026-05-16: 新增 RK 媒体链路知识库，沉淀 PAL/DMC、编码配置、实时流、录像、回放/下载和 OSD/翻转边界。

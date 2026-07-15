@@ -110,6 +110,28 @@ typedef struct
 typedef void (* CaptureMotionTrackerCallback)(MOTION_TRACKER_RESULT result);
 
 
+// 整数坐标点
+typedef struct {
+    int x;
+    int y;
+} CmiotPoint_t;
+
+// 轴对齐矩形：min左上角，max右下角
+typedef struct {
+    CmiotPoint_t min;
+    CmiotPoint_t max;
+} CmiotRect_t;
+
+// 任意四边形（不规则4点区域）
+typedef struct {
+    CmiotPoint_t p[4];
+} CmiotQuad_t;
+/*
+ *@param type 1-人形 2-入侵 3-运动
+ */
+typedef void(* cmoit_intrude_event_start_callback_t)(int type, char *pic, int pic_size, uint64_t utcms);
+typedef void(* cmoit_intrude_event_stop_callback_t)(int type, uint64_t utcms);
+
 int AVSetLogLevel(int level);
 int AvInit(float sd,int ispmode);
 int AvRelease();

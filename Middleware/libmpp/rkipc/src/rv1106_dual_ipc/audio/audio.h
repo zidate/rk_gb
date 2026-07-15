@@ -24,6 +24,8 @@ int rk_audio_set_encode_type(int stream_id, const char *value);
 int rk_audio_set_ai_volume(int ai);
 int rk_audio_set_ao_volume(int ao);
 
+
+void rk_audio_set_mic_enable(int en);
 #if 0
 //aac
 int rk_audio_aac_encode_deinit();

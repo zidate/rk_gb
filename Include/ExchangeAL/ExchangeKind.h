@@ -69,6 +69,8 @@ enum ConfigKinds
 	CFG_AUDIO, 			//音频
 	CFG_OSD_TIME, 		//OSD 时间
 	CFG_OSD_TEXT, 		//OSD 自定义文字
+	CFG_CMIOT, 			//千里眼
+	CFG_CMIOT_INTRUDE, 	//千里眼 入侵配置
 	CFG_NR,
 };
 

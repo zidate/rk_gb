@@ -183,8 +183,8 @@ static VI_CHAN_PARAM_T s_vi_chan_param[3] = {
 		.max_height = 720,
 		.width = 1280,
 		.height = 720,
-		.buf_cnt = 2,
-		.depth = 1,
+		.buf_cnt = 3,
+		.depth = 2,
 		.frmae_rate = 15,
 	},
 	{
@@ -441,6 +441,8 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 	},
 };
 
+static pthread_mutex_t g_snap_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 // -----------------------------------------------------------------------
 // 新增代码 结束
 
@@ -591,7 +593,7 @@ static void *rkipc_get_venc_0(void *arg) {
 							timestamp,
 							data,
 							stFrame.pstPack->u32Len,
-							end_flag);
+							/*end_flag*/(stFrame.pstPack->u64PTS/1000));
 			}
 			else
 				LOG_ERROR("RK_MPI_MB_Handle2VirAddr failed\n");
@@ -950,7 +952,7 @@ static void *rkipc_get_venc_1(void *arg) {
 							timestamp,
 							data,
 							stFrame.pstPack->u32Len,
-							end_flag);
+							/*end_flag*/(stFrame.pstPack->u64PTS/1000));
 			}
 			else
 				LOG_ERROR("RK_MPI_MB_Handle2VirAddr failed\n");
@@ -6480,6 +6482,325 @@ static int s_thum_count = 0;
 static char s_thum_data[MAX_THUM_NUM][MAX_THUM_SIZE];
 static DET_THUM_S s_thum_inof[MAX_THUM_NUM];
 static CaptureDetectSnapCallback s_det_snap_cb = NULL;
+
+/*
+ *@param type 1-人形 2-入侵 3-运动
+ */
+static cmoit_intrude_event_start_callback_t s_cmoit_intrude_event_start_cb = NULL;
+static cmoit_intrude_event_stop_callback_t s_cmoit_intrude_event_stop_cb = NULL;
+
+static CmiotQuad_t s_cmiot_intrude_det_rect = {{{0, 0}, {1000, 0}, {1000, 1000}, {0, 1000}}};
+static int s_cmoit_person_report_en = 1;
+static int s_cmoit_person_report_interval = 60; //单位秒
+static int s_cmoit_intrude_report_en = 1;
+static int s_cmoit_intrude_report_interval = 60; //单位秒
+static int s_cmoit_real_time_frame = 0;
+
+
+// 向量叉积 (b-a) × (c-a)，纯int运算
+static int cross(const CmiotPoint_t a, const CmiotPoint_t b, const CmiotPoint_t c)
+{
+    return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
+}
+
+// 两点距离平方，用于判断点在线段上
+static int dist2(const CmiotPoint_t a, const CmiotPoint_t b)
+{
+    int dx = a.x - b.x;
+    int dy = a.y - b.y;
+    return dx * dx + dy * dy;
+}
+
+// 快速排斥实验辅助：获取区间最小最大值
+static inline int imin(int a, int b) { return a < b ? a : b; }
+static inline int imax(int a, int b) { return a > b ? a : b; }
+
+// 处理顶点落在另一条线段上的相切情况
+static bool PointOnSeg(CmiotPoint_t p, CmiotPoint_t s0, CmiotPoint_t s1)
+{
+	if (cross(s0, s1, p) != 0) return false;
+	int d0 = dist2(p, s0);
+	int d1 = dist2(p, s1);
+	int dSeg = dist2(s0, s1);
+	return (d0 + d1 <= dSeg);
+}
+
+// 判断两条线段是否相交（含端点接触）
+static bool segmentIntersect(CmiotPoint_t a1, CmiotPoint_t a2, CmiotPoint_t b1, CmiotPoint_t b2)
+{
+    // 快速排斥：包围盒无重叠直接不相交
+    int aMinX = imin(a1.x, a2.x);
+    int aMaxX = imax(a1.x, a2.x);
+    int aMinY = imin(a1.y, a2.y);
+    int aMaxY = imax(a1.y, a2.y);
+
+    int bMinX = imin(b1.x, b2.x);
+    int bMaxX = imax(b1.x, b2.x);
+    int bMinY = imin(b1.y, b2.y);
+    int bMaxY = imax(b1.y, b2.y);
+
+    if (aMinX > bMaxX || aMaxX < bMinX) return false;
+    if (aMinY > bMaxY || aMaxY < bMinY) return false;
+
+    // 跨立实验
+    int c1 = cross(a1, a2, b1);
+    int c2 = cross(a1, a2, b2);
+    int c3 = cross(b1, b2, a1);
+    int c4 = cross(b1, b2, a2);
+
+    // 标准线段相交（互相跨立）
+    if ((c1 * c2 < 0) && (c3 * c4 < 0))
+        return true;
+
+    if (PointOnSeg(b1, a1, a2)) return true;
+    if (PointOnSeg(b2, a1, a2)) return true;
+    if (PointOnSeg(a1, b1, b2)) return true;
+    if (PointOnSeg(a2, b1, b2)) return true;
+
+    return false;
+}
+
+// 射线法判断整数点是否在四边形内部/边上
+static bool pointInQuad(const CmiotPoint_t p, const CmiotQuad_t* quad)
+{
+    bool inside = false;
+    for (int i = 0, j = 3; i < 4; j = i++)
+    {
+        CmiotPoint_t vi = quad->p[i];
+        CmiotPoint_t vj = quad->p[j];
+
+        // 点在线段边上
+        if (cross(vi, vj, p) == 0)
+        {
+            int d0 = dist2(p, vi);
+            int d1 = dist2(p, vj);
+            int dSeg = dist2(vi, vj);
+            if (d0 + d1 <= dSeg)
+                return true;
+        }
+
+        // 水平向右射线穿过边
+        if (((vi.y > p.y) != (vj.y > p.y)))
+        {
+            // 求交点X坐标，用乘法避免浮点除法
+            long long lhs = (long long)(p.y - vi.y) * (vj.x - vi.x);
+            long long rhs = (long long)(vj.y - vi.y) * (p.x - vi.x);
+            if (lhs < rhs)
+                inside = !inside;
+        }
+    }
+    return inside;
+}
+
+// 计算四边形包围盒AABB
+static CmiotRect_t getQuadAABB(const CmiotQuad_t* quad)
+{
+    CmiotRect_t box;
+    box.min.x = box.max.x = quad->p[0].x;
+    box.min.y = box.max.y = quad->p[0].y;
+    for (int i = 1; i < 4; i++)
+    {
+        if (quad->p[i].x < box.min.x) box.min.x = quad->p[i].x;
+        if (quad->p[i].x > box.max.x) box.max.x = quad->p[i].x;
+        if (quad->p[i].y < box.min.y) box.min.y = quad->p[i].y;
+        if (quad->p[i].y > box.max.y) box.max.y = quad->p[i].y;
+    }
+    return box;
+}
+
+// 两个AABB矩形是否重叠
+static bool aabbOverlap(const CmiotRect_t* r1, const CmiotRect_t* r2)
+{
+    if (r1->max.x < r2->min.x) return false;
+    if (r1->min.x > r2->max.x) return false;
+    if (r1->max.y < r2->min.y) return false;
+    if (r1->min.y > r2->max.y) return false;
+    return true;
+}
+
+// 核心：单个矩形与不规则四边形是否相交/重合
+static bool rectOverlapQuad(const CmiotRect_t* rect, const CmiotQuad_t* quad)
+{
+    // 包围盒快速过滤
+    CmiotRect_t quadBox = getQuadAABB(quad);
+    if (!aabbOverlap(rect, &quadBox))
+        return false;
+
+    // 矩形四个顶点
+    CmiotPoint_t rectPts[4] = {
+        {rect->min.x, rect->min.y},
+        {rect->max.x, rect->min.y},
+        {rect->max.x, rect->max.y},
+        {rect->min.x, rect->max.y}
+    };
+
+    // 1. 四边形任意顶点落在矩形内部
+    for (int i = 0; i < 4; i++)
+    {
+        CmiotPoint_t p = quad->p[i];
+        if (p.x >= rect->min.x && p.x <= rect->max.x &&
+            p.y >= rect->min.y && p.y <= rect->max.y)
+        {
+            return true;
+        }
+    }
+
+    // 2. 矩形任意顶点落在四边形内部
+    for (int i = 0; i < 4; i++)
+    {
+        if (pointInQuad(rectPts[i], quad))
+            return true;
+    }
+
+    // 3. 四边形边与矩形边相交
+    CmiotPoint_t quadEdges[4][2] = {
+        {quad->p[0], quad->p[1]},
+        {quad->p[1], quad->p[2]},
+        {quad->p[2], quad->p[3]},
+        {quad->p[3], quad->p[0]}
+    };
+    CmiotPoint_t rectEdges[4][2] = {
+        {rectPts[0], rectPts[1]},
+        {rectPts[1], rectPts[2]},
+        {rectPts[2], rectPts[3]},
+        {rectPts[3], rectPts[0]}
+    };
+
+    for (int q = 0; q < 4; q++)
+    {
+        for (int r = 0; r < 4; r++)
+        {
+            if (segmentIntersect(quadEdges[q][0], quadEdges[q][1],
+                                 rectEdges[r][0], rectEdges[r][1]))
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+void rk_video_set_cmoit_intrude_event_param(CmiotQuad_t det_rect, int person_en, int person_interval, 
+															int intrude_en, int intrude_interval, int frame)
+{
+	s_cmiot_intrude_det_rect = det_rect;
+	s_cmoit_person_report_en = person_en;
+	s_cmoit_person_report_interval = person_interval;
+	s_cmoit_intrude_report_en = intrude_en;
+	s_cmoit_intrude_report_interval = intrude_interval;
+	s_cmoit_real_time_frame = frame;
+}
+
+void rk_video_set_cmoit_intrude_event_callback(cmoit_intrude_event_start_callback_t start_cb, 
+																cmoit_intrude_event_stop_callback_t stop_cb)
+{
+	s_cmoit_intrude_event_start_cb = start_cb;
+	s_cmoit_intrude_event_stop_cb = stop_cb;
+}
+
+static void cmoit_intrude_person_event_proc(int type, char *pic, int pic_size, uint64_t utcms)
+{
+	static int person_event_start = 0;
+	static uint64_t person_event_report_utcms = 0;
+	static long long person_trigger_last_time = 0;
+	
+	struct timeval tv = {0};
+
+	int person_result = type & 0x01;
+
+	if (0 == s_cmoit_person_report_en)
+		person_result = 0;
+
+	if(person_result)
+	{
+		person_trigger_last_time = rkipc_get_curren_time_ms();
+
+		#if 0
+		if ((0 == person_event_report_utcms) || 
+			(utcms > (person_event_report_utcms + s_cmoit_person_report_interval * 1000)))
+		#else
+		if (0 == person_event_start)
+		#endif
+		{
+			if (s_cmoit_intrude_event_start_cb)
+			{
+				s_cmoit_intrude_event_start_cb(1, pic, pic_size, utcms);
+				person_event_report_utcms = utcms;
+				person_event_start = 1;
+			}
+		}
+	}
+	else
+	{
+//		printf("person_event_start: %d, rkipc_get_curren_time_ms(): %lld, person_trigger_last_time: %lld\n", person_event_start, rkipc_get_curren_time_ms(), person_trigger_last_time);
+		if (person_event_start && 
+			(rkipc_get_curren_time_ms() > (person_trigger_last_time + 10*1000)))
+		{
+			if (s_cmoit_intrude_event_stop_cb)
+			{
+				gettimeofday(&tv, NULL);
+				utcms = ((unsigned long long)tv.tv_sec * 1000 + tv.tv_usec / 1000);
+				s_cmoit_intrude_event_stop_cb(1, utcms);
+			}
+			person_event_start = 0;
+		}
+	}
+}
+
+static void cmoit_intrude_event_proc(RockIvaBaObjectInfo *pRkIvaObj, uint32_t objNum, char *pic, int pic_size, uint64_t utcms)
+{	
+//	static int intrude_event_start = 0;
+	static uint64_t intrude_event_report_time = 0;
+
+	CmiotRect_t stObjRect;
+	int intrude_result = 0;
+
+	if (0 == s_cmoit_intrude_report_en)
+		return ;
+
+	//判断是否入侵
+	for (int i = 0; i < objNum; i++)
+	{
+		if (ROCKIVA_OBJECT_TYPE_PERSON != pRkIvaObj[i].objInfo.type)
+			continue;
+
+		stObjRect.min.x = pRkIvaObj[i].objInfo.rect.topLeft.x / 10;
+		stObjRect.min.y = pRkIvaObj[i].objInfo.rect.topLeft.y / 10;
+		stObjRect.max.x = pRkIvaObj[i].objInfo.rect.bottomRight.x / 10;
+		stObjRect.max.y = pRkIvaObj[i].objInfo.rect.bottomRight.y / 10;
+
+		bool overlap = rectOverlapQuad(&stObjRect, &s_cmiot_intrude_det_rect);
+		printf("obj[%d]: [%d, %d], [%d, %d]  quad: [%d, %d], [%d, %d], [%d, %d], [%d, %d] --- overlap: %d\n", 
+			i, stObjRect.min.x, stObjRect.min.y, stObjRect.max.x, stObjRect.max.y, 
+			s_cmiot_intrude_det_rect.p[0].x, s_cmiot_intrude_det_rect.p[0].y, 
+			s_cmiot_intrude_det_rect.p[1].x, s_cmiot_intrude_det_rect.p[1].y, 
+			s_cmiot_intrude_det_rect.p[2].x, s_cmiot_intrude_det_rect.p[2].y, 
+			s_cmiot_intrude_det_rect.p[3].x, s_cmiot_intrude_det_rect.p[3].y, 
+			overlap);
+        if (overlap)
+        {
+			intrude_result = 1;
+			break;
+        }
+	}
+
+	if (0 == intrude_result)
+		return ;
+
+	printf("intrude_event_report_time: %lld, utcms: %llu\n", intrude_event_report_time, utcms);
+	if ((0 == intrude_event_report_time) || 
+		(utcms > (intrude_event_report_time + s_cmoit_intrude_report_interval * 1000)))
+	{
+		if (s_cmoit_intrude_event_start_cb)
+		{
+			s_cmoit_intrude_event_start_cb(2, pic, pic_size, utcms);
+			intrude_event_report_time = utcms;
+		}
+	}
+}
+
+
 #if 01
 //iva
 static void gb_person_cb(int status,RockIvaRectangle rect)
@@ -6744,6 +7065,10 @@ static void *thread_gb_det_proc(void *arg) {
 	int snap_succ;
 	long long last_snap_time = -1;
 
+	//cmiot
+	uint64_t cmiot_event_utcms;
+	struct timeval tv = {0};
+
 	stVencFrame.pstPack = malloc(sizeof(VENC_PACK_S));
 	if (NULL ==  stVencFrame.pstPack) {
 		LOG_ERROR("malloc stVencFrame.pstPack failure\n");
@@ -6864,20 +7189,28 @@ static void *thread_gb_det_proc(void *arg) {
 			goto NEXT;
 		}
 		
+		pthread_mutex_lock(&g_snap_mutex); // lock
+		
 		LOG_INFO("send frame to venc[2]...\n");		
 		//编码大图
 		ret = RK_MPI_VENC_SendFrame(s_jpeg_venc_chan_param[0].channel, &stJpgViFrame, 1000);
 		if (ret != RK_SUCCESS) {
 			RK_LOGE("RK_MPI_VENC_SendFrame failure:%X pipe:%d chnid:%d", ret, 0, s_jpeg_venc_chan_param[0].channel);
+			pthread_mutex_unlock(&g_snap_mutex); // unlock
 			goto NEXT;
 		}
 		LOG_INFO("get frame from venc[2]...\n");
 		ret = RK_MPI_VENC_GetStream(s_jpeg_venc_chan_param[0].channel, &stVencFrame, 1000);
 		if (ret != RK_SUCCESS) {
 			RK_LOGE("RK_MPI_VENC_GetStream failure:%X pipe:%d chnid:%d", ret, 0, s_jpeg_venc_chan_param[0].channel);
+			pthread_mutex_unlock(&g_snap_mutex); // unlock
 			goto NEXT;
 		}
 		LOG_INFO("get frame from venc[2] succ...\n");
+
+		gettimeofday(&tv, NULL);
+		cmiot_event_utcms = ((unsigned long long)tv.tv_sec * 1000 + tv.tv_usec / 1000);
+		
 		data = RK_MPI_MB_Handle2VirAddr(stVencFrame.pstPack->pMbBlk);
 		if (stVencFrame.pstPack->u32Len <= MAX_MAIN_JPG_SIZE)
 		{
@@ -6906,6 +7239,8 @@ static void *thread_gb_det_proc(void *arg) {
 		ret = RK_MPI_VENC_ReleaseStream(s_jpeg_venc_chan_param[0].channel, &stVencFrame);
 		if (ret != RK_SUCCESS) 
 			LOG_ERROR("RK_MPI_VENC_ReleaseStream chan[%d] fail %x\n", s_jpeg_venc_chan_param[0].channel, ret);
+
+		pthread_mutex_unlock(&g_snap_mutex); // unlock
 
 		if (0 == snap_succ)
 		{
@@ -7060,11 +7395,22 @@ NEXT:
 		gb_vehicle_cb(vehicle_triggered, stEmptyRect);
 		gb_non_vehicle_cb(non_vehicle_triggered, stEmptyRect);
 
-		if (snap_succ && s_det_snap_cb)
+		if (snap_succ)
 		{
-			//回调图片
-			s_det_snap_cb(&s_main_jpg_info, s_thum_inof, s_thum_count)
-;
+			//1400 推送回调
+			if (s_det_snap_cb)
+				s_det_snap_cb(&s_main_jpg_info, s_thum_inof, s_thum_count);
+			//cmiot 人形事件处理 
+			if (person_triggered)
+				cmoit_intrude_person_event_proc(0x01, s_main_jpg_info.data, s_main_jpg_info.size, cmiot_event_utcms);
+			else
+				cmoit_intrude_person_event_proc(0, 0, 0, 0);
+			//cmiot 入侵事件处理
+			cmoit_intrude_event_proc(p_triggerObjects, *p_objNum, s_main_jpg_info.data, s_main_jpg_info.size, cmiot_event_utcms);
+		}
+		else
+		{
+			cmoit_intrude_person_event_proc(0, 0, 0, 0);
 		}
 	}
 
@@ -8179,4 +8525,95 @@ int gb_rkipc_osd_detach(int des_chan) {
 		pthread_mutex_unlock(&s_rgn_osd_param[i].mutex);
 	}
 	return 0;
+}
+
+
+int tmp_rkipc_snap(void **pic_data, unsigned int *pic_size)
+{
+	int jpg_vi_chan = 1;
+	int ret;
+	int result = -1;
+	VIDEO_FRAME_INFO_S stJpgViFrame;
+	VENC_STREAM_S stVencFrame;
+	void *data = NULL;
+
+	if (NULL == pic_data || NULL == pic_size)
+	{
+		LOG_ERROR("param error.\n");
+		goto END;
+	}
+
+	stVencFrame.pstPack = malloc(sizeof(VENC_PACK_S));
+	if (NULL ==  stVencFrame.pstPack) {
+		LOG_ERROR("malloc stVencFrame.pstPack failure\n");
+		goto END;
+	}
+
+	ret = RK_MPI_VI_GetChnFrame(pipe_id_, jpg_vi_chan, &stJpgViFrame, 1000);
+	if (ret)
+	{
+		LOG_ERROR("RK_MPI_VI_GetChnFrame chan[%d] failed. ret: %x\n", jpg_vi_chan, ret);
+		goto VI_GET_FAIL;
+	}
+
+	pthread_mutex_lock(&g_snap_mutex); // lock
+
+	ret = RK_MPI_VENC_SendFrame(s_jpeg_venc_chan_param[0].channel, &stJpgViFrame, 1000);
+	if (ret != RK_SUCCESS) {
+		RK_LOGE("RK_MPI_VENC_SendFrame failure:%X pipe:%d chnid:%d", ret, 0, s_jpeg_venc_chan_param[0].channel);
+		pthread_mutex_unlock(&g_snap_mutex); // unlock
+		goto VENC_SEND_FAIL;
+	}
+	LOG_INFO("get frame from venc[2]...\n");
+	ret = RK_MPI_VENC_GetStream(s_jpeg_venc_chan_param[0].channel, &stVencFrame, 1000);
+	if (ret != RK_SUCCESS) {
+		RK_LOGE("RK_MPI_VENC_GetStream failure:%X pipe:%d chnid:%d", ret, 0, s_jpeg_venc_chan_param[0].channel);
+		pthread_mutex_unlock(&g_snap_mutex); // unlock
+		goto VENC_GET_FAIL;
+	}
+	LOG_INFO("get frame from venc[2] succ...\n");
+	if (stVencFrame.pstPack->u32Len > 512*1024)
+	{
+		LOG_ERROR("main jpeg size: %d is exceeded.\n", stVencFrame.pstPack->u32Len);
+		goto VENC_DATA_ERR;
+	}
+	
+	data = RK_MPI_MB_Handle2VirAddr(stVencFrame.pstPack->pMbBlk);
+	if (NULL == data)
+	{
+		LOG_ERROR("main jpeg Handle2VirAddr fail.\n");
+		goto HAND_2_VIRADDR_FAIL;
+	}
+
+	*pic_data = (void *)malloc(stVencFrame.pstPack->u32Len);
+	if (NULL == *pic_data)
+	{
+		LOG_ERROR("malloc fail.\n");
+		goto MALLOC_FAIL;
+	}
+
+	*pic_size = stVencFrame.pstPack->u32Len;
+	memcpy(*pic_data, data, stVencFrame.pstPack->u32Len);
+	result = 0;
+
+MALLOC_FAIL:
+HAND_2_VIRADDR_FAIL:
+VENC_DATA_ERR:
+	ret = RK_MPI_VENC_ReleaseStream(s_jpeg_venc_chan_param[0].channel, &stVencFrame);
+	if (ret != RK_SUCCESS) 
+		LOG_ERROR("RK_MPI_VENC_ReleaseStream chan[%d] fail %x\n", s_jpeg_venc_chan_param[0].channel, ret);
+
+	pthread_mutex_unlock(&g_snap_mutex); // unlock
+
+VENC_GET_FAIL:
+VENC_SEND_FAIL:
+	ret = RK_MPI_VI_ReleaseChnFrame(pipe_id_, jpg_vi_chan, &stJpgViFrame);
+	if (ret != RK_SUCCESS)
+		LOG_ERROR("RK_MPI_VI_ReleaseChnFrame chan[%d] fail %x", jpg_vi_chan, ret);
+
+VI_GET_FAIL:
+	if (stVencFrame.pstPack)
+		free(stVencFrame.pstPack);
+END:
+	return result;
 }

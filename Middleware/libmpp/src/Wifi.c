@@ -16,7 +16,8 @@
 #include <net/if.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include<sys/ioctl.h>
+#include <sys/ioctl.h>
+#include <linux/if_arp.h>
 
 #include "PAL/MW_Common.h"
 #include "PAL/Net.h"
@@ -1010,6 +1011,7 @@ int WifiList_2(router_list_2_s* list, int MAX_Len)
 				break;
 			}
 			
+			list[recordIdx].encryptType = 0;
 			bNeedFindHead = 0;
 			goto ReadNext;
 		}
@@ -1064,6 +1066,36 @@ int WifiList_2(router_list_2_s* list, int MAX_Len)
 		}
 #endif
 		{
+			/* 查找encrypt  */
+			char *p = strstr(tmp, "IE: ");
+			if(p != NULL)
+			{
+				if (strstr(tmp, "WPA "))
+					list[recordIdx].encryptType = 2;
+				else if (strstr(tmp, "WPA2 "))
+					list[recordIdx].encryptType = 3;
+				else if (strstr(tmp, "WPA3 "))
+					list[recordIdx].encryptType = 4;
+				goto ReadNext;
+			}
+		}
+
+		if (WIFI_MODEL_AIC8800DL == s_stWifiModelInfo.model)
+		{
+			/* 查找signal  */
+			char *pSIGNALStart = strstr(tmp, "Signal level=");
+			if(pSIGNALStart != NULL)
+			{
+				int dBm = 0;
+				sscanf(pSIGNALStart + strlen("Signal level=") , "%d ", &dBm);
+				if (dBm > -30) dBm = -30;
+				if (dBm < -100) dBm = -100;
+				list[recordIdx].quality = (dBm - (-100)) * 100 / ((-30) - (-100));
+				goto ReadNext;
+			}
+		}
+		else
+		{
 			/* 查找signal  */
 			char *pSIGNALStart = strstr(tmp, "Quality=");
 			if(pSIGNALStart != NULL)
@@ -1093,6 +1125,184 @@ exit:
 	return realApNum;
 #endif
 }
+
+
+//------------------------------------------------
+int WifiList_3(router_list_3_s* list, int MAX_Len)
+{
+	int realApNum = -1;
+	if( (WIFI_MODE_AP != WifiMode) && (WIFI_MODE_ST != WifiMode) )
+	{
+		MW_START_PROCESS("sh", "sh", "-c", "ifconfig wlan0 up", NULL);
+	}
+	sleep(1);
+
+	FILE *pp = popen("iwlist wlan0 scan", "r");
+	if(pp == NULL)
+	{
+		EMSG("WifiList--->popen fails\r\n");
+		goto exit;
+	}
+
+	char tmp[512] = {0};
+	memset(tmp, 0, sizeof(tmp));
+
+	// sleep(6);
+
+
+#if 0 	/// debug
+	while (fgets(tmp, sizeof(tmp), pp) != NULL)
+	{
+		EMSG("%s", tmp);
+	}
+	exit:
+		return 0;
+#else
+	unsigned char bNeedFindHead = 1;
+	int recordIdx = -1;
+	while (fgets(tmp, sizeof(tmp), pp) != NULL)
+	{
+//		MSG("%s", tmp);
+		/* 首先找BSSID	  以此为基准 */
+		char *pBSSIDStart = strstr(tmp, " - Address: ");
+		if(pBSSIDStart != NULL)
+		{
+			recordIdx++;
+			if(recordIdx >= MAX_Len)
+			{
+				EMSG(" Reach Max Record \r\n");
+				recordIdx--;
+				break;
+			}
+
+			/* 解析 BSSID */
+			char *pAddr = pBSSIDStart + strlen(" - Address: ");
+			while(*pAddr == ' ') pAddr++;
+			strncpy(list[recordIdx].bssid, pAddr, 17);
+			list[recordIdx].bssid[17] = '\0';
+
+			
+			
+			list[recordIdx].encryptType = 0;
+			bNeedFindHead = 0;
+			goto ReadNext;
+		}
+		else
+		{
+			if(recordIdx < 0)
+			{/* 只有找到第一个BSSID 才能继续读下去 */
+				goto ReadNext;
+			}
+		}
+
+		if( 1 == bNeedFindHead )
+		{
+			goto ReadNext;
+		}
+		
+		{
+			/* 查找ssid  */
+			char *pSSIDStart = strstr(tmp, "ESSID:\"");
+			if(pSSIDStart != NULL)
+			{
+#if 1
+                sscanf(pSSIDStart + strlen("ESSID:\""), "%s", list[recordIdx].essid);
+                int s_len = strlen((char *)(list[recordIdx].essid));
+                if(s_len != 0)
+                {
+                    list[recordIdx].essid[s_len - 1] = 0;
+                    s_len--;
+                }
+#else
+				snprintf(list[recordIdx].essid, sizeof(list[recordIdx].essid), "%s", pSSIDStart + strlen("ESSID:\""));
+#endif
+				if( 0 == strlen(list[recordIdx].essid) )
+				{
+					bNeedFindHead = 1;
+					recordIdx--;
+				}
+				goto ReadNext;
+			}
+		}
+#if 0
+		{
+			/* 查找channel	*/
+			char *pCHANNELStart = strstr(tmp, "(Channel ");
+			if(pCHANNELStart != NULL)
+			{
+				int x = 0;
+				sscanf(pCHANNELStart + strlen("(Channel "), "%d)", &x);
+				list[recordIdx].channel = x;
+				goto ReadNext;
+			}
+		}
+#endif
+		{
+			/* 查找encrypt  */
+			char *p = strstr(tmp, "IE: ");
+			if(p != NULL)
+			{
+				if (strstr(tmp, "WPA "))
+					list[recordIdx].encryptType = 2;
+				else if (strstr(tmp, "WPA2 "))
+					list[recordIdx].encryptType = 3;
+				else if (strstr(tmp, "WPA3 "))
+					list[recordIdx].encryptType = 4;
+				goto ReadNext;
+			}
+		}
+
+		if (WIFI_MODEL_AIC8800DL == s_stWifiModelInfo.model)
+		{
+			/* 查找signal  */
+			char *pSIGNALStart = strstr(tmp, "Signal level=");
+			if(pSIGNALStart != NULL)
+			{
+				int dBm = 0;
+				sscanf(pSIGNALStart + strlen("Signal level=") , "%d ", &dBm);
+				if (dBm > -30) dBm = -30;
+				if (dBm < -100) dBm = -100;
+				list[recordIdx].quality = (dBm - (-100)) * 100 / ((-30) - (-100));
+				goto ReadNext;
+			}
+		}
+		else
+		{
+			/* 查找signal  */
+			char *pSIGNALStart = strstr(tmp, "Quality=");
+			if(pSIGNALStart != NULL)
+			{
+				int x = 0;
+				int y = 0;
+				sscanf(pSIGNALStart + strlen("Quality=") , "%d/%d ",&x,&y);
+				list[recordIdx].quality = x*100/y;
+				goto ReadNext;
+			}
+		}
+
+
+ReadNext:
+		memset(tmp, 0, sizeof(tmp));
+	}
+
+	pclose(pp);
+
+exit:
+	if( (WIFI_MODE_AP != WifiMode) && (WIFI_MODE_ST != WifiMode) )
+	{
+		MW_START_PROCESS("sh", "sh", "-c", "ifconfig wlan0 down", NULL);
+	}
+
+	realApNum = recordIdx + 1;
+	return realApNum;
+#endif
+}
+
+
+
+
+
+//------------------------------------------------
 
 
 int WifiCheckApIsExist(const char *ssid)
@@ -1237,6 +1447,49 @@ int WifiSignal(router_signal_s* stSignal)
 		}
 
 		{
+			/* 查找Frequency  */
+			char *p = strstr(tmp, "Frequency:");
+			if(p != NULL)
+			{
+				float freq = 0;
+				sscanf(p + strlen("Frequency:") , "%f ", &freq);
+				if (freq < 5.0)
+					stSignal->uchFreq = 1;
+				else
+					stSignal->uchFreq = 2;
+				break;
+			}
+		}
+
+		{
+			/* 查找Bit Rate:  */
+			char *p = strstr(tmp, "Bit Rate:");
+			if(p != NULL)
+			{
+				int speed = 0;
+				sscanf(p + strlen("Bit Rate:") , "%d ", &speed);
+				stSignal->uchLindSpeed = speed;
+				break;
+			}
+		}
+
+		if (WIFI_MODEL_AIC8800DL == s_stWifiModelInfo.model)
+		{
+			/* 查找signal  */
+			char *pSIGNALStart = strstr(tmp, "Signal level=");
+			if(pSIGNALStart != NULL)
+			{
+				int dBm = 0;
+				sscanf(pSIGNALStart + strlen("Signal level=") , "%d ", &dBm);
+				if (dBm > -30) dBm = -30;
+				if (dBm < -100) dBm = -100;
+				stSignal->uchSignal = (dBm - (-100)) * 100 / ((-30) - (-100));
+				stSignal->dBm = dBm;
+				break;
+			}
+		}
+		else
+		{
 			/* 查找signal  */
 			char *pSIGNALStart = strstr(tmp, "Link Quality=");
 			if(pSIGNALStart != NULL)
@@ -1245,6 +1498,15 @@ int WifiSignal(router_signal_s* stSignal)
 				int y = 0;
 				sscanf(pSIGNALStart + strlen("Link Quality=") , "%d/%d ",&x,&y);
 				stSignal->uchSignal = x*100/y;
+
+				pSIGNALStart = strstr(tmp, "Signal level=");
+				if(pSIGNALStart != NULL)
+				{
+					int dBm = 0;
+					sscanf(pSIGNALStart + strlen("Signal level=") , "%d ", &dBm);
+					stSignal->dBm = dBm;
+				}
+
 				break;
 			}
 		}
@@ -1581,5 +1843,120 @@ int NetIfInLine(char *name)
 		return 0;
 	}
 	return -1;
+}
+
+int NetGetDns(char dns[16])
+{
+	FILE *fp = NULL;
+	int ret;
+    char line[128] = {0};
+
+	if (!dns)
+		return -1;
+	
+    fp = fopen("/etc/resolv.conf", "r");
+	if (!fp)
+	{
+		return -1;
+	}
+	
+	while (fgets(line, sizeof(line), fp))
+	{
+		if (strstr(line, "nameserver"))
+		{
+			memset(dns, 0, 16);
+			ret = sscanf(line, "nameserver %15[^ ] ", dns);
+			if (1 == ret)
+			{
+				fclose(fp);
+				return 0;
+			}
+		}
+	}
+	fclose(fp);
+	return -1;
+}
+
+int NetGetGateway(char gw_addr[16], char gw_mac[18])
+{
+	FILE *fp = NULL;
+	int ret;
+	int found = 0;
+    char line[256] = {0};
+	char iFace[24] = {0};
+	unsigned int ip_addr;
+
+	if (!gw_addr || !gw_mac)
+		return -1;
+	
+    fp = fopen("/proc/net/route", "r");
+	if (!fp)
+	{
+		return -1;
+	}
+
+	fgets(line, sizeof(line), fp);
+	//eth0    00000000        010AA8C0        0003    0       0       0       00000000        0       0       0 
+	while (fgets(line, sizeof(line), fp))
+	{
+		char *token = NULL;
+		char delim[2] = {0x09, 0};
+		char *saveptr = NULL;
+		token = strtok_r(line, delim, &saveptr);
+		if (token)
+		{
+			memset(iFace, 0, sizeof(iFace));
+			strncpy(iFace, token, sizeof(iFace)-1);
+			token = strtok_r(NULL, delim, &saveptr);
+			if (token && strcmp(token, "00000000") == 0)
+			{
+				token = strtok_r(NULL, delim, &saveptr);
+				if (token)
+				{
+					ret = sscanf(token, "%x", &ip_addr);
+					if (1 == ret)
+					{
+						printf("ip_dadr: %08X\n", ip_addr);
+						struct in_addr sin_addr;
+						sin_addr.s_addr = ip_addr;
+						snprintf(gw_addr, 16, "%s", inet_ntoa(sin_addr));
+						printf("ip_dadr: %s\n", gw_addr);
+						found = 1;
+						break;
+					}
+				}
+			}
+		}
+	}
+	fclose(fp);
+
+	if (0 == found)
+		return -1;
+	
+    struct arpreq arp; // Structure for ARP request.
+    int sockfd; // Socket file descriptor.
+    struct sockaddr_in *s_in; // Pointer to sockaddr_in structure.
+
+    sockfd = socket(AF_INET, SOCK_DGRAM, 0); // Create a socket for ARP requests.
+    if (sockfd < 0) {
+        perror("socket");
+		return -1;
+    }
+    s_in = (struct sockaddr_in *)&arp.arp_pa; // Set the address family to AF_INET.
+    s_in->sin_family = AF_INET; // Set the address family to AF_INET.
+    s_in->sin_addr.s_addr = ip_addr; // Set the gateway IP address.
+    strcpy(arp.arp_dev, iFace); // Set the interface name.
+    ret = ioctl(sockfd, SIOCGARP, &arp);
+    close(sockfd); // Close the socket file descriptor.
+    if (ret != 0) // Get the ARP entry for the gateway IP.
+    {
+        perror("SIOCGARP"); // Print error message if ARP request fails.
+		return -1;
+    }
+	// Copy the MAC address from arp structure to output buffer.
+	snprintf(gw_mac, 18, "%02x:%02x:%02x:%02x:%02x:%02x", arp.arp_ha.sa_data[0], arp.arp_ha.sa_data[1], 
+			arp.arp_ha.sa_data[2], arp.arp_ha.sa_data[3], arp.arp_ha.sa_data[4], arp.arp_ha.sa_data[5]);
+
+	return 0;
 }
 

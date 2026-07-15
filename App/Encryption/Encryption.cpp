@@ -386,7 +386,7 @@ int CEncryption::LoadFile()
 {
 #if 1
     CheckDevLicense();
-	ChangeTuyapidBySdcard();//add on 0927
+//	ChangeTuyapidBySdcard();//add on 0927
 	// memset(m_devInfoFromEEPROM.TUYA_PID, 0, sizeof(m_devInfoFromEEPROM.TUYA_PID));
 	// memcpy(m_devInfoFromEEPROM.TUYA_PID, "sxrmiqf8p2aaiu4x", 16);
 #else
@@ -740,17 +740,17 @@ bool CEncryption::ParseLicense(unsigned char *hwid, DEVICE_INFO_FROM_EEPROM_S *p
 	
 	unsigned char customInfoLen = hwid[27]; 	//自定义数据长度
 
-	memset(pstOut->TUTK_UID, 0, sizeof(pstOut->TUTK_UID));
-	memcpy(pstOut->TUTK_UID, &hwid[28], 20); 	//TUTK UID		//20 bytes
+	memset(pstOut->CM_CODE, 0, sizeof(pstOut->CM_CODE));
+	memcpy(pstOut->CM_CODE, &hwid[28], 21); 	//移动串码 21字符
 	
-	memset(pstOut->TUYA_AUTHKEY, 0, sizeof(pstOut->TUYA_AUTHKEY));
-	memcpy(pstOut->TUYA_AUTHKEY, &hwid[48], 32); 	//涂鸦 AUTH KEY	//32 bytes
-	
-	memset(pstOut->TUYA_UID, 0, sizeof(pstOut->TUYA_UID));
-	memcpy(pstOut->TUYA_UID, &hwid[80], 20); 	//涂鸦 UUID 		//20 bytes
-
-	memset(pstOut->TUYA_PID, 0, sizeof(pstOut->TUYA_PID));
-	memcpy(pstOut->TUYA_PID, &hwid[100], 16); 	//涂鸦 PRODUCT ID //16 bytes
+//	memset(pstOut->TUYA_AUTHKEY, 0, sizeof(pstOut->TUYA_AUTHKEY));
+//	memcpy(pstOut->TUYA_AUTHKEY, &hwid[48], 32); 	//涂鸦 AUTH KEY	//32 bytes
+//	
+//	memset(pstOut->TUYA_UID, 0, sizeof(pstOut->TUYA_UID));
+//	memcpy(pstOut->TUYA_UID, &hwid[80], 20); 	//涂鸦 UUID 		//20 bytes
+//
+//	memset(pstOut->TUYA_PID, 0, sizeof(pstOut->TUYA_PID));
+//	memcpy(pstOut->TUYA_PID, &hwid[100], 16); 	//涂鸦 PRODUCT ID //16 bytes
 
 	unsigned char eofFlag = hwid[28+customInfoLen]; 	//结束符
 
@@ -776,10 +776,10 @@ bool CEncryption::ParseLicense(unsigned char *hwid, DEVICE_INFO_FROM_EEPROM_S *p
 	AppInfo("MAC : %02x:%02x:%02x:%02x:%02x:%02x\n", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 	AppInfo("CustomInfoLen : %d\n", hwid[27]);
 	AppInfo("CRC_FLAG : %d\n", crc32Flag);
-	AppInfo("TUYA_PID : %s\n", pstOut->TUYA_PID);
-	AppInfo("TUYA_UID : %s\n", pstOut->TUYA_UID);
-	AppInfo("TUYA_AUTHKEY : %s\n", pstOut->TUYA_AUTHKEY);
-	AppInfo("TUTK_UID : %s\n", pstOut->TUTK_UID);
+//	AppInfo("TUYA_PID : %s\n", pstOut->TUYA_PID);
+//	AppInfo("TUYA_UID : %s\n", pstOut->TUYA_UID);
+//	AppInfo("TUYA_AUTHKEY : %s\n", pstOut->TUYA_AUTHKEY);
+	AppInfo("CM_CODE : %s\n", pstOut->CM_CODE);
 	AppInfo("============================================\n");
 
 	//HEAD
@@ -797,16 +797,16 @@ bool CEncryption::ParseLicense(unsigned char *hwid, DEVICE_INFO_FROM_EEPROM_S *p
 		return false;
 	}
 
-	if (0x0701 != PN)  		//产品标号
+	if (0x0705 != PN)  		//产品标号
 	{
 		AppErr("EEPROM ---PN error!!!!\n");
 		return false;
 	}
 
 	//产品类型和型号
-	if( (0x00 != PC) || ( (0x03 != PT) && (0x06 != PT) && (0x00 != PT) && (0x07 != PT) && (0x08 != PT)) || (0x00 != PF) || ((0x01 != HT) )) 		//PID部分
+	if( (0x00 != PC) || (0x09 != PF) || ((0x04 != HT) && (0x05 != HT) && (0x06 != HT)) ) 		//PID部分
 	{
-		AppErr("EEPROM ---PC or PT or PF or HT error!!!!\n");
+		AppErr("EEPROM ---PC or PF or HT error!!!!\n");
 		return false;
 	}
 
@@ -819,37 +819,37 @@ bool CEncryption::ParseLicense(unsigned char *hwid, DEVICE_INFO_FROM_EEPROM_S *p
 
 	if (crc32Flag != 0xAA)
 	{
-		//旧协议头，无校验码，判断pid、uid、authkey是否是数字和字母
-		for (int i = 0; i < 32; i++)
-		{
-			if (((pstOut->TUYA_AUTHKEY[i] < '0') || (pstOut->TUYA_AUTHKEY[i] > '9')) && 
-				((pstOut->TUYA_AUTHKEY[i] < 'A') || (pstOut->TUYA_AUTHKEY[i] > 'Z')) && 
-				((pstOut->TUYA_AUTHKEY[i] < 'a') || (pstOut->TUYA_AUTHKEY[i] > 'z')))
-			{
-				AppErr("EEPROM ---tuya authkey error!!!!\n");
-				return false;
-			}
-		}
-		for (int i = 0; i < 20; i++)
-		{
-			if (((pstOut->TUYA_UID[i] < '0') || (pstOut->TUYA_UID[i] > '9')) && 
-				((pstOut->TUYA_UID[i] < 'A') || (pstOut->TUYA_UID[i] > 'Z')) && 
-				((pstOut->TUYA_UID[i] < 'a') || (pstOut->TUYA_UID[i] > 'z')))
-			{
-				AppErr("EEPROM ---tuya uuid error!!!!\n");
-				return false;
-			}
-		}
-		for (int i = 0; i < 16; i++)
-		{
-			if (((pstOut->TUYA_PID[i] < '0') || (pstOut->TUYA_PID[i] > '9')) && 
-				((pstOut->TUYA_PID[i] < 'A') || (pstOut->TUYA_PID[i] > 'Z')) && 
-				((pstOut->TUYA_PID[i] < 'a') || (pstOut->TUYA_PID[i] > 'z')))
-			{
-				AppErr("EEPROM ---tuya pid error!!!!\n");
-				return false;
-			}
-		}
+//		//旧协议头，无校验码，判断pid、uid、authkey是否是数字和字母
+//		for (int i = 0; i < 32; i++)
+//		{
+//			if (((pstOut->TUYA_AUTHKEY[i] < '0') || (pstOut->TUYA_AUTHKEY[i] > '9')) && 
+//				((pstOut->TUYA_AUTHKEY[i] < 'A') || (pstOut->TUYA_AUTHKEY[i] > 'Z')) && 
+//				((pstOut->TUYA_AUTHKEY[i] < 'a') || (pstOut->TUYA_AUTHKEY[i] > 'z')))
+//			{
+//				AppErr("EEPROM ---tuya authkey error!!!!\n");
+//				return false;
+//			}
+//		}
+//		for (int i = 0; i < 20; i++)
+//		{
+//			if (((pstOut->TUYA_UID[i] < '0') || (pstOut->TUYA_UID[i] > '9')) && 
+//				((pstOut->TUYA_UID[i] < 'A') || (pstOut->TUYA_UID[i] > 'Z')) && 
+//				((pstOut->TUYA_UID[i] < 'a') || (pstOut->TUYA_UID[i] > 'z')))
+//			{
+//				AppErr("EEPROM ---tuya uuid error!!!!\n");
+//				return false;
+//			}
+//		}
+//		for (int i = 0; i < 16; i++)
+//		{
+//			if (((pstOut->TUYA_PID[i] < '0') || (pstOut->TUYA_PID[i] > '9')) && 
+//				((pstOut->TUYA_PID[i] < 'A') || (pstOut->TUYA_PID[i] > 'Z')) && 
+//				((pstOut->TUYA_PID[i] < 'a') || (pstOut->TUYA_PID[i] > 'z')))
+//			{
+//				AppErr("EEPROM ---tuya pid error!!!!\n");
+//				return false;
+//			}
+//		}
 	}
 	else
 	{

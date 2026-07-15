@@ -407,7 +407,8 @@ int rkipc_rockiva_init() {
 	int ri_h = rk_param_get_int("event.regional_invasion:height", 360);
 
 	initParams.baRules.areaInBreakRule[0].ruleEnable = rk_param_get_int("event.regional_invasion:enabled", 0);
-	initParams.baRules.areaInBreakRule[0].sense = rk_param_get_int("event.regional_invasion:sensitivity_level", 50); // [1, 100]
+	//算法用固定灵敏度，APP上的灵敏度设置通过判断算法结果置信度实现
+	initParams.baRules.areaInBreakRule[0].sense = 50;//rk_param_get_int("event.regional_invasion:sensitivity_level", 50); // [1, 100]
 	initParams.baRules.areaInBreakRule[0].alertTime = rk_param_get_int("event.regional_invasion:time_threshold", 1) * 1000; // ms
 	initParams.baRules.areaInBreakRule[0].minObjSize[2].height = web_height / 100 * rk_param_get_int("event.regional_invasion:proportion", 5);
 	initParams.baRules.areaInBreakRule[0].minObjSize[2].width = web_width / 100 * rk_param_get_int("event.regional_invasion:proportion", 5);

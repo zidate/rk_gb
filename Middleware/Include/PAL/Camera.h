@@ -13,6 +13,7 @@ struct CameraParam				// HI3518平台
 	//add by shang 2020.06.01
 	int				wdrSwitch;		// 宽动态开关
 	int				osdSwitch;		// 时间水印开关
+	int				nightVisionSwitch; 	//夜视开关
 	int				nightVisionMode; 	// 夜视模式  单光 0-自动     1-关夜视   2-开夜视
 										//           双光 0-红外夜视 1-全彩夜视 2-智能夜视
 	int 			iAntiFlicker;		// 防闪烁  0-关闭 1-50HZ 2-60HZ

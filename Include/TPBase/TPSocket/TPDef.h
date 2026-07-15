@@ -1,6 +1,8 @@
 #ifndef __TP_DEF_H
 #define __TP_DEF_H
 
+#define LINUX
+
 #ifdef LINUX
 	#include "TPLinuxDef.h"
 #elif defined(WIN32)

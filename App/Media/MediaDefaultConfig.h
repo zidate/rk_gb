@@ -26,6 +26,8 @@ public:
 	void setAudio();
 	void setOSDTime();
 	void setOSDText();
+	void setCmiot();
+	void setCmiotIntrude();
 private:
 	void SetEventHandler(CConfigTable &table);
 };

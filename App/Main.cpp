@@ -12,7 +12,11 @@
 
 #include "web_server.h"
 
-#if 0
+
+static bool s_bStartCmiot = true;
+
+
+#if 01
 int g_test_enc_type_change; //for debug
 int g_test_enc_type[2]; //for debug
 
@@ -23,6 +27,13 @@ int gb_rkipc_osd_time_set(int date_type, int time_type, int display_week_enabled
 						  int x, int y, int show, int alignment);
 }
 #endif
+
+extern "C" {
+int StartOnvifDiscoveryPthread(void);
+void StopOnvifDiscoveryPthread(void);
+}
+int cmiot_start();
+int cmiot_reset();
 
 //--------------------
 unsigned char bStartPrivateMode; 		//是否开启隐私模式
@@ -385,7 +396,7 @@ static void *thread_web_server(void *args)
 		
 		//设置参数 注：目前不支持实时更新本地的配置信息，因此需要在web_server启动之前，把相应的信息配置好
 		verify_status.ip_mode = WifiConfig.bStaticIpEnable;
-		strcpy(verify_status.version, "1.0.6"); 	//设备版本号
+		strcpy(verify_status.version, "1.0.7"); 	//设备版本号
 		inet_ntop(AF_INET, &WifiConfig.HostIP.l, verify_status.ip_addr, sizeof(verify_status.ip_addr));	//IP地址
 		inet_ntop(AF_INET, &WifiConfig.Gateway.l, verify_status.gateway, sizeof(verify_status.gateway));	//网关地址
 		inet_ntop(AF_INET, &WifiConfig.Submask.l, verify_status.netmask, sizeof(verify_status.netmask));	//子网掩码
@@ -1107,7 +1118,7 @@ static void *thread_monitor_dev_status(void *args)
 	return NULL;
 }
 
-#if 0
+#if 01
 static void *thread_test_rtsp(void *args)
 {
 	StartRtspPthread();
@@ -1158,11 +1169,11 @@ bool CSofia::preStart()
 {
 
 	//捕获到异常信号，做静默处理 add on 2025.03.12<添加异常处理逻辑 start>
-	signal(SIGFPE, SignalFuncExit);
-	signal(SIGINT, SignalFuncExit);
-	signal(SIGTERM, SignalFuncExit);
-	signal(SIGABRT, SignalFuncExit);
-	signal(SIGSEGV, SignalFuncExit);
+//	signal(SIGFPE, SignalFuncExit);
+//	signal(SIGINT, SignalFuncExit);
+//	signal(SIGTERM, SignalFuncExit);
+//	signal(SIGABRT, SignalFuncExit);
+//	signal(SIGSEGV, SignalFuncExit);
 	//捕获到异常信号，做静默处理 add on 2025.03.12<添加异常处理逻辑 end>
 
 
@@ -1187,7 +1198,142 @@ bool CSofia::preStart()
 	
 	return true;
 }
+#if 0
+static void *debug_volume(void *args)
+{
+	while (1)
+	{
+		//音量百分之20
+		if (access("/tmp/play_volune_20", F_OK) == 0)
+		{
+			
+			CConfigTable table;
+			SirenConfig SirenCfg;
+			
+			g_configManager.getConfig(getConfigName(CFG_SIREN), table);
+			TExchangeAL<SirenConfig>::getConfig(table,SirenCfg);
+			AppWarning("get sirenvolume:%d \r\n", SirenCfg.sirenvolume);
+			SirenCfg.sirenvolume = 20;
+			TExchangeAL<SirenConfig>::setConfig(SirenCfg, table);
+			g_configManager.setConfig(getConfigName(CFG_SIREN), table, 0, IConfigManager::applyOK);
+			AppWarning("set sirenvolume:%d \r\n", SirenCfg.sirenvolume);
+			system("rm /tmp/play_volune_20");
 
+		}
+		//音量百分之50
+		else if (access("/tmp/play_volune_50", F_OK) == 0)
+		{
+			CConfigTable table;
+			SirenConfig SirenCfg;
+			
+			g_configManager.getConfig(getConfigName(CFG_SIREN), table);
+			TExchangeAL<SirenConfig>::getConfig(table,SirenCfg);
+			AppWarning("get sirenvolume:%d \r\n", SirenCfg.sirenvolume);
+			SirenCfg.sirenvolume = 50;
+			TExchangeAL<SirenConfig>::setConfig(SirenCfg, table);
+			g_configManager.setConfig(getConfigName(CFG_SIREN), table, 0, IConfigManager::applyOK);
+			AppWarning("set sirenvolume:%d \r\n", SirenCfg.sirenvolume);
+			system("rm /tmp/play_volune_50");
+		}
+		//音量百分之80
+		else if(access("/tmp/play_volune_80", F_OK) == 0)
+		{
+			CConfigTable table;
+			SirenConfig SirenCfg;
+			
+			g_configManager.getConfig(getConfigName(CFG_SIREN), table);
+			TExchangeAL<SirenConfig>::getConfig(table,SirenCfg);
+			AppWarning("get sirenvolume:%d \r\n", SirenCfg.sirenvolume);
+			SirenCfg.sirenvolume = 80;
+			TExchangeAL<SirenConfig>::setConfig(SirenCfg, table);
+			g_configManager.setConfig(getConfigName(CFG_SIREN), table, 0, IConfigManager::applyOK);
+			AppWarning("set sirenvolume:%d \r\n", SirenCfg.sirenvolume);
+			system("rm /tmp/play_volune_80");
+		}
+		
+		sleep(1);
+	}
+	return NULL;
+}
+
+
+
+static void *debug_aduio(void *args)
+{
+	while (1)
+	{
+		if (access("/tmp/play_xitongqidongzhong", F_OK) == 0)
+		{
+			//语音提示
+			CAudioPrompt::AudioFileParm audioFile;
+			audioFile.strFileName = AUDIO_FILE_SYSTEM_STARTING;
+			audioFile.type = 0;
+			g_AudioPrompt.aoPlay(audioFile);
+			
+			system("rm /tmp/play_xitongqidongzhong");
+		}
+		//音量百分之50
+		else if (access("/tmp/play_bindsuccess", F_OK) == 0)
+		{
+			//语音提示
+			CAudioPrompt::AudioFileParm audioFile;
+			audioFile.strFileName = AUDIO_FILE_BIND_SUCCESS;
+			audioFile.type = 0;
+			g_AudioPrompt.aoPlay(audioFile);
+			system("rm /tmp/play_bindsuccess");
+		}
+		else if (access("/tmp/play_chongzhishexiangjichenggong", F_OK) == 0)
+		{
+			//语音提示
+			CAudioPrompt::AudioFileParm audioFile;
+			audioFile.strFileName = AUDIO_FILE_DEV_RESET;
+			audioFile.type = 0;
+			g_AudioPrompt.aoPlay(audioFile);
+			system("rm /tmp/play_chongzhishexiangjichenggong");
+		}
+		else if (access("/tmp/play_gujianshengjizhong", F_OK) == 0)
+		{
+			//语音提示
+			CAudioPrompt::AudioFileParm audioFile;
+			audioFile.strFileName = AUDIO_FILE_DEV_UPDATING;
+			audioFile.type = 0;
+			g_AudioPrompt.aoPlay(audioFile);
+			system("rm /tmp/play_gujianshengjizhong");
+		}
+		else if (access("/tmp/play_shengjichenggong", F_OK) == 0)
+		{
+			//语音提示
+			CAudioPrompt::AudioFileParm audioFile;
+			audioFile.strFileName = AUDIO_FILE_DEV_OTA_SUCCESS;
+			audioFile.type = 0;
+			g_AudioPrompt.aoPlay(audioFile);
+			system("rm /tmp/play_shengjichenggong");
+		}
+		else if (access("/tmp/play_jiebangchenggong", F_OK) == 0)
+		{
+			//语音提示
+			CAudioPrompt::AudioFileParm audioFile;
+			audioFile.strFileName = AUDIO_FILE_UNBIND_SUCCESS;
+			audioFile.type = 0;
+			g_AudioPrompt.aoPlay(audioFile);
+			system("rm /tmp/play_jiebangchenggong");
+		}
+		else if (access("/tmp/play_wifi_lianjiechenggong", F_OK) == 0)
+		{
+			//语音提示
+			CAudioPrompt::AudioFileParm audioFile;
+			audioFile.strFileName = AUDIO_FILE_WIFI_CONNECTED;
+			audioFile.type = 0;
+			g_AudioPrompt.aoPlay(audioFile);
+			system("rm /tmp/play_wifi_lianjiechenggong");
+		}
+		
+		sleep(1);
+	}
+	return NULL;
+}
+
+#endif
 bool CSofia::start()
 {
 	if (PRODUCT_AGING_TEST == g_ProductCofHandle.GetProductMode()) // 老化测试
@@ -1330,6 +1476,7 @@ bool CSofia::start()
 	{
 		AvInit(ProductCof_g.stitch_distance,ProductCof_g.ispmode);
 		// 音频模块初始化
+		g_AVManager.AudioParamInit();
 		g_AVManager.AudioInit();
 		//视频参数
 		g_AVManager.VideoParamInit();//掉了这个接口，帧率码率等参数使用CFG_VIDEO的配置，不掉的话使用/oem/usr/bin/rkipc.ini的配置
@@ -1383,7 +1530,7 @@ bool CSofia::start()
 		NetWifiConfig WifiConfig;
 		g_configManager.getConfig(getConfigName(CFG_WIFI), table);
 		TExchangeAL<NetWifiConfig>::getConfig(table, WifiConfig);
-#if 01
+#if 0
 		if (false == WifiConfig.bEnable)
 		{
 			g_IndicatorLight.setLightStatus(CIndicatorLight::ENUM_POWER_INDICATOR_LIGHT_SLOW_FLICKER);
@@ -1395,7 +1542,7 @@ bool CSofia::start()
 				sleep(1);
 			}
 			START_PROCESS("sh", "sh", "-c", "ifconfig eth0 up", NULL);
-#if 01
+#if 0
 			//直连
 			START_PROCESS("sh", "sh", "-c", "ifconfig eth0 192.168.1.101 netmask 255.255.255.0", NULL);
 #else
@@ -1421,6 +1568,15 @@ bool CSofia::start()
 
 		g_IndicatorLight.setLightStatus(CIndicatorLight::ENUM_POWER_INDICATOR_LIGHT_ALWAYS_ON);
 		g_IndicatorLight.setLightStatus(CIndicatorLight::ENUM_LINK_INDICATOR_LIGHT_ALWAYS_OFF);
+
+		if (s_bStartCmiot)
+		{
+			g_NetConfigHook.SetQrcodeEnable(false);
+			cmiot_start();
+		}
+		while (1) sleep(1);
+
+
 		
 		// 启动网络管理模块
 		g_NetConfigHook.Init();
@@ -1554,6 +1710,7 @@ void CSofia::OnTimeReboot(Param wParam)
 {
 	printf("\033[1;36m   OnTimeReboot  \033[0m\n");
 	AppInfo("----- OnTimeReboot timer -------\n");
+	cmiot_reset();
 	SystemReset();
 }
 
@@ -1954,8 +2111,8 @@ int main(int argc, char **argv)
 	}
 
 #ifndef DDBUG
-	CFeedDog::instance()->create();
-	CFeedDog::instance()->start();
+//	CFeedDog::instance()->create();
+//	CFeedDog::instance()->start();
 #endif
 
 	AppInfo("Dgiot Build in:%s, %s\n", __DATE__, __TIME__);

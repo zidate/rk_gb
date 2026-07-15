@@ -82,6 +82,8 @@ static ConfigPair s_configKeyMaps[] =
 	{"Audio",CFG_AUDIO},
 	{"OSD_Time",CFG_OSD_TIME},
 	{"OSD_Text",CFG_OSD_TEXT},
+	{"CMIOT",CFG_CMIOT},
+	{"CMIOT_INTRUDE",CFG_CMIOT_INTRUDE},
 	{NULL,}
 };
 

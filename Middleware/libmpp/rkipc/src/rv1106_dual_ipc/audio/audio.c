@@ -43,6 +43,8 @@ static int g_audio_run_ = 1;
 static int enable_aed, enable_bcd, enable_vqe;
 MPP_CHN_S ai_chn, aenc_chn;
 
+static int s_mic_enable = 1;
+
 static void *ai_get_detect_result(void *arg);
 
 void *save_ai_thread(void *ptr) 
@@ -66,6 +68,12 @@ void *save_ai_thread(void *ptr)
 		ret = RK_MPI_AI_GetFrame(ai_dev_id, ai_chn_id, &frame, RK_NULL, s32MilliSec);
 		if (ret == RK_SUCCESS) 
 		{
+			if (0 == s_mic_enable)
+			{
+				RK_MPI_AI_ReleaseFrame(ai_dev_id, ai_chn_id, &frame, RK_NULL);
+				continue;
+			}
+			
 			void *data = RK_MPI_MB_Handle2VirAddr(frame.pMbBlk);
 			if (data)
 			{
@@ -81,7 +89,7 @@ void *save_ai_thread(void *ptr)
 							timestamp,
 							data,
 							frame.u32Len,
-							0);
+							/*0*/(frame.u64TimeStamp/1000));
 				
 				int g711u_len = DG_encode_g711u((char *)data, (char *)g711u_data, frame.u32Len);
 				// printf("======frame.u32Len = %d,g711u_len=%d\n",frame.u32Len,g711u_len);
@@ -94,7 +102,7 @@ void *save_ai_thread(void *ptr)
 								timestamp,
 								g711u_data,
 								g711u_len,
-								0);
+								/*0*/(frame.u64TimeStamp/1000));
 				}
 
 				#if 0
@@ -1097,6 +1105,13 @@ int rk_audio_set_ao_volume(int ao)
 	// LOG_INFO("rk_audio_set_ao_volume : get volume = %d", volume);
 	return 0;
 }
+
+void rk_audio_set_mic_enable(int en)
+{
+	s_mic_enable = en;
+}
+
+
 
 #if 0
 //aac

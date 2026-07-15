@@ -35,8 +35,8 @@ CAVManager* CAVManager::instance()
 }
 
 //视频
-//extern int g_test_enc_type_change; //for debug
-//extern int g_test_enc_type[2]; //for debug
+extern int g_test_enc_type_change; //for debug
+extern int g_test_enc_type[2]; //for debug
 void CAVManager::onConfigVideo(const CConfigTable &table, int &ret)
 {
 	VideoConf_S VideoConfig;
@@ -49,11 +49,11 @@ void CAVManager::onConfigVideo(const CConfigTable &table, int &ret)
 			CaptureChangeEncParam(i, VideoConfig.chan[i].enc_type, VideoConfig.chan[i].bit_rate, VideoConfig.chan[i].frmae_rate, VideoConfig.chan[i].gop);
 		}
 	}
-//	g_test_enc_type[0] = m_VideoConfig.chan[0].enc_type;
-//	g_test_enc_type[1] = m_VideoConfig.chan[1].enc_type;
-//	if (VideoConfig.chan[0].enc_type != m_VideoConfig.chan[0].enc_type || 
-//		VideoConfig.chan[1].enc_type != m_VideoConfig.chan[1].enc_type)
-//		g_test_enc_type_change = 1;
+	g_test_enc_type[0] = m_VideoConfig.chan[0].enc_type;
+	g_test_enc_type[1] = m_VideoConfig.chan[1].enc_type;
+	if (VideoConfig.chan[0].enc_type != m_VideoConfig.chan[0].enc_type || 
+		VideoConfig.chan[1].enc_type != m_VideoConfig.chan[1].enc_type)
+		g_test_enc_type_change = 1;
 	m_VideoConfig = VideoConfig;
 }
 
@@ -110,7 +110,7 @@ bool CAVManager::VideoParamInit()
 
 	for (int i = 0; i < VIDEO_CHANNEL_MAX; i++)
 	{
-//		g_test_enc_type[i] = m_VideoConfig.chan[i].enc_type;
+		g_test_enc_type[i] = m_VideoConfig.chan[i].enc_type;
 		CaptureInitEncParam(i, m_VideoConfig.chan[i].enc_type, m_VideoConfig.chan[i].bit_rate, m_VideoConfig.chan[i].frmae_rate, m_VideoConfig.chan[i].gop);
 	}
 
@@ -173,6 +173,28 @@ bool CAVManager::VideoDeInit()
 }
 
 //音频
+void CAVManager::onConfigAudio(const CConfigTable &table, int &ret)
+{
+	AudioConf_S AudioConfig;
+    TExchangeAL<AudioConf_S>::getConfig(table, AudioConfig);
+
+	if (AudioConfig.mic_enable != m_AudioConfig.mic_enable)
+		AudioMicEnable(AudioConfig.mic_enable);
+
+	m_AudioConfig = AudioConfig;
+}
+bool CAVManager::AudioParamInit()
+{
+	CConfigTable table;
+	g_configManager.getConfig(getConfigName(CFG_AUDIO), table);
+    TExchangeAL<AudioConf_S>::getConfig(table, m_AudioConfig);
+	g_configManager.attach(getConfigName(CFG_AUDIO), IConfigManager::Proc(&CAVManager::onConfigAudio, this));
+
+	AudioMicEnable(m_AudioConfig.mic_enable);
+
+	return true;
+}
+
 bool CAVManager::AudioInit()
 {
 	if (!m_audioInit)

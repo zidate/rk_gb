@@ -22,6 +22,8 @@ public:
 	bool VideoDeInit();
 
 	///	音频
+	void onConfigAudio(const CConfigTable &table, int &ret);
+	bool AudioParamInit();
 	bool AudioInit();
 	bool AudioDeInit();
 	/// 播放
@@ -50,6 +52,7 @@ private:
 	CMutex m_Mutex;
 
 	VideoConf_S m_VideoConfig;
+	AudioConf_S m_AudioConfig;
 
 	OSDTimeConf_S m_OSDTimeConf;
 	OSDTextAllConf_S m_OSDTextAllConf;

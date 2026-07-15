@@ -711,6 +711,7 @@ template<> void exchangeTable<AudioConf_S>(CConfigTable &table, AudioConf_S &con
 	CKeyExchange exchanger;
 	
 	exchanger.setState(state);
+	exchanger.exchange(table, "mic_enable", 	config.mic_enable);
 	exchanger.exchange(table, "enc_type", 		config.enc_type);
 }
 
@@ -753,5 +754,46 @@ template<> void exchangeTable<OSDTextAllConf_S>(CConfigTable &table, OSDTextAllC
 		}
 		exchangeTable(table[i], configAll.osd_text[i], state);
 	}
+}
+
+//千里眼配置
+template<> void exchangeTable<CmiotConf_S>(CConfigTable &table, CmiotConf_S &config, int state)
+{
+	CKeyExchange exchanger;
+	
+	exchanger.setState(state);
+	exchanger.exchange(table, "video_quality", 	config.video_quality);
+}
+
+template<> void exchangeTable<CmiotRectPoint_S>(CConfigTable &table, CmiotRectPoint_S &config, int state)
+{
+	CKeyExchange exchanger;
+	
+	exchanger.setState(state);
+	exchanger.exchange(table, "x", 	config.x);
+	exchanger.exchange(table, "y", 	config.y);
+}
+//千里眼入侵配置
+template<> void exchangeTable<CmiotIntrudeConf_S>(CConfigTable &table, CmiotIntrudeConf_S &config, int state)
+{
+	CKeyExchange exchanger;
+
+	exchanger.setState(state);
+
+	for(int i = 0; i < 4; i++)
+	{
+		if(table["rect_point"][i] == Json::nullValue && state == CKeyExchange::ES_LOADING)
+		{
+			continue;
+		}
+		exchangeTable(table["rect_point"][i], config.rect_point[i], state);
+	}
+	
+	exchanger.exchange(table, "person_report_en", 			config.person_report_en);
+	exchanger.exchange(table, "person_report_interval", 	config.person_report_interval);
+	exchanger.exchange(table, "intrude_report_en", 			config.intrude_report_en);
+	exchanger.exchange(table, "intrude_report_interval", 	config.intrude_report_interval);
+	exchanger.exchange(table, "real_time_frame", 			config.real_time_frame);
+	exchanger.exchange(table, "intrude_sound_light_alarm", 	config.intrude_sound_light_alarm);
 }
 

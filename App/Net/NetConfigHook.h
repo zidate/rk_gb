@@ -74,6 +74,8 @@ public:
 	WLAN_BLE GetCurlWifiBleSupport();//add on 2025.01.11
 
 	bool GetQrcodeEnable();
+	void SetQrcodeEnable(bool en);
+	bool SaveWifi();
 
 	typedef	enum {
 		NET_CHECK_ETH0_VALID = 0,
@@ -148,6 +150,8 @@ private:
 	WLAN_BLE m_wlanBleSupport;//add on 2025.01.11 WIFI_BLE_SUPPORT :支持蓝牙  WIFI_BLE_NOT_SUPPORT :不支持蓝牙
 
 	bool m_bWifiEnable;
+
+	bool m_bNeedSaveWifiInfo;//用于WiFi连接成功后保存WiFi信息---WiFi切换功能
 	
 	bool m_bCanScanQrCode; //插过网线或者超时后就不允许再启动
 };

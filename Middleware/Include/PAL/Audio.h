@@ -50,6 +50,7 @@ int AudioCreate(void);
 /// \retval <0 销毁失败
 /// \retval 0 销毁成功
 int AudioDestory(void);
+void AudioMicEnable(int en);
 
 
 /// 切换音视频输出的类型。
