@@ -71,14 +71,17 @@ DEFCONFIG_RELATIVE_PATH = (
     "sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig"
 )
 ANDROID_AB_RELATIVE_PATH = "sysdrv/source/uboot/u-boot/common/android_ab.c"
-AVB_AB_FLOW_RELATIVE_PATH = (
+STANDARD_AVB_AB_FLOW_RELATIVE_PATH = (
     "sysdrv/source/uboot/u-boot/lib/avb/libavb_ab/avb_ab_flow.c"
+)
+RK_AVB_AB_RELATIVE_PATH = (
+    "sysdrv/source/uboot/u-boot/lib/avb/rk_avb_user/rk_ab_ops_user.c"
 )
 PATCH_TARGETS = [
     BOARD_CONFIG_RELATIVE_PATH,
     DEFCONFIG_RELATIVE_PATH,
     ANDROID_AB_RELATIVE_PATH,
-    AVB_AB_FLOW_RELATIVE_PATH,
+    RK_AVB_AB_RELATIVE_PATH,
 ]
 SDK_BASELINE_ROOT = pathlib.Path(
     os.environ.get("RV1106_SDK_BASELINE", "/tmp/rk_dual_backup_ref/RV1106_IPC_SDK")
@@ -87,7 +90,7 @@ SDK_BASELINE_SHA256 = {
     BOARD_CONFIG_RELATIVE_PATH: "05a466237c9c0f8dc9a9769efb291e5ddb8c80a29e0066347806350ef81ed8d2",
     DEFCONFIG_RELATIVE_PATH: "e762bccd96ebd1be962fe845f5da24471c2301e4abc73ba0d236c7580bfea697",
     ANDROID_AB_RELATIVE_PATH: "95a848a050e0e85948f8ae5fc8f5a169c82aee101920e6dc77adca51f9675d73",
-    AVB_AB_FLOW_RELATIVE_PATH: "581520340c3b06169755b3192a74d339738524119af9c61cbfd71b479b7a48f1",
+    RK_AVB_AB_RELATIVE_PATH: "5ed32179b47097121f127bdb1ee4f405f636b7a931047981cc1340adc75964e8",
 }
 
 
@@ -417,8 +420,8 @@ class BootSelectionPatchTest(unittest.TestCase):
     def setUpClass(cls):
         cls.changes = parse_git_patch(PATCH_PATH.read_text(encoding="utf-8"))
 
-    def test_libavb_invalid_metadata_defaults_to_a_only(self):
-        change = target_changes(self.changes, AVB_AB_FLOW_RELATIVE_PATH)
+    def test_linked_rockchip_avb_invalid_metadata_defaults_to_a_only(self):
+        change = target_changes(self.changes, RK_AVB_AB_RELATIVE_PATH)
         added = stripped(change["added"])
         deleted = stripped(change["deleted"])
         context = stripped(change["context"])
@@ -433,6 +436,13 @@ class BootSelectionPatchTest(unittest.TestCase):
             deleted,
         )
         self.assertFalse(any("slots[0]" in line for line in change["deleted"]))
+        self.assertNotIn(
+            (
+                f"a/{STANDARD_AVB_AB_FLOW_RELATIVE_PATH}",
+                f"b/{STANDARD_AVB_AB_FLOW_RELATIVE_PATH}",
+            ),
+            self.changes,
+        )
 
     def test_patch_applies_without_fuzz_and_preserves_complete_a_only_defaults(self):
         missing = [
@@ -473,7 +483,7 @@ class BootSelectionPatchTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-            avb_source = (sdk_root / AVB_AB_FLOW_RELATIVE_PATH).read_text(
+            avb_source = (sdk_root / RK_AVB_AB_RELATIVE_PATH).read_text(
                 encoding="utf-8"
             )
             for assignment in (

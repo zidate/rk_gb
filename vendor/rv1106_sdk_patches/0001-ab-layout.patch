@@ -66,14 +66,17 @@ index 99c648b..8b27c20 100755
 @@ -463 +470 @@
 -		printf("%s: Failed to get partition '%s'.\n", __func__, ANDROID_PARTITION_SYSTEM);
 +		printf("%s: Failed to get partition '%s'.\n", __func__, root_part_name);
-diff --git a/sysdrv/source/uboot/u-boot/lib/avb/libavb_ab/avb_ab_flow.c b/sysdrv/source/uboot/u-boot/lib/avb/libavb_ab/avb_ab_flow.c
-index c84131d..a6898d6 100755
---- a/sysdrv/source/uboot/u-boot/lib/avb/libavb_ab/avb_ab_flow.c
-+++ b/sysdrv/source/uboot/u-boot/lib/avb/libavb_ab/avb_ab_flow.c
-@@ -70,4 +70,4 @@
-   data->slots[0].successful_boot = 0;
--  data->slots[1].priority = AVB_AB_MAX_PRIORITY - 1;
--  data->slots[1].tries_remaining = AVB_AB_MAX_TRIES_REMAINING;
-+  data->slots[1].priority = 0;
-+  data->slots[1].tries_remaining = 0;
-   data->slots[1].successful_boot = 0;
+diff --git a/sysdrv/source/uboot/u-boot/lib/avb/rk_avb_user/rk_ab_ops_user.c b/sysdrv/source/uboot/u-boot/lib/avb/rk_avb_user/rk_ab_ops_user.c
+index 2cd1562..45c2cde 100755
+--- a/sysdrv/source/uboot/u-boot/lib/avb/rk_avb_user/rk_ab_ops_user.c
++++ b/sysdrv/source/uboot/u-boot/lib/avb/rk_avb_user/rk_ab_ops_user.c
+@@ -148,8 +148,8 @@ void avb_ab_data_init(AvbABData* data)
+         data->slots[0].priority = AVB_AB_MAX_PRIORITY;
+         data->slots[0].tries_remaining = AVB_AB_MAX_TRIES_REMAINING;
+         data->slots[0].successful_boot = 0;
+-        data->slots[1].priority = AVB_AB_MAX_PRIORITY - 1;
+-        data->slots[1].tries_remaining = AVB_AB_MAX_TRIES_REMAINING;
++        data->slots[1].priority = 0;
++        data->slots[1].tries_remaining = 0;
+         data->slots[1].successful_boot = 0;
+ }

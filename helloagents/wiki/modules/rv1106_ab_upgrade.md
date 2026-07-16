@@ -41,13 +41,14 @@
 
 ## SDK 实编验证
 
-- 验证日期：2026-07-15。
+- 验证日期：2026-07-15；Rockchip 实际链接 A/B 初始化器修正于 2026-07-16 重新验证。
 - 板级配置：`BoardConfig-SPI_NAND-NONE-RV1106_IPC38_DEMO_V10-IPC-XWR60440.mk`。
 - 补丁按 `vendor/rv1106_sdk_patches/series` 中的 0001～0004 顺序应用。
-- `project/build.sh uboot` 成功，生成 U-Boot、SPL/TPL、ITB、loader 和 idblock；最终 ELF 中存在 `ab_sd_update`、`spinand_set_block_lock`、`avb_ab_mark_slot_active` 及 libavb user ops。
+- `CONFIG_AVB_LIBAVB_AB` 在此 SDK 实际链接 `lib/avb/rk_avb_user/rk_ab_ops_user.o`；无效 misc 初始化已在该对象中设为 A priority=15/tries=7、B priority=0/tries=0。
+- `project/build.sh uboot` 成功，生成 U-Boot、SPL/TPL、ITB、loader 和 idblock；最终 ELF 中存在 `ab_sd_update`、`spinand_set_block_lock`、`avb_ab_data_init`、`avb_ab_mark_slot_active` 及 libavb user ops。
 - `project/build.sh kernel` 成功，生成 `boot.img` 和 `vmlinux`；`vmlinux` 中存在 `spinand_get_block_lock`、`spinand_set_block_lock` 和 MTD lock/unlock 处理函数。
 - `make -C sysdrv/tools/board/rk_ota distclean all` 成功，产物为 32-bit ARM EABI5/uClibc 可执行文件。
-- 关键产物 SHA-256：`uboot.img`=`9c7188fbd4c08d60e6634c90f663e383d4d0960543fc089d1a2086268f5c2eb8`，`boot.img`=`8585d73c86766d2ee5abf512e4fd8ba5b0a30621004c64c809280491bd48ba85`，`rk_ota`=`82c8ecf642bfad94db5fe6bb22a34e9fc3a32ecd4a5ac896249b439879f428e4`。
+- 关键产物 SHA-256：`uboot.img`=`98674e21e62a0d71c7c32c61331cca511074085d5afc1c11e5d35a0ba5f6d965`，`boot.img`=`8585d73c86766d2ee5abf512e4fd8ba5b0a30621004c64c809280491bd48ba85`，`rk_ota`=`82c8ecf642bfad94db5fe6bb22a34e9fc3a32ecd4a5ac896249b439879f428e4`。
 - 原始 SDK 归档存在损坏，完整解压最终返回 tar exit 2；本次定向提取的 `project/sysdrv`、全部补丁目标及三个构建目标完整。归档中未参与本功能的其他组件不能据此视为已验证。
 
 ## 证据
