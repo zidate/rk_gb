@@ -387,11 +387,21 @@ int DmClientService::RunLwm2mClientOnce()
                 if (updateRet == 0) {
                     ++state.reportsInWindow;
                     state.lastReportTime = now;
+                    state.retryCount = 0;
+                    nextHeartbeat = now + static_cast<time_t>(rule.heartbeat_time_min) * 60;
+                } else {
+                    ++state.retryCount;
+                    if (state.retryCount < rule.retry_num) {
+                        nextHeartbeat = now + static_cast<time_t>(rule.retry_interval_min) * 60;
+                    } else {
+                        nextHeartbeat = now + static_cast<time_t>(rule.heartbeat_time_min) * 60;
+                        state.retryCount = 0;
+                    }
                 }
             } else {
                 printf("[DM] heartbeat skipped by reportNum/reportTime rule\n");
+                nextHeartbeat = now + static_cast<time_t>(rule.heartbeat_time_min) * 60;
             }
-            nextHeartbeat = now + static_cast<time_t>(rule.heartbeat_time_min) * 60;
         }
 
         if (state.addressChanged && !state.addressConfig.empty()) {
