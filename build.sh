@@ -109,6 +109,14 @@ function make_all()
 #----------------------------
 function image()
 {
+	OSD_FONT_SRC=$ROOT/Middleware/libmpp/rkipc/common/osd/noto_serif_sc_gb2312.otf
+	OSD_FONT_DST=$PACKAGING/oem_ipc/usr/share/noto_serif_sc_gb2312.otf
+	if [ ! -f "$OSD_FONT_SRC" ]; then
+		echo "OSD font not found: $OSD_FONT_SRC"
+		return 1
+	fi
+	mkdir -p "$(dirname "$OSD_FONT_DST")"
+	cp -f "$OSD_FONT_SRC" "$OSD_FONT_DST" || return 1
 	echo "make image ..."
 	make -C $PACKAGING;
 	echo "make image $PACKAGING $BOARD_TYPE $BLE_TYPE end ..."
