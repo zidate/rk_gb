@@ -195,14 +195,14 @@ function check()
 if [ "$1" == "clean" ];then
 #	check $2
 	clean_all
-#	image-clean
+	image-clean
 elif [ "$1" == "all" ];then
 	DMODE=release
 #	check $2
-#	clean_all
+	clean_all
 	make_all
-#	echo "BOARD_TYPE=$BOARD_TYPE"
-#	image
+	echo "BOARD_TYPE=$BOARD_TYPE"
+	image
 elif [ "$1" == "debug" ];then
 	DMODE=debug
 #	check $2

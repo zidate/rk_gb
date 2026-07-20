@@ -36,6 +36,7 @@ struct DmObjectState
     time_t lastReportTime;
     int reportsInWindow;
     time_t reportWindowStart;
+    int retryCount;
 
     DmObjectState();
 };

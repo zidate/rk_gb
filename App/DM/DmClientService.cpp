@@ -379,7 +379,7 @@ int DmClientService::RunLwm2mClientOnce()
         const time_t now = time(NULL);
         const DmRuleConfig rule = ParseDmRuleConfig(state.ruleConfig);
         if (IsReady(context) && now >= nextHeartbeat) {
-            if (DmReportAllowed(state, now)) {
+            if (state.retryCount > 0 || DmReportAllowed(state, now)) {
                 const int updateRet = lwm2m_update_registration(context,
                                                                 cfg.short_server_id,
                                                                 true);
@@ -387,11 +387,17 @@ int DmClientService::RunLwm2mClientOnce()
                 if (updateRet == 0) {
                     ++state.reportsInWindow;
                     state.lastReportTime = now;
+                    state.retryCount = 0;
+                    nextHeartbeat = now + static_cast<time_t>(rule.heartbeat_time_min) * 60;
+                } else {
+                    ++state.retryCount;
+                    printf("[DM] heartbeat update ret=%d, retry in 10s\n", updateRet);
+                    nextHeartbeat = now + 10;
                 }
             } else {
                 printf("[DM] heartbeat skipped by reportNum/reportTime rule\n");
+                nextHeartbeat = now + static_cast<time_t>(rule.heartbeat_time_min) * 60;
             }
-            nextHeartbeat = now + static_cast<time_t>(rule.heartbeat_time_min) * 60;
         }
 
         if (state.addressChanged && !state.addressConfig.empty()) {

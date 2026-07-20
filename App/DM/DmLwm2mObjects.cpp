@@ -370,7 +370,8 @@ DmObjectState::DmObjectState()
     : addressChanged(false),
       lastReportTime(0),
       reportsInWindow(0),
-      reportWindowStart(0)
+      reportWindowStart(0),
+      retryCount(0)
 {
 }
 

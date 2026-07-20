@@ -58,6 +58,11 @@ bool EnsureDirectoryExists(const std::string& filePath)
     return true;
 }
 
+}
+
+namespace
+{
+
 void SetIfNotEmpty(std::string& target, const std::string& value)
 {
     if (!value.empty()) {
@@ -250,7 +255,7 @@ int WriteDefaultConfig(const DmConfig& cfg, const std::string& path)
 
 DmConfig::DmConfig()
     : enabled(1),
-      server_uri(kDmDefaultAdaptServerUri),
+      server_uri(kDmDefaultCommercialServerUri),
       local_port(0),
       lifetime_sec(86400),
       short_server_id(123),
@@ -267,8 +272,7 @@ DmConfig::DmConfig()
       secret(kDmDefaultSecret)
 {
     device_values["sysVersion"] = "5.10.160";
-    device_values["softwareVer"] = "1.0.9";
-    
+    device_values["softwareVer"] = "2.0.0";
 }
 
 int LoadDmConfig(DmConfig& out, const std::string& path)
