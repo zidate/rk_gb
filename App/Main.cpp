@@ -4,7 +4,6 @@
 #include "Protocol/ProtocolManager.h"
 #include "Protocol/config/LocalConfigProvider.h"
 #include "DM/DmClientService.h"
-#include "Manager/CloudPlatformControl.h"
 #include "ChinaMobile/CmiotOsdControl.h"
 #include "ProduceNew/Produce.h"
 #include "ProduceNew/NetWifi.h"
@@ -13,6 +12,9 @@
 #include "Base64Coder.h"
 
 #include "web_server.h"
+
+
+static bool s_bStartCmiot = true;
 
 
 #if 01
@@ -1478,6 +1480,11 @@ bool CSofia::start()
 		g_AVManager.AudioParamInit();
 		g_AVManager.AudioInit();
 		//视频参数
+		{
+			const int osdRet = cmiot_osd_initialize();
+			if (osdRet != 0)
+				AppErr("cmiot_osd_initialize failed ret=%d\n", osdRet);
+		}
 		g_AVManager.VideoParamInit();//掉了这个接口，帧率码率等参数使用CFG_VIDEO的配置，不掉的话使用/oem/usr/bin/rkipc.ini的配置
 		g_AVManager.VideoInit();
 		
@@ -1568,25 +1575,12 @@ bool CSofia::start()
 		g_IndicatorLight.setLightStatus(CIndicatorLight::ENUM_POWER_INDICATOR_LIGHT_ALWAYS_ON);
 		g_IndicatorLight.setLightStatus(CIndicatorLight::ENUM_LINK_INDICATOR_LIGHT_ALWAYS_OFF);
 
-		const CloudPlatformType cloudPlatform = GetCloudPlatform();
-		AppErr("cloud_platform=%s\n", GetCloudPlatformName(cloudPlatform));
-		if (cloudPlatform == CLOUD_PLATFORM_CMIOT)
+		if (s_bStartCmiot)
 		{
-			const int osdRet = cmiot_osd_initialize();
-			if (osdRet != 0)
-				AppErr("cmiot_osd_initialize failed ret=%d\n", osdRet);
 			g_NetConfigHook.SetQrcodeEnable(false);
-			const int cmiotRet = cmiot_start();
-			if (cmiotRet != 0)
-			{
-				AppErr("cmiot_start failed ret=%d\n", cmiotRet);
-				return false;
-			}
-			while (1)
-			{
-				sleep(1);
-			}
+			cmiot_start();
 		}
+		while (1) sleep(1);
 
 
 		

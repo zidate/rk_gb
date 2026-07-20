@@ -8,7 +8,6 @@
 #include <string>
 
 #include "Common.h"
-#include "Manager/CloudPlatformControl.h"
 #include "Media/AVManager.h"
 #include "Media/NormalizedOsdControl.h"
 
@@ -615,9 +614,6 @@ int ApplyStoredCmiotOsd(const StoredCmiotOsd& config)
 
 int ApplyEffectiveConfigLocked(const StoredCmiotOsd& config)
 {
-    if (GetCloudPlatform() != CLOUD_PLATFORM_CMIOT) {
-        return 0;
-    }
     return config.osdSwitch ? ApplyStoredCmiotOsd(config)
                             : g_AVManager.ApplyLocalOsdConfig();
 }
@@ -660,8 +656,7 @@ extern "C" int cmiot_osd_initialize(void)
     if (loadRet != 0) {
         return loadRet;
     }
-    if (GetCloudPlatform() != CLOUD_PLATFORM_CMIOT ||
-        !current.valid || !current.osdSwitch) {
+    if (!current.valid || !current.osdSwitch) {
         return 0;
     }
     return ApplyStoredCmiotOsd(current);
@@ -669,9 +664,6 @@ extern "C" int cmiot_osd_initialize(void)
 
 extern "C" int cmiot_osd_is_override_active(void)
 {
-    if (GetCloudPlatform() != CLOUD_PLATFORM_CMIOT) {
-        return 0;
-    }
     pthread_mutex_lock(&g_cmiot_osd_mutex);
     const int loadRet = EnsureLoadedLocked();
     const bool active = loadRet == 0 && g_cmiot_osd.valid && g_cmiot_osd.osdSwitch;

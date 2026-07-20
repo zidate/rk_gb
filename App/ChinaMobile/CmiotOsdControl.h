@@ -7,8 +7,8 @@
 extern "C" {
 #endif
 
-/* 文本索引 0..4 映射硬件 RGN 1..5，RGN 6/7 保留。 */
-#define CMIOT_APP_OSD_TEXT_MAX 5
+/* 文本索引 0..6 映射硬件 RGN 1..7。 */
+#define CMIOT_APP_OSD_TEXT_MAX 7
 
 /* 返回 CMIOT_APP_OSD_TEXT_MAX。 */
 int cmiot_osd_get_text_capacity(void);

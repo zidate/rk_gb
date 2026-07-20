@@ -23,21 +23,18 @@ def main() -> int:
     platform_cpp = read("App/Manager/CloudPlatformControl.cpp")
     cmake = read("App/CMakeLists.txt")
 
-    for token in ("CFG_CLOUD_PLATFORM", "CFG_CMIOT_OSD"):
-        require(token in kinds and token in kind_map, f"missing config key {token}")
-    require('"CloudPlatform"' in kind_map, "missing CloudPlatform JSON namespace")
+    require("CFG_CMIOT_OSD" in kinds and "CFG_CMIOT_OSD" in kind_map,
+            "missing config key CFG_CMIOT_OSD")
     require('"CMIOT_OSD"' in kind_map, "missing CMIOT_OSD JSON namespace")
-    require('table["platform"] = CLOUD_PLATFORM_GB28181' in defaults,
-            "GB28181 must be the persisted default platform")
     require('table["valid"] = false' in defaults and 'table["osd_switch"] = 0' in defaults,
             "cmiot OSD must default to an invalid, disabled bank")
-    for token in ("CLOUD_PLATFORM_GB28181", "CLOUD_PLATFORM_CMIOT", "GetCloudPlatform"):
-        require(token in platform_h + platform_cpp, f"missing platform API {token}")
-    require("static const CloudPlatformType platform = ReadCloudPlatform()" in platform_cpp,
-            "platform selection must stay fixed until process restart")
-    require("Manager/CloudPlatformControl.cpp" in cmake,
-            "CloudPlatformControl.cpp must be compiled")
-    print("PASS: cloud platform and cmiot OSD config namespaces are persistent")
+
+    # CloudPlatformControl has been removed; GetCloudPlatform no longer exists
+    require(platform_h == "" and platform_cpp == "",
+            "CloudPlatformControl.h/.cpp must be deleted")
+    require("CloudPlatformControl.cpp" not in cmake,
+            "CloudPlatformControl.cpp must be removed from CMakeLists.txt")
+    print("PASS: cmiot OSD config persisted; CloudPlatformControl removed")
     return 0
 
 

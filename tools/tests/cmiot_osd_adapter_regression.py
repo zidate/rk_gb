@@ -31,7 +31,7 @@ def main() -> int:
         "cmiot_osd_get_text_capacity",
         "cmiot_osd_set_config",
         "cmiot_osd_get_config",
-        "CMIOT_APP_OSD_TEXT_MAX 5",
+        "CMIOT_APP_OSD_TEXT_MAX 7",
     ):
         require(token in CMIOT_H, f"CmiotOsdControl.h should expose {token}.")
 

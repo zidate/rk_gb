@@ -84,7 +84,6 @@ static ConfigPair s_configKeyMaps[] =
 	{"OSD_Text",CFG_OSD_TEXT},
 	{"CMIOT",CFG_CMIOT},
 	{"CMIOT_INTRUDE",CFG_CMIOT_INTRUDE},
-	{"CloudPlatform",CFG_CLOUD_PLATFORM},
 	{"CMIOT_OSD",CFG_CMIOT_OSD},
 	{NULL,}
 };

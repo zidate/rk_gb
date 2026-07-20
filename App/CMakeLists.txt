@@ -143,7 +143,6 @@ set(Media_SRC
 #Manager模块
 set(Manager_SRC
 	Manager/ManagerDefaultConfig.cpp
-	Manager/CloudPlatformControl.cpp
 )
 #Tuya模块
 set(Tuya_SRC tuya/Tuya.cpp

@@ -329,10 +329,10 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 	},
 	{
 		.handle = 1,
-		.max_width = 800,
-		.max_height = 80,
-		.width = 800,
-		.height = 80,
+		.max_width = 0,
+		.max_height = 0,
+		.width = 0,
+		.height = 0,
 		.x = 0,
 		.y = 0,
 		.alignment = 0,
@@ -345,10 +345,10 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 	},
 	{
 		.handle = 2,
-		.max_width = 800,
-		.max_height = 80,
-		.width = 800,
-		.height = 80,
+		.max_width = 0,
+		.max_height = 0,
+		.width = 0,
+		.height = 0,
 		.x = 0,
 		.y = 0,
 		.alignment = 0,
@@ -361,10 +361,10 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 	},
 	{
 		.handle = 3,
-		.max_width = 800,
-		.max_height = 80,
-		.width = 800,
-		.height = 80,
+		.max_width = 0,
+		.max_height = 0,
+		.width = 0,
+		.height = 0,
 		.x = 0,
 		.y = 0,
 		.alignment = 0,
@@ -377,10 +377,10 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 	},
 	{
 		.handle = 4,
-		.max_width = 800,
-		.max_height = 80,
-		.width = 800,
-		.height = 80,
+		.max_width = 0,
+		.max_height = 0,
+		.width = 0,
+		.height = 0,
 		.x = 0,
 		.y = 0,
 		.alignment = 0,
@@ -393,10 +393,10 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 	},
 	{
 		.handle = 5,
-		.max_width = 800,
-		.max_height = 80,
-		.width = 800,
-		.height = 80,
+		.max_width = 0,
+		.max_height = 0,
+		.width = 0,
+		.height = 0,
 		.x = 0,
 		.y = 0,
 		.alignment = 0,
@@ -409,10 +409,10 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 	},
 	{
 		.handle = 6,
-		.max_width = 800,
-		.max_height = 80,
-		.width = 800,
-		.height = 80,
+		.max_width = 0,
+		.max_height = 0,
+		.width = 0,
+		.height = 0,
 		.x = 0,
 		.y = 0,
 		.alignment = 0,
@@ -425,10 +425,10 @@ RGN_OSD_PARAM_T s_rgn_osd_param[8] = {
 	},
 	{
 		.handle = 7,
-		.max_width = 800,
-		.max_height = 80,
-		.width = 800,
-		.height = 80,
+		.max_width = 0,
+		.max_height = 0,
+		.width = 0,
+		.height = 0,
 		.x = 0,
 		.y = 0,
 		.alignment = 0,
@@ -4006,12 +4006,13 @@ int rk_video_get_resolution_v10(int stream_id, int *w,int *h)
 		return -1;
 	}
 
-	char entry[128] = {'\0'};
-	snprintf(entry, 127, "video.%d:width", stream_id);
-	snprintf(entry, 127, "video.%d:height", stream_id);
-	
-	*w = rk_param_get_int(entry, 1920);
-	*h = rk_param_get_int(entry, 1080);
+	char entry_w[128] = {'\0'};
+	char entry_h[128] = {'\0'};
+	snprintf(entry_w, 127, "video.%d:width", stream_id);
+	snprintf(entry_h, 127, "video.%d:height", stream_id);
+
+	*w = rk_param_get_int(entry_w, 1920);
+	*h = rk_param_get_int(entry_h, 1080);
 
 	return 0;
 }
@@ -4531,6 +4532,11 @@ int rkipc_osd_bmp_create(int id, osd_data_s *osd_data) {
 	RGN_CHN_ATTR_S stRgnChnAttr;
 	BITMAP_S stBitmap;
 
+	if (osd_data->width <= 0 || osd_data->height <= 0) {
+		LOG_WARN("rkipc_osd_bmp_create skip: invalid size %dx%d\n", osd_data->width, osd_data->height);
+		return RK_SUCCESS;
+	}
+
 	// create overlay regions
 	memset(&stRgnAttr, 0, sizeof(stRgnAttr));
 	stRgnAttr.enType = OVERLAY_RGN;
@@ -4597,6 +4603,11 @@ int rkipc_osd_bmp_create(int id, osd_data_s *osd_data) {
 			return RK_FAILURE;
 		}
 		LOG_DEBUG("RK_MPI_RGN_AttachToChn to jpeg success\n");
+	}
+
+	if (osd_data->width <= 0 || osd_data->height <= 0) {
+		LOG_WARN("rkipc_osd_bmp_create skip: invalid size %dx%d\n", osd_data->width, osd_data->height);
+		return RK_SUCCESS;
 	}
 
 	// set bitmap
@@ -4710,6 +4721,12 @@ int rkipc_osd_bmp_change(int id, osd_data_s *osd_data) {
 	}
 
 	// set bitmap
+	
+	if (osd_data->width <= 0 || osd_data->height <= 0) {
+		LOG_WARN("rkipc_osd_bmp_change skip: invalid size %dx%d\n", osd_data->width, osd_data->height);
+		return RK_SUCCESS;
+	}
+	
 	stBitmap.enPixelFormat = RK_FMT_ARGB8888;
 	stBitmap.u32Width = osd_data->width;
 	stBitmap.u32Height = osd_data->height;
@@ -7966,7 +7983,7 @@ static void *thread_osd_update(void *arg) {
 					p_osd_time_param[i].width = bmp_width;
 					p_osd_time_param[i].height = bmp_height;
 				} else if (p_osd_time_param[i].show && strlen(p_osd_time_param[i].text) > 0) {
-					iconv_gbk_to_wchar(p_osd_time_param[i].text, wch_text);
+					iconv_utf8_to_wchar(p_osd_time_param[i].text, wch_text);
 					bmp_width = UPALIGNTO16(wstr_get_actual_advance_x(wch_text));
 					bmp_height = UPALIGNTO16(s_osd_font_size) + 16;
 					p_osd_time_param[i].width = bmp_width;
@@ -8039,8 +8056,7 @@ static void *thread_osd_update(void *arg) {
 				//更新自定义文字显示
 				if (i > 0 && p_osd_time_param[i].show && strlen(p_osd_time_param[i].text) > 0)
 				{
-//					iconv_utf8_to_wchar(p_osd_time_param[i].text, wch_text);
-					iconv_gbk_to_wchar(p_osd_time_param[i].text, wch_text);
+					iconv_utf8_to_wchar(p_osd_time_param[i].text, wch_text);
 					bmp_width = UPALIGNTO16(wstr_get_actual_advance_x(wch_text));
 					bmp_height = UPALIGNTO16(s_osd_font_size) + 16;
 					p_osd_time_param[i].width = bmp_width;
@@ -8059,10 +8075,13 @@ static void *thread_osd_update(void *arg) {
 						stBitmap.u32Width = bmp_width;
 						stBitmap.u32Height = bmp_height;
 						stBitmap.pData = (RK_VOID *)bmp_buffer;
-						ret = RK_MPI_RGN_SetBitMap(p_osd_time_param[i].handle, &stBitmap);
-						if (ret != RK_SUCCESS) {
-							LOG_ERROR("RK_MPI_RGN_SetBitMap failed with %#x, handle: %d\n", ret, p_osd_time_param[i].handle);
-						}		
+						if (bmp_width > 0 && bmp_height > 0) 
+						{
+							ret = RK_MPI_RGN_SetBitMap(p_osd_time_param[i].handle, &stBitmap);
+							if (ret != RK_SUCCESS) {
+								LOG_ERROR("RK_MPI_RGN_SetBitMap failed with %#x, handle: %d\n", ret, p_osd_time_param[i].handle);
+							}
+						}
 						free(bmp_buffer);
 					}
 				}
@@ -8096,9 +8115,12 @@ static void *thread_osd_update(void *arg) {
 				stBitmap.u32Width = bmp_width;
 				stBitmap.u32Height = bmp_height;
 				stBitmap.pData = (RK_VOID *)bmp_buffer;
-				ret = RK_MPI_RGN_SetBitMap(p_osd_time_param[0].handle, &stBitmap);
-				if (ret != RK_SUCCESS) {
-					LOG_ERROR("RK_MPI_RGN_SetBitMap failed with %#x, handle: %d\n", ret, p_osd_time_param[0].handle);
+				if (bmp_width > 0 && bmp_height > 0) 
+				{
+					ret = RK_MPI_RGN_SetBitMap(p_osd_time_param[0].handle, &stBitmap);
+					if (ret != RK_SUCCESS) {
+						LOG_ERROR("RK_MPI_RGN_SetBitMap failed with %#x, handle: %d\n", ret, p_osd_time_param[0].handle);
+					}
 				}		
 				free(bmp_buffer);
 			}
@@ -8125,9 +8147,9 @@ int gb_rkipc_osd_time_create(RGN_OSD_PARAM_T *p_st_rgn_osd_time_param) {
 		return 0;
 	}
 
-	p_st_rgn_osd_time_param->max_width = 800;
+	p_st_rgn_osd_time_param->max_width = s_stream_venc_chan_param[0].width;
 	p_st_rgn_osd_time_param->max_height = UPALIGNTO16(RKIPC_OSD_MAX_FONT_SIZE) + 16;
-	p_st_rgn_osd_time_param->width = p_st_rgn_osd_time_param->max_width;
+	p_st_rgn_osd_time_param->width = 0;
 	p_st_rgn_osd_time_param->height = p_st_rgn_osd_time_param->max_height;
 
 	// create overlay regions
@@ -8142,8 +8164,13 @@ int gb_rkipc_osd_time_create(RGN_OSD_PARAM_T *p_st_rgn_osd_time_param) {
 			stRgnAttr.unAttr.stOverlay.stSize.u32Height);
 	ret = RK_MPI_RGN_Create(RgnHandle, &stRgnAttr);
 	if (RK_SUCCESS != ret) {
-		LOG_ERROR("RK_MPI_RGN_Create (%d) failed with %#x\n", RgnHandle, ret);
-		goto ERR_CREAT;
+		LOG_WARN("RK_MPI_RGN_Create (%d) failed (%#x), attempting destroy+recreate\n", RgnHandle, ret);
+		RK_MPI_RGN_Destroy(RgnHandle);
+		ret = RK_MPI_RGN_Create(RgnHandle, &stRgnAttr);
+		if (RK_SUCCESS != ret) {
+			LOG_ERROR("RK_MPI_RGN_Create (%d) failed with %#x after destroy\n", RgnHandle, ret);
+			goto ERR_CREAT;
+		}
 	}
 	LOG_DEBUG("The handle: %d, create success\n", RgnHandle);
 
@@ -8328,8 +8355,12 @@ ERR_CREAT:
 int gb_rkipc_osd_init() {
 
 	int ret;
-	
+	//create_font("/mnt/sdcard/simsun_cn_3000.ttf", s_osd_font_size);
 	create_font("/oem/usr/share/noto_serif_sc_gb2312.otf", s_osd_font_size);
+	for (int i = 0; i < 8; i++) {
+		s_rgn_osd_param[i].max_width = s_stream_venc_chan_param[0].width;
+		s_rgn_osd_param[i].max_height = UPALIGNTO16(s_osd_font_size) + 16;
+	}
 
 	gb_rkipc_osd_time_create(&s_rgn_osd_param[0]);
 

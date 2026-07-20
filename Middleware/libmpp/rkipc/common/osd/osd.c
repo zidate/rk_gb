@@ -178,9 +178,9 @@ int iconv_gbk_to_wchar(const char *in, wchar_t *out) {
 
 int generate_date_time(const char *fmt, wchar_t *result) {
 	char year[8] = {0}, month[4] = {0}, day[4] = {0};
-	char week[16] = {0}, hms[12] = {0};
-	char ymd_string[16] = {0};
-	char week_string[16] = {0};
+	char week[16] = {0}, hms[32] = {0};
+	char ymd_string[32] = {0};
+	char week_string[32] = {0};
 	char time_string[MAX_WCH_BYTE] = {0};
 	int wid = -1;
 	int wchar_cnt = 0;
@@ -229,7 +229,7 @@ int generate_date_time(const char *fmt, wchar_t *result) {
 		}
 	} else if (strstr(fmt, OSD_FMT_WEEK1)) {
 		strftime(week, sizeof(week), "%A", localtime(&curtime));
-		sprintf(week_string, " %s", week);
+		sprintf(week_string, "%s", week);
 	}
 
 	wchar_cnt = sizeof(ymd_string) / sizeof(wchar_t);
@@ -255,9 +255,15 @@ int generate_date_time(const char *fmt, wchar_t *result) {
 			sprintf(ymd_string, "%s月%s日%s年", month, day, year);
 		else if (strstr(fmt, OSD_FMT_YMD2))
 			sprintf(ymd_string, "%s日%s月%s年", day, month, year);
+		else if (strstr(fmt, OSD_FMT_YMD3))
+			sprintf(ymd_string, "%s年%s月%s日", year, month, day);
+		else if (strstr(fmt, OSD_FMT_YMD4))
+			sprintf(ymd_string, "%s月%s日%s年", month, day, year);
+		else if (strstr(fmt, OSD_FMT_YMD5))
+			sprintf(ymd_string, "%s日%s月%s年", day, month, year);
 	}
 
-	snprintf(time_string, MAX_WCH_BYTE, "%s%s %s", ymd_string, week_string, hms);
+	snprintf(time_string, MAX_WCH_BYTE, "%s%s%s", ymd_string, week_string, hms);
 	// LOG_INFO("time_string is %s\n", time_string);
 	printf("time_string: %s\n", time_string);
 	printf("time_string len: %d\n", strlen(time_string));
@@ -272,9 +278,9 @@ int generate_date_time(const char *fmt, wchar_t *result) {
 
 int generate_date_time_2(const char *fmt, wchar_t *result) {
 	char year[8] = {0}, month[4] = {0}, day[4] = {0};
-	char week[16] = {0}, hms[12] = {0};
+	char week[16] = {0}, hms[32] = {0};
 	char ymd_string[32] = {0};
-	char week_string[16] = {0};
+	char week_string[32] = {0};
 	char time_string[MAX_WCH_BYTE] = {0};
 	int wid = -1;
 

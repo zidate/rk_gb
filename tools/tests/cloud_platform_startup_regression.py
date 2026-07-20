@@ -12,21 +12,17 @@ def require(condition: bool, message: str) -> None:
 
 
 def main() -> int:
-    require('#include "Manager/CloudPlatformControl.h"' in MAIN,
-            "Main must use the persisted platform selector")
-    require("static bool s_bStartCmiot" not in MAIN,
-            "hard-coded cmiot selection must be removed")
-    require("GetCloudPlatform()" in MAIN and "CLOUD_PLATFORM_CMIOT" in MAIN,
-            "startup must branch on the configured platform")
-    cmiot_pos = MAIN.find("cmiot_start();")
-    protocol_pos = MAIN.find("protocolManager.Start()")
-    require(cmiot_pos >= 0 and protocol_pos > cmiot_pos,
-            "both startup paths must remain present")
-    require("if (cloudPlatform == CLOUD_PLATFORM_CMIOT)" in MAIN,
-            "CMIOT startup must be an explicit exclusive branch")
-    require("cloud_platform=%s" in MAIN,
-            "selected platform must be logged")
-    print("PASS: startup selects exactly one configured cloud platform")
+    require('#include "Manager/CloudPlatformControl.h"' not in MAIN,
+            "CloudPlatformControl include must be removed")
+    require("GetCloudPlatform" not in MAIN,
+            "GetCloudPlatform must be removed from Main.cpp")
+    require("cmiot_osd_initialize()" in MAIN,
+            "cmiot_osd_initialize must be called unconditionally")
+    require("cmiot_start()" not in MAIN,
+            "cmiot_start gateway must be removed with GetCloudPlatform")
+    require("while (1)" not in MAIN,
+            "infinite loop blocking GB startup must be removed")
+    print("PASS: startup no longer uses CloudPlatform; cmiot_osd_initialize called unconditionally")
     return 0
 
 

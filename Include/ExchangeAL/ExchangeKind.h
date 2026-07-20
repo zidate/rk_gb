@@ -71,7 +71,6 @@ enum ConfigKinds
 	CFG_OSD_TEXT, 		//OSD 自定义文字
 	CFG_CMIOT, 			//千里眼
 	CFG_CMIOT_INTRUDE, 	//千里眼 入侵配置
-	CFG_CLOUD_PLATFORM, //当前云平台：GB28181/CMIOT
 	CFG_CMIOT_OSD,      //cmiot 独立 OSD 配置
 	CFG_NR,
 };

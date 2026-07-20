@@ -1028,8 +1028,8 @@ int cmiot_start()
 	//snprintf(g_imei, sizeof(g_imei), "119032221000020");
 #if 1//WiFi枪机
 #if 1
-	snprintf(g_mac, sizeof(g_mac), "2ce099897495");
-	snprintf(g_imei, sizeof(g_imei), "119032221000026");
+	snprintf(g_mac, sizeof(g_mac), "2CE099897492");
+	snprintf(g_imei, sizeof(g_imei), "119032221000023");
 #else//罗工
     snprintf(g_mac, sizeof(g_mac), "2CE099897497");
 	snprintf(g_imei, sizeof(g_imei), "119032221000028");

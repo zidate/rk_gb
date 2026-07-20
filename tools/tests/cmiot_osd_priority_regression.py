@@ -23,8 +23,8 @@ def main() -> int:
             "local updates must still be cached")
     require("cmiot_osd_initialize()" in MAIN,
             "CMIOT boot must restore the persisted OSD bank")
-    require("cloudPlatform == CLOUD_PLATFORM_CMIOT" in MAIN,
-            "restore must be scoped to CMIOT startup")
+    require("cloudPlatform == CLOUD_PLATFORM_CMIOT" not in MAIN,
+            "restore must not be scoped to cloud platform")
     print("PASS: cmiot override suppresses local refresh and restores local on disable")
     return 0
 

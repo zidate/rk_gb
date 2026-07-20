@@ -19,8 +19,8 @@ namespace
 static const int kVideoOsdDateTimeId = 1;
 static const int kVideoOsdCustomTextId = 2;
 static const int kVideoOsdCoordinateMax = 10000;
-static const int kDefaultMainStreamWidth = 1920;
-static const int kDefaultMainStreamHeight = 1080;
+static const int kDefaultMainStreamWidth = 2560;
+static const int kDefaultMainStreamHeight = 1440;
 static int g_cached_master_switch = -1;
 static int g_cached_event_switch = -1;
 static int g_cached_alert_switch = -1;
@@ -139,10 +139,10 @@ static bool QueryMainStreamResolution(int& width, int& height)
 
 static void QueryMainStreamResolutionOrDefault(int& width, int& height)
 {
-    if (!QueryMainStreamResolution(width, height)) {
+    //if (!QueryMainStreamResolution(width, height)) {
         width = kDefaultMainStreamWidth;
         height = kDefaultMainStreamHeight;
-    }
+    //}
 }
 
 static int ClampVideoOsdCoordinate(int value)
