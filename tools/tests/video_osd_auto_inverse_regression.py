@@ -12,6 +12,9 @@ FONT_FACTORY_C = (ROOT / "Middleware/libmpp/rkipc/common/osd/font_factory.c").re
 RK_VIDEO_C = (
     ROOT / "Middleware/libmpp/rkipc/src/rv1106_dual_ipc/video/video.c"
 ).read_text(encoding="utf-8-sig", errors="ignore")
+OSD_UPDATE_THREAD = RK_VIDEO_C.split("static void *thread_osd_update", 1)[1].split(
+    "int gb_rkipc_osd_time_create", 1
+)[0]
 
 
 def require(condition: bool, message: str) -> None:
@@ -53,11 +56,19 @@ def main() -> int:
         "RV1106 OSD bitmap refresh should use the ARGB8888 per-character callback in auto mode.",
     )
     require(
+        "auto_color_enabled = rkipc_osd_auto_color_is_enabled();" in OSD_UPDATE_THREAD
+        and "auto_color_enabled && i > 0" in OSD_UPDATE_THREAD
+        and "p_osd_time_param[i].changed = 1;" in OSD_UPDATE_THREAD,
+        "Visible text OSD regions should be redrawn after each luminance-map refresh in auto mode.",
+    )
+    require(
         'color = 0xffffff' not in RK_VIDEO_C,
         "font_color_mode=auto should not be implemented as fixed white.",
     )
 
-    print("PASS: RV1106 OSD auto color uses NV12 luminance and ARGB8888 per-character callback")
+    print(
+        "PASS: RV1106 OSD auto color refreshes time/text bitmaps from NV12 luminance"
+    )
     return 0
 
 

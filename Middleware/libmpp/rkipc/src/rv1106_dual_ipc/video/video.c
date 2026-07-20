@@ -7950,6 +7950,7 @@ static void *thread_osd_update(void *arg) {
 	int bmp_width;
 	int bmp_height;
 	int bmp_size;
+	int auto_color_enabled;
 	unsigned char *bmp_buffer = NULL;
 	time_t rawtime;
 	struct tm *cur_time_info;
@@ -7968,10 +7969,15 @@ static void *thread_osd_update(void *arg) {
 		else
 			last_time_sec = cur_time_info->tm_sec;
 		rkipc_osd_auto_color_update();
+		auto_color_enabled = rkipc_osd_auto_color_is_enabled();
 
 		for (int i = 0; i < 8; i++)
 		{
 			pthread_mutex_lock(&p_osd_time_param[i].mutex);
+			// 自动颜色模式下，自定义文字需随最新亮度图周期重绘。
+			if (auto_color_enabled && i > 0 && p_osd_time_param[i].show &&
+			    p_osd_time_param[i].text[0] != '\0')
+				p_osd_time_param[i].changed = 1;
 			while (p_osd_time_param[i].changed)
 			{
 				printf("rgn[%d] change. text: %s, x: %d, y: %d, show: %d\n", i, p_osd_time_param[i].text, 
