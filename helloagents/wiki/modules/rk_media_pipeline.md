@@ -127,7 +127,7 @@ flowchart TD
 | cmiot OSD 适配 | `App/ChinaMobile/CmiotOsdControl.*` 对外提供 `cmiot_osd_initialize()`、`cmiot_osd_set_config()` / `cmiot_osd_get_config()` | cmiot 配置独立持久化到 `CFG_CMIOT_OSD`，不经过 `VideoOsdState`；`NormalizedOsdControl` 只在 RK OSD 最终边界把 `0-10000` 坐标换成像素 |
 | 翻转 | `CFG_CAMERA_PARAM -> CameraParamAll.vCameraParamAll[0].mirror/flip` | `VideoImageControl::ApplyVideoImageFlipMode()` 写配置并触发 `applyOK` |
 
-RV1106 的 OSD 字体仍走 ARGB8888 FreeType 位图路径。`font_color_mode=auto` 时，RK 层会从 `VIDEO_PIPE_1` 取一帧 NV12，按 Y 平面下采样生成亮/暗 map，再在 `font_factory` 逐字符回调里选择黑色或白色；取不到帧或格式不匹配时不阻塞刷新，字符颜色回退为白色。时间 OSD 和所有可见、非空的 text OSD 都随这份亮度 map 每秒重绘；固定颜色模式下 text OSD 仍只在配置变化时重绘。
+RV1106 的 OSD 字体仍走 ARGB8888 FreeType 位图路径。`font_color_mode=auto` 时，RK 层会从 `VIDEO_PIPE_1` 取一帧 NV12，按 Y 平面下采样生成亮/暗 map，再在 `font_factory` 逐字符回调里选择黑色或白色；取不到帧或格式不匹配时不阻塞刷新，字符颜色回退为白色。时间 OSD 因内容每秒变化而正常重绘；text OSD 只在其覆盖区域的 8×8 亮度分类单元跨过黑/白阈值，或配置发生变化时重绘，避免静态画面每秒重复调用 FreeType 与 RGN。字体画布背景像素为全透明，GB OSD RGN 使用 `BgAlpha=0/FgAlpha=255`，不再叠加半透明黑底。
 
 同一固件通过 `CFG_CLOUD_PLATFORM` 在启动时选择唯一云平台，缺省及非法配置均回退 `GB28181`；选择结果在进程生命周期内固定，修改配置后重启生效。`CMIOT` 与 `GB28181` 不同时启动，cmiot SDK 的 `mode=2` 只是水印排版模式，不表示当前云平台为国标。
 
@@ -167,6 +167,7 @@ cmiot 覆盖期间，本地 OSD 配置仍正常保存并更新 `AVManager` 缓�
 - `App/Protocol/gb28181/GB28181RtpPsSender.*`
 
 ## 变更历史
+- 2026-07-20: 优化 text OSD 自动黑白刷新：新增局部亮度分类变化门控，静态区域不再周期重绘；同时将字体画布和 RGN 背景改为全透明，去掉 OSD 黑底。
 - 2026-07-20: 修复 text OSD 在 `font_color_mode=auto` 下只按首次画面选色的问题；亮度 map 周期更新后会同步触发可见 text 区域重绘，固定色刷新策略不变。
 - 2026-07-15: 增加单固件 `GB28181/CMIOT` 运行时平台选择和 cmiot OSD 独立持久化；cmiot 坐标只在 `NormalizedOsdControl` 最终边界换算，覆盖关闭后恢复最新本地 OSD。
 - 2026-07-13: 增加首版 cmiot OSD 适配记录；当时接口位于 `App/cmiot` 且复用 `VideoOsdControl/CFG_OSD_*`，该口径已由 2026-07-15 的独立持久化与平台优先级规则取代。

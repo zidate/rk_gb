@@ -99,9 +99,8 @@ unsigned int set_font_color(unsigned int font_color) {
 	// argb → bgra
 	font_color_ = font_color_to_bgra(font_color);
 
-	// argb → bgra
-	bg_font_color_ = font_color_to_bgra(0x000000) & 0xFFFFFF00;
-	bg_font_color_ |= 0x00000060;
+	// 字体画布背景保持全透明，只保留字形像素。
+	bg_font_color_ = 0x00000000;
 
 	// LOG_INFO("font_color is %08x, font_color_ is %08x\n", font_color,
 	// font_color_);
@@ -219,8 +218,8 @@ void draw_argb8888_text_with_color_callback(unsigned char *buffer, int buf_w, in
 		pthread_mutex_unlock(&g_font_mutex);
 		return;
 	}
-	unsigned int BG_COLOR  = bg_font_color_; // 黑色前景色
-	// 绘制背景
+	unsigned int BG_COLOR  = bg_font_color_;
+	// 绘制透明背景
 	unsigned int* imagePtr = (unsigned int*)buffer;
     for (int k = 0; k < buf_w * buf_h; k++ ) {
         *imagePtr++  = BG_COLOR;

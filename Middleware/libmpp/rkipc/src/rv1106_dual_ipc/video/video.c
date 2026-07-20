@@ -7627,6 +7627,7 @@ static void *s_osd_update_signal;
 static pthread_mutex_t s_osd_auto_color_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int s_osd_color_auto_enabled;
 static unsigned char *s_osd_auto_color_map;
+static unsigned char *s_osd_auto_color_changed_map;
 static int s_osd_auto_color_map_w;
 static int s_osd_auto_color_map_h;
 static int s_osd_auto_color_frame_w;
@@ -7709,6 +7710,10 @@ static void rkipc_osd_auto_color_free_locked(void)
 		free(s_osd_auto_color_map);
 		s_osd_auto_color_map = NULL;
 	}
+	if (s_osd_auto_color_changed_map) {
+		free(s_osd_auto_color_changed_map);
+		s_osd_auto_color_changed_map = NULL;
+	}
 	s_osd_auto_color_map_w = 0;
 	s_osd_auto_color_map_h = 0;
 	s_osd_auto_color_frame_w = 0;
@@ -7743,6 +7748,7 @@ static int rkipc_osd_auto_color_resize_locked(int frame_w, int frame_h, int down
 	int map_w;
 	int map_h;
 	unsigned char *map;
+	unsigned char *changed_map;
 
 	if (frame_w <= 0 || frame_h <= 0 || downsample <= 0)
 		return -1;
@@ -7751,19 +7757,24 @@ static int rkipc_osd_auto_color_resize_locked(int frame_w, int frame_h, int down
 	map_h = (frame_h + downsample - 1) / downsample;
 	if (map_w <= 0 || map_h <= 0)
 		return -1;
-	if (s_osd_auto_color_map && s_osd_auto_color_frame_w == frame_w &&
+	if (s_osd_auto_color_map && s_osd_auto_color_changed_map &&
+	    s_osd_auto_color_frame_w == frame_w &&
 	    s_osd_auto_color_frame_h == frame_h && s_osd_auto_color_map_w == map_w &&
 	    s_osd_auto_color_map_h == map_h && s_osd_auto_color_downsample == downsample)
 		return 0;
 
 	map = (unsigned char *)malloc(map_w * map_h);
-	if (!map) {
+	changed_map = (unsigned char *)malloc(map_w * map_h);
+	if (!map || !changed_map) {
+		free(map);
+		free(changed_map);
 		rkipc_osd_auto_color_free_locked();
 		return -1;
 	}
 
 	rkipc_osd_auto_color_free_locked();
 	s_osd_auto_color_map = map;
+	s_osd_auto_color_changed_map = changed_map;
 	s_osd_auto_color_map_w = map_w;
 	s_osd_auto_color_map_h = map_h;
 	s_osd_auto_color_frame_w = frame_w;
@@ -7776,6 +7787,8 @@ static int rkipc_osd_auto_color_resize_locked(int frame_w, int frame_h, int down
 static void rkipc_osd_auto_color_fill_map_locked(const unsigned char *y_addr, int frame_w,
                                                  int frame_h, int stride, int downsample)
 {
+	int previous_map_valid = s_osd_auto_color_map_valid;
+
 	for (int my = 0; my < s_osd_auto_color_map_h; my++) {
 		int y0 = my * downsample;
 		int y1 = rkipc_osd_clamp_int(y0 + downsample, 0, frame_h);
@@ -7784,6 +7797,8 @@ static void rkipc_osd_auto_color_fill_map_locked(const unsigned char *y_addr, in
 			int x1 = rkipc_osd_clamp_int(x0 + downsample, 0, frame_w);
 			unsigned int sum = 0;
 			unsigned int count = 0;
+			unsigned char bright;
+			int index;
 
 			for (int y = y0; y < y1; y++) {
 				const unsigned char *line = y_addr + y * stride;
@@ -7792,8 +7807,11 @@ static void rkipc_osd_auto_color_fill_map_locked(const unsigned char *y_addr, in
 					count++;
 				}
 			}
-			s_osd_auto_color_map[my * s_osd_auto_color_map_w + mx] =
-				count && (sum / count >= RKIPC_OSD_AUTO_THRESHOLD) ? 1 : 0;
+			index = my * s_osd_auto_color_map_w + mx;
+			bright = count && (sum / count >= RKIPC_OSD_AUTO_THRESHOLD) ? 1 : 0;
+			s_osd_auto_color_changed_map[index] =
+				!previous_map_valid || s_osd_auto_color_map[index] != bright;
+			s_osd_auto_color_map[index] = bright;
 		}
 	}
 	s_osd_auto_color_map_valid = 1;
@@ -7808,6 +7826,7 @@ static int rkipc_osd_auto_color_update(void)
 	int stride;
 	int ret;
 	int release_ret;
+	int map_updated = 0;
 
 	if (!rkipc_osd_auto_color_is_enabled())
 		return 0;
@@ -7815,7 +7834,7 @@ static int rkipc_osd_auto_color_update(void)
 	memset(&frame, 0, sizeof(frame));
 	ret = RK_MPI_VI_GetChnFrame(pipe_id_, VIDEO_PIPE_1, &frame, RKIPC_OSD_AUTO_VI_TIMEOUT_MS);
 	if (ret != RK_SUCCESS)
-		return ret;
+		return 0;
 
 	y_addr = (unsigned char *)RK_MPI_MB_Handle2VirAddr(frame.stVFrame.pMbBlk);
 	frame_w = frame.stVFrame.u32Width;
@@ -7826,9 +7845,11 @@ static int rkipc_osd_auto_color_update(void)
 	    stride >= frame_w) {
 		pthread_mutex_lock(&s_osd_auto_color_mutex);
 		if (s_osd_color_auto_enabled &&
-		    !rkipc_osd_auto_color_resize_locked(frame_w, frame_h, RKIPC_OSD_AUTO_DOWNSAMPLE))
+		    !rkipc_osd_auto_color_resize_locked(frame_w, frame_h, RKIPC_OSD_AUTO_DOWNSAMPLE)) {
 			rkipc_osd_auto_color_fill_map_locked(y_addr, frame_w, frame_h, stride,
 			                                     RKIPC_OSD_AUTO_DOWNSAMPLE);
+			map_updated = 1;
+		}
 		pthread_mutex_unlock(&s_osd_auto_color_mutex);
 	}
 
@@ -7836,7 +7857,71 @@ static int rkipc_osd_auto_color_update(void)
 	if (release_ret != RK_SUCCESS)
 		LOG_ERROR("RK_MPI_VI_ReleaseChnFrame fail %x\n", release_ret);
 
-	return ret;
+	return map_updated;
+}
+
+static int rkipc_osd_auto_color_region_changed(const RGN_OSD_PARAM_T *param)
+{
+	int main_w = s_stream_venc_chan_param[0].width;
+	int main_h = s_stream_venc_chan_param[0].height;
+	int main_x0;
+	int main_y0;
+	int main_x1;
+	int main_y1;
+	int map_x0;
+	int map_y0;
+	int map_x1;
+	int map_y1;
+	int changed = 0;
+
+	if (!param || param->width <= 0 || param->height <= 0 || main_w <= 0 || main_h <= 0)
+		return 1;
+
+	main_x0 = UPALIGNTO16(rkipc_osd_aligned_x(param, param->width, main_w));
+	main_y0 = UPALIGNTO16(param->y);
+	main_x1 = rkipc_osd_clamp_int(main_x0 + param->width, 0, main_w);
+	main_y1 = rkipc_osd_clamp_int(main_y0 + param->height, 0, main_h);
+	main_x0 = rkipc_osd_clamp_int(main_x0, 0, main_w);
+	main_y0 = rkipc_osd_clamp_int(main_y0, 0, main_h);
+	if (main_x0 >= main_x1 || main_y0 >= main_y1)
+		return 1;
+
+	pthread_mutex_lock(&s_osd_auto_color_mutex);
+	if (!s_osd_auto_color_map_valid || !s_osd_auto_color_changed_map ||
+	    s_osd_auto_color_map_w <= 0 || s_osd_auto_color_map_h <= 0 ||
+	    s_osd_auto_color_frame_w <= 0 || s_osd_auto_color_frame_h <= 0 ||
+	    s_osd_auto_color_downsample <= 0) {
+		changed = 1;
+		goto EXIT;
+	}
+
+	map_x0 = (main_x0 * s_osd_auto_color_frame_w / main_w) /
+		s_osd_auto_color_downsample;
+	map_y0 = (main_y0 * s_osd_auto_color_frame_h / main_h) /
+		s_osd_auto_color_downsample;
+	map_x1 = ((main_x1 * s_osd_auto_color_frame_w + main_w - 1) / main_w +
+	          s_osd_auto_color_downsample - 1) /
+		s_osd_auto_color_downsample;
+	map_y1 = ((main_y1 * s_osd_auto_color_frame_h + main_h - 1) / main_h +
+	          s_osd_auto_color_downsample - 1) /
+		s_osd_auto_color_downsample;
+	map_x0 = rkipc_osd_clamp_int(map_x0, 0, s_osd_auto_color_map_w - 1);
+	map_y0 = rkipc_osd_clamp_int(map_y0, 0, s_osd_auto_color_map_h - 1);
+	map_x1 = rkipc_osd_clamp_int(map_x1, map_x0 + 1, s_osd_auto_color_map_w);
+	map_y1 = rkipc_osd_clamp_int(map_y1, map_y0 + 1, s_osd_auto_color_map_h);
+
+	for (int my = map_y0; my < map_y1 && !changed; my++) {
+		for (int mx = map_x0; mx < map_x1; mx++) {
+			if (s_osd_auto_color_changed_map[my * s_osd_auto_color_map_w + mx]) {
+				changed = 1;
+				break;
+			}
+		}
+	}
+
+EXIT:
+	pthread_mutex_unlock(&s_osd_auto_color_mutex);
+	return changed;
 }
 
 static int rkipc_osd_auto_color_map_is_bright_locked(int frame_x, int frame_y)
@@ -7951,6 +8036,7 @@ static void *thread_osd_update(void *arg) {
 	int bmp_height;
 	int bmp_size;
 	int auto_color_enabled;
+	int auto_color_map_updated;
 	unsigned char *bmp_buffer = NULL;
 	time_t rawtime;
 	struct tm *cur_time_info;
@@ -7968,15 +8054,16 @@ static void *thread_osd_update(void *arg) {
 			continue;
 		else
 			last_time_sec = cur_time_info->tm_sec;
-		rkipc_osd_auto_color_update();
+		auto_color_map_updated = rkipc_osd_auto_color_update();
 		auto_color_enabled = rkipc_osd_auto_color_is_enabled();
 
 		for (int i = 0; i < 8; i++)
 		{
 			pthread_mutex_lock(&p_osd_time_param[i].mutex);
-			// 自动颜色模式下，自定义文字需随最新亮度图周期重绘。
-			if (auto_color_enabled && i > 0 && p_osd_time_param[i].show &&
-			    p_osd_time_param[i].text[0] != '\0')
+			// 自动颜色模式下，仅在文字覆盖区域的明暗分类变化时重绘。
+			if (auto_color_enabled && auto_color_map_updated && i > 0 &&
+			    p_osd_time_param[i].show && p_osd_time_param[i].text[0] != '\0' &&
+			    rkipc_osd_auto_color_region_changed(&p_osd_time_param[i]))
 				p_osd_time_param[i].changed = 1;
 			while (p_osd_time_param[i].changed)
 			{
@@ -8192,8 +8279,8 @@ int gb_rkipc_osd_time_create(RGN_OSD_PARAM_T *p_st_rgn_osd_time_param) {
 		p_st_rgn_osd_time_param->width, s_stream_venc_chan_param[0].width);
 	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X = UPALIGNTO16(main_display_x);
 	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y = UPALIGNTO16(p_st_rgn_osd_time_param->y);
-	stRgnChnAttr.unChnAttr.stOverlayChn.u32BgAlpha = 128;
-	stRgnChnAttr.unChnAttr.stOverlayChn.u32FgAlpha = 128;
+	stRgnChnAttr.unChnAttr.stOverlayChn.u32BgAlpha = 0;
+	stRgnChnAttr.unChnAttr.stOverlayChn.u32FgAlpha = 255;
 	stRgnChnAttr.unChnAttr.stOverlayChn.u32Layer = RgnHandle;
 
 	stMppChn.s32ChnId = 0;
@@ -8296,8 +8383,8 @@ int gb_rkipc_osd_text_create(RGN_OSD_PARAM_T *p_st_rgn_osd_text_param) {
 		p_st_rgn_osd_text_param->width, s_stream_venc_chan_param[0].width);
 	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32X = UPALIGNTO16(main_display_x);
 	stRgnChnAttr.unChnAttr.stOverlayChn.stPoint.s32Y = UPALIGNTO16(p_st_rgn_osd_text_param->y);
-	stRgnChnAttr.unChnAttr.stOverlayChn.u32BgAlpha = 128;
-	stRgnChnAttr.unChnAttr.stOverlayChn.u32FgAlpha = 128;
+	stRgnChnAttr.unChnAttr.stOverlayChn.u32BgAlpha = 0;
+	stRgnChnAttr.unChnAttr.stOverlayChn.u32FgAlpha = 255;
 	stRgnChnAttr.unChnAttr.stOverlayChn.u32Layer = RgnHandle;
 
 	stMppChn.s32ChnId = 0;
@@ -8523,8 +8610,8 @@ int gb_rkipc_osd_attach(int des_chan) {
 				UPALIGNTO16(s_rgn_osd_param[i].y * s_stream_venc_chan_param[1].height /
 							s_stream_venc_chan_param[0].height);
 		}
-		stRgnChnAttr.unChnAttr.stOverlayChn.u32BgAlpha = 128;
-		stRgnChnAttr.unChnAttr.stOverlayChn.u32FgAlpha = 128;
+		stRgnChnAttr.unChnAttr.stOverlayChn.u32BgAlpha = 0;
+		stRgnChnAttr.unChnAttr.stOverlayChn.u32FgAlpha = 255;
 		stRgnChnAttr.unChnAttr.stOverlayChn.u32Layer = s_rgn_osd_param[i].handle;
 
 		ret = RK_MPI_RGN_AttachToChn(s_rgn_osd_param[i].handle, &stMppChn, &stRgnChnAttr);

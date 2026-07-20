@@ -8,6 +8,7 @@
 
 | 时间戳 | 功能名称 | 类型 | 状态 | 方案包路径 |
 |--------|----------|------|------|------------|
+| 202607201810 | text_osd_auto_color_cpu_transparency | 轻量迭代 | ✅已完成 | [2026-07/202607201810_text_osd_auto_color_cpu_transparency](2026-07/202607201810_text_osd_auto_color_cpu_transparency/) |
 | 202607201739 | text_osd_auto_color_refresh | 轻量迭代 | ✅已完成 | [2026-07/202607201739_text_osd_auto_color_refresh](2026-07/202607201739_text_osd_auto_color_refresh/) |
 | 202604271503 | gb_config_redundancy_trim | 轻量迭代 | ✅已完成 | [2026-04/202604271503_gb_config_redundancy_trim](2026-04/202604271503_gb_config_redundancy_trim/) |
 | 202604271125 | external_module_demos | 文档 | ✅已完成 | [2026-04/202604271125_external_module_demos](2026-04/202604271125_external_module_demos/) |
@@ -112,6 +113,7 @@
 
 ### 2026-07
 
+- [202607201810_text_osd_auto_color_cpu_transparency](2026-07/202607201810_text_osd_auto_color_cpu_transparency/) - 仅在 text OSD 局部明暗分类变化时重绘，并移除字体画布与 RGN 黑底
 - [202607201739_text_osd_auto_color_refresh](2026-07/202607201739_text_osd_auto_color_refresh/) - 让 auto 模式下可见的 text OSD 随亮度图周期重绘，固定色刷新策略不变
 
 ### 2026-04
