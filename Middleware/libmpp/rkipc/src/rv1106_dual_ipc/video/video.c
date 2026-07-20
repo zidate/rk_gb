@@ -8329,8 +8329,7 @@ int gb_rkipc_osd_init() {
 
 	int ret;
 	
-//	create_font("/mnt/sdcard/simsun_cn_3000.ttf", s_osd_font_size);
-	create_font("/oem/usr/share/simsun_cn_3000.ttf", s_osd_font_size);
+	create_font("/oem/usr/share/noto_serif_sc_gb2312.otf", s_osd_font_size);
 
 	gb_rkipc_osd_time_create(&s_rgn_osd_param[0]);
 
