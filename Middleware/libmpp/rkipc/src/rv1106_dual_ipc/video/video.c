@@ -8153,7 +8153,7 @@ int gb_rkipc_osd_time_create(RGN_OSD_PARAM_T *p_st_rgn_osd_time_param) {
 		return 0;
 	}
 
-	p_st_rgn_osd_time_param->max_width = s_stream_venc_chan_param[0].width;
+	p_st_rgn_osd_time_param->max_width = 1600;
 	p_st_rgn_osd_time_param->max_height = UPALIGNTO16(RKIPC_OSD_MAX_FONT_SIZE) + 16;
 	p_st_rgn_osd_time_param->width = 0;
 	p_st_rgn_osd_time_param->height = p_st_rgn_osd_time_param->max_height;
@@ -8362,9 +8362,10 @@ int gb_rkipc_osd_init() {
 
 	int ret;
 	//create_font("/mnt/sdcard/simsun_cn_3000.ttf", s_osd_font_size);
-	create_font("/oem/usr/share/noto_serif_sc_gb2312.otf", s_osd_font_size);
+	create_font("/oem/usr/share/simsun_cn.ttc", s_osd_font_size);
+	//create_font("/oem/usr/share/noto_serif_sc_gb2312.otf", s_osd_font_size);
 	for (int i = 0; i < 8; i++) {
-		s_rgn_osd_param[i].max_width = s_stream_venc_chan_param[0].width;
+		s_rgn_osd_param[i].max_width = 1600;//s_stream_venc_chan_param[0].width;
 		s_rgn_osd_param[i].max_height = UPALIGNTO16(s_osd_font_size) + 16;
 	}
 
