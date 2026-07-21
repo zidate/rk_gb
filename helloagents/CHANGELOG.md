@@ -7,6 +7,7 @@
 ## [Unreleased]
 
 ### 修复
+- 根据板端效果反馈将 RV1106 text OSD 自动黑白恢复为每秒重绘，移除局部亮度变化 map 与区域门控；字体画布全透明和 GB OSD `BgAlpha=0/FgAlpha=255` 保持不变，继续去除黑底。
 - 优化 RV1106 text OSD 自动黑白的 CPU 开销并去掉黑底：继续每秒更新低分辨率亮度分类，但仅在某条文字覆盖区域跨过黑/白阈值时重新生成 bitmap；字体背景像素改为全透明，GB OSD RGN 调整为 `BgAlpha=0/FgAlpha=255`。
 - 修复 RV1106 text OSD 在 `font_color_mode=auto` 下不会随画面亮度实时更新的问题：亮度 map 每秒刷新后，所有可见且非空的自定义文字区域会重新生成 ARGB8888 bitmap；固定颜色模式仍仅在配置变化时重绘。
 - 收口 RV1106 OSD 扩展对 GB28181 的影响：新增字号、颜色、星期和对齐等能力只作为媒体/ExchangeAL 外部接口与 RK OSD 落地能力，`ProtocolManager` 的 GB OSD 协议归一化、比较和日期格式映射恢复到既有兼容字段，避免影响已联调通过的 GB28181 OSD 接口。

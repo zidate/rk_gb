@@ -59,16 +59,15 @@ def main() -> int:
         "RV1106 OSD bitmap refresh should use the ARGB8888 per-character callback in auto mode.",
     )
     require(
-        "s_osd_auto_color_changed_map" in RK_VIDEO_C
-        and "rkipc_osd_auto_color_region_changed" in RK_VIDEO_C,
-        "Auto mode should track luminance-class changes for each OSD-covered region.",
+        "auto_color_enabled = rkipc_osd_auto_color_is_enabled();" in OSD_UPDATE_THREAD
+        and "auto_color_enabled && i > 0" in OSD_UPDATE_THREAD
+        and "p_osd_time_param[i].changed = 1;" in OSD_UPDATE_THREAD,
+        "Visible text OSD regions should be redrawn once per second in auto mode.",
     )
     require(
-        "auto_color_map_updated && i > 0" in OSD_UPDATE_THREAD
-        and "rkipc_osd_auto_color_region_changed(&p_osd_time_param[i])"
-        in OSD_UPDATE_THREAD
-        and "p_osd_time_param[i].changed = 1;" in OSD_UPDATE_THREAD,
-        "Text OSD regions should redraw only when their local luminance class changes.",
+        "s_osd_auto_color_changed_map" not in RK_VIDEO_C
+        and "rkipc_osd_auto_color_region_changed" not in RK_VIDEO_C,
+        "Auto mode should not gate text redraw on a local luminance-change map.",
     )
     require(
         "bg_font_color_ = 0x00000000;" in FONT_FACTORY_C,
@@ -87,7 +86,7 @@ def main() -> int:
     )
 
     print(
-        "PASS: RV1106 OSD redraw is locally gated and uses a transparent canvas"
+        "PASS: RV1106 text OSD refreshes every second with a transparent canvas"
     )
     return 0
 
