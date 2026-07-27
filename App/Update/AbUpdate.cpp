@@ -7,22 +7,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#ifndef AB_UPDATE_FORK
-#define AB_UPDATE_FORK() fork()
-#endif
-
-#ifndef AB_UPDATE_EXECV
-#define AB_UPDATE_EXECV(path, argv) execv((path), (argv))
-#endif
-
-#ifndef AB_UPDATE_WAITPID
-#define AB_UPDATE_WAITPID(pid, status, options) waitpid((pid), (status), (options))
-#endif
-
-#ifndef AB_UPDATE_EXIT
-#define AB_UPDATE_EXIT(status) _exit(status)
-#endif
-
 int AbUpdateApply(const char *package_path, bool reboot_after_success)
 {
     static char program[] = "/oem/usr/bin/rk_ota";
@@ -45,22 +29,22 @@ int AbUpdateApply(const char *package_path, bool reboot_after_success)
     argv[4] = reboot_after_success ? reboot_arg : NULL;
     argv[5] = NULL;
 
-    const pid_t pid = AB_UPDATE_FORK();
+    const pid_t pid = fork();
     if (pid < 0)
     {
         return -1;
     }
     if (pid == 0)
     {
-        AB_UPDATE_EXECV(program, argv);
-        AB_UPDATE_EXIT(127);
+        execv(program, argv);
+        _exit(127);
     }
 
     int status = 0;
     pid_t waited;
     do
     {
-        waited = AB_UPDATE_WAITPID(pid, &status, 0);
+        waited = waitpid(pid, &status, 0);
     } while (waited < 0 && errno == EINTR);
 
     if (waited != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
