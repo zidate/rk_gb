@@ -864,10 +864,10 @@ static int flash_write(const char *image_dir, const char *partition) {
         goto relock;
     if (write_oem && flash_write_partition(src_oem_path, dest_oem_path))
         goto relock;
-    if (mtd_device && fsync(control_fd)) {
-        LOGE("Sync MTD updates failed.\n");
-        goto relock;
-    }
+//    if (mtd_device && fsync(control_fd)) {
+//        LOGE("Sync MTD updates failed.\n");
+//        goto relock;
+//    }
     if (mtd_device && write_rootfs &&
         prepare_ubi_partition(strrchr(dest_rootfs_path, '/') + 1))
         goto relock;

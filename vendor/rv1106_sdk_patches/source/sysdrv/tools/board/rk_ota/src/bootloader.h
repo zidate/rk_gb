@@ -51,8 +51,8 @@ static const int BOOTLOADER_MESSAGE_OFFSET_IN_MISC = 16 * 1024;
 #define AB_BOOT_NAME "boot"
 #define AB_ROOTFS_NAME "rootfs"
 #define AB_OEM_NAME "oem"
-#define UPDATE_TAR_PATH "/mnt/sdcard/update_ota.tar"
-#define UPDATE_TAR_DIRECTRY "/mnt/sdcard/rk_update"
+#define UPDATE_TAR_PATH "/tmp/update_ota.tar"
+#define UPDATE_TAR_DIRECTRY "/tmp/rk_update"
 
 /* Bootloader Message
  *
