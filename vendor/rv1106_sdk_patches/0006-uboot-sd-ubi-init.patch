@@ -1,0 +1,180 @@
+diff --git a/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c b/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
+index f1b58f5..5493638 100644
+--- a/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
++++ b/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
+@@ -15,13 +15,25 @@
+ #include <linux/mtd/mtd.h>
+ #include <linux/mtd/spinand.h>
+ 
+-#define AB_SD_BOOT BIT(0)
+-#define AB_SD_ROOTFS BIT(1)
+-#define AB_SD_OEM BIT(2)
+-#define AB_SD_UBOOT BIT(3)
++#define AB_SD_ENV BIT(0)
++#define AB_SD_IDBLOCK BIT(1)
++#define AB_SD_UBOOT BIT(2)
++#define AB_SD_BOOT BIT(3)
++#define AB_SD_ROOTFS BIT(4)
++#define AB_SD_OEM BIT(5)
+ #define AB_SD_SLOT_TRIO (AB_SD_BOOT | AB_SD_ROOTFS | AB_SD_OEM)
++#define AB_SD_KIB(n) ((loff_t)(n) * 1024)
+ #define AB_SD_MIB(n) ((loff_t)(n) * 1024 * 1024)
+ 
++enum ab_sd_image_index {
++	AB_SD_IMAGE_ENV,
++	AB_SD_IMAGE_IDBLOCK,
++	AB_SD_IMAGE_UBOOT,
++	AB_SD_IMAGE_BOOT,
++	AB_SD_IMAGE_ROOTFS,
++	AB_SD_IMAGE_OEM,
++};
++
+ struct ab_sd_image {
+ 	const char *filename;
+ 	const char *partition;
+@@ -31,6 +43,8 @@ struct ab_sd_image {
+ };
+ 
+ static const struct ab_sd_image ab_sd_images[] = {
++	{ "env.img", "env", AB_SD_ENV, AB_SD_KIB(256), false },
++	{ "idblock.img", "idblock", AB_SD_IDBLOCK, AB_SD_MIB(1), false },
+ 	{ "uboot.img", "uboot", AB_SD_UBOOT, AB_SD_MIB(1), false },
+ 	{ "boot.img", "boot", AB_SD_BOOT, AB_SD_MIB(4), true },
+ 	{ "rootfs.img", "rootfs", AB_SD_ROOTFS, AB_SD_MIB(10), true },
+@@ -228,19 +242,98 @@ static int ab_sd_write_present_slot_images(u32 present,
+ 	int ret;
+ 
+ 	if (present & AB_SD_BOOT) {
+-		ret = ab_sd_write_image(&ab_sd_images[1], image_sizes[1],
++		ret = ab_sd_write_image(&ab_sd_images[AB_SD_IMAGE_BOOT],
++					 image_sizes[AB_SD_IMAGE_BOOT],
+ 					 target_suffix, eraseblock_buf, verify_buf);
+ 		if (ret)
+ 			return ret;
+ 	}
+ 	if (present & AB_SD_ROOTFS) {
+-		ret = ab_sd_write_image(&ab_sd_images[2], image_sizes[2],
++		ret = ab_sd_write_image(&ab_sd_images[AB_SD_IMAGE_ROOTFS],
++					 image_sizes[AB_SD_IMAGE_ROOTFS],
++					 target_suffix, eraseblock_buf, verify_buf);
++		if (ret)
++			return ret;
++	}
++	if (present & AB_SD_OEM) {
++		ret = ab_sd_write_image(&ab_sd_images[AB_SD_IMAGE_OEM],
++					 image_sizes[AB_SD_IMAGE_OEM],
+ 					 target_suffix, eraseblock_buf, verify_buf);
+ 		if (ret)
+ 			return ret;
+ 	}
++
++	return CMD_RET_SUCCESS;
++}
++
++static int ab_sd_prepare_ubi_image(const struct ab_sd_image *image,
++				   const char *target_suffix)
++{
++	char command[sizeof("ubi part rootfs_b")];
++	char target[sizeof("rootfs_b")];
++	int detach_ret;
++	int ret;
++
++	ab_sd_get_target(image, target_suffix, target, sizeof(target));
++	snprintf(command, sizeof(command), "ubi part %s", target);
++	ret = run_command(command, 0);
++	detach_ret = run_command("ubi detach", 0);
++	if (ret) {
++		printf("Failed to initialize UBI partition %s (err = %d)\n",
++		       target, ret);
++		return CMD_RET_FAILURE;
++	}
++	if (detach_ret) {
++		printf("Failed to detach UBI partition %s (err = %d)\n",
++		       target, detach_ret);
++		return CMD_RET_FAILURE;
++	}
++
++	printf("Initialized UBI partition %s before restoring protection\n",
++	       target);
++	return CMD_RET_SUCCESS;
++}
++
++static int ab_sd_prepare_present_ubi_images(u32 present,
++					    const char *target_suffix)
++{
++	int ret;
++
++	if (present & AB_SD_ROOTFS) {
++		ret = ab_sd_prepare_ubi_image(
++			&ab_sd_images[AB_SD_IMAGE_ROOTFS], target_suffix);
++		if (ret)
++			return ret;
++	}
+ 	if (present & AB_SD_OEM) {
+-		ret = ab_sd_write_image(&ab_sd_images[3], image_sizes[3],
++		ret = ab_sd_prepare_ubi_image(&ab_sd_images[AB_SD_IMAGE_OEM],
++					      target_suffix);
++		if (ret)
++			return ret;
++	}
++
++	return CMD_RET_SUCCESS;
++}
++
++static int ab_sd_write_present_fixed_images(u32 present,
++					    const loff_t *image_sizes,
++					    const char *target_suffix,
++					    u8 *eraseblock_buf, u8 *verify_buf)
++{
++	static const enum ab_sd_image_index write_order[] = {
++		AB_SD_IMAGE_ENV,
++		AB_SD_IMAGE_UBOOT,
++		AB_SD_IMAGE_IDBLOCK,
++	};
++	unsigned int i;
++	int ret;
++
++	for (i = 0; i < ARRAY_SIZE(write_order); i++) {
++		const struct ab_sd_image *image = &ab_sd_images[write_order[i]];
++
++		if (!(present & image->present_bit))
++			continue;
++		ret = ab_sd_write_image(image, image_sizes[write_order[i]],
+ 					 target_suffix, eraseblock_buf, verify_buf);
+ 		if (ret)
+ 			return ret;
+@@ -307,12 +400,15 @@ static int ab_sd_run_transaction(u32 present, const loff_t *image_sizes,
+ 	if (ret)
+ 		goto relock;
+ 
+-	if (present & AB_SD_UBOOT) {
+-		ret = ab_sd_write_image(&ab_sd_images[0], image_sizes[0],
+-					target_suffix, eraseblock_buf, verify_buf);
+-		if (ret)
+-			goto relock;
+-	}
++	ret = ab_sd_prepare_present_ubi_images(present, target_suffix);
++	if (ret)
++		goto relock;
++
++	ret = ab_sd_write_present_fixed_images(present, image_sizes,
++					       target_suffix, eraseblock_buf,
++					       verify_buf);
++	if (ret)
++		goto relock;
+ 
+ relock:
+ 	relock_ret = spinand_set_block_lock(spinand, BL_LOWER_3_4_LOCKED);
+diff --git a/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig b/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig
+index 229f781..713f6a2 100755
+--- a/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig
++++ b/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig
+@@ -160,3 +160,6 @@ CONFIG_SPL_GZIP=y
+ # CONFIG_EFI_LOADER is not set
+ CONFIG_MTD_SPI_NAND=y
+-CONFIG_SPI_NAND_CHUCUN=y
+\ No newline at end of file
++CONFIG_SPI_NAND_CHUCUN=y
++CONFIG_CMD_UBI=y
++CONFIG_MTDIDS_DEFAULT="spi-nand0=spi-nand0"
++# CONFIG_CMD_UBIFS is not set

@@ -2,3 +2,9 @@
 0002-uboot-sd-protection.patch
 0003-kernel-protection.patch
 0004-rk-ota.patch
+0005-uboot-mtdparts-unit-suffix.patch
+0006-uboot-sd-ubi-init.patch
+0007-rk-ota-ubi-init.patch
+0008-uboot-env-mtdparts-prefix.patch
+0009-uboot-sd-fixed-raw-offset.patch
+0010-uboot-sd-oem-switch.patch

@@ -8,6 +8,15 @@
 
 | 时间戳 | 功能名称 | 类型 | 状态 | 方案包路径 |
 |--------|----------|------|------|------------|
+| 202607241649 | rv1106_sd_oem_switch | 轻量迭代 | ✅已完成 | [2026-07/202607241649_rv1106_sd_oem_switch](2026-07/202607241649_rv1106_sd_oem_switch/) |
+| 202607241536 | rv1106_sd_fixed_raw_write | 轻量迭代 | ✅已完成 | [2026-07/202607241536_rv1106_sd_fixed_raw_write](2026-07/202607241536_rv1106_sd_fixed_raw_write/) |
+| 202607241008 | rv1106_mtdparts_env_prefix | 轻量迭代 | ✅已完成 | [2026-07/202607241008_rv1106_mtdparts_env_prefix](2026-07/202607241008_rv1106_mtdparts_env_prefix/) |
+| 202607231556 | rv1106_mtdids_default | 轻量迭代 | ✅已完成 | [2026-07/202607231556_rv1106_mtdids_default](2026-07/202607231556_rv1106_mtdids_default/) |
+| 202607231500 | rv1106_temporary_unlock | 修复 | ✅已完成 | [2026-07/202607231500_rv1106_temporary_unlock](2026-07/202607231500_rv1106_temporary_unlock/) |
+| 202607231208 | rv1106_mtdparts_double_scale | 修复 | ✅已完成 | [2026-07/202607231208_rv1106_mtdparts_double_scale](2026-07/202607231208_rv1106_mtdparts_double_scale/) |
+| 202607231040 | rv1106_mtdparts_unit_suffix | 修复 | ✅已完成 | [2026-07/202607231040_rv1106_mtdparts_unit_suffix](2026-07/202607231040_rv1106_mtdparts_unit_suffix/) |
+| 202607221923 | rv1106_mtdparts_byte_layout | 修复 | ✅已完成 | [2026-07/202607221923_rv1106_mtdparts_byte_layout](2026-07/202607221923_rv1106_mtdparts_byte_layout/) |
+| 202607221725 | rv1106_sd_fat_dos_restore | 轻量迭代 | ✅已完成 | [2026-07/202607221725_rv1106_sd_fat_dos_restore](2026-07/202607221725_rv1106_sd_fat_dos_restore/) |
 | 202604271503 | gb_config_redundancy_trim | 轻量迭代 | ✅已完成 | [2026-04/202604271503_gb_config_redundancy_trim](2026-04/202604271503_gb_config_redundancy_trim/) |
 | 202604271125 | external_module_demos | 文档 | ✅已完成 | [2026-04/202604271125_external_module_demos](2026-04/202604271125_external_module_demos/) |
 | 202604271057 | protocol_config_cleanup | 轻量迭代 | ✅已完成 | [2026-04/202604271057_protocol_config_cleanup](2026-04/202604271057_protocol_config_cleanup/) |
@@ -108,6 +117,18 @@
 | 202603121053 | rk830_cross_build | 修复 | ✅已完成 | [2026-03/202603121053_rk830_cross_build](2026-03/202603121053_rk830_cross_build/) |
 
 ## 按月归档
+
+### 2026-07
+
+- [202607241649_rv1106_sd_oem_switch](2026-07/202607241649_rv1106_sd_oem_switch/) - 将 OEM 存在设为 SD 升级切换 A/B 槽的触发条件
+- [202607241536_rv1106_sd_fixed_raw_write](2026-07/202607241536_rv1106_sd_fixed_raw_write/) - 修复固定 env/idblock/U-Boot 命名 MTD 缺失和 FAT 缓冲区未对齐，事务成功后激活非活动 A/B 槽
+- [202607241008_rv1106_mtdparts_env_prefix](2026-07/202607241008_rv1106_mtdparts_env_prefix/) - 修复 SPI NAND `env.img` 中 `mtdparts` 变量值缺少旧式 U-Boot parser 前缀的问题；正常 `./build.sh env` 与直接 sysdrv 构建入口均已覆盖
+- [202607231556_rv1106_mtdids_default](2026-07/202607231556_rv1106_mtdids_default/) - 为 U-Boot `ubi part` 增加 `spi-nand0=spi-nand0` 默认设备映射，修复写后三件套无法初始化目标 UBI 分区的问题
+- [202607231500_rv1106_temporary_unlock](2026-07/202607231500_rv1106_temporary_unlock/) - 保持前 96 MiB 常态保护，在 SD/OTA 解锁事务内完成 rootfs/oem UBI autoresize；SD 新增 env/idblock，OTA 仅允许 boot/rootfs/oem
+- [202607231208_rv1106_mtdparts_double_scale](2026-07/202607231208_rv1106_mtdparts_double_scale/) - 修复 MTD helper 基于 `ustrtoull()` 导致 `K/M/G` 重复换算、全部后续分区 `out of reach` 的问题
+- [202607231040_rv1106_mtdparts_unit_suffix](2026-07/202607231040_rv1106_mtdparts_unit_suffix/) - 用 U-Boot MTD parser 原生识别大小写 `K/M/G`，保留 SDK 的 `256K/1M` 分区字符串；替代前一版十六进制字节布局方案
+- [202607221923_rv1106_mtdparts_byte_layout](2026-07/202607221923_rv1106_mtdparts_byte_layout/) - 修复 U-Boot 新 MTD parser 拒绝 `256K` 分区后缀、导致已验证的 A/B 镜像仍找不到 `boot_b` 分区的问题
+- [202607221725_rv1106_sd_fat_dos_restore](2026-07/202607221725_rv1106_sd_fat_dos_restore/) - 修复 RV1106 新 A/B SD updater 未按 DOS 分区表解析 MBR/FAT 卡、导致在探测 `uboot.img` 前退出且实际未升级的问题
 
 ### 2026-04
 

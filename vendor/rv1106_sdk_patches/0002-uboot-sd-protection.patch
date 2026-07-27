@@ -54,10 +54,10 @@ index c4f0d34..114613a 100755
 +		     SPINAND_HAS_QE_BIT | SPINAND_HAS_BLOCK_PROTECTION,
 diff --git a/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c b/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
 new file mode 100644
-index 0000000..b2ccf93
+index 0000000..f1b58f5
 --- /dev/null
 +++ b/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
-@@ -0,0 +1,410 @@
+@@ -0,0 +1,434 @@
 +// SPDX-License-Identifier: GPL-2.0+
 +/* Validate RV1106 A/B update images on the SD card before flash access. */
 +
@@ -67,6 +67,7 @@ index 0000000..b2ccf93
 +#include <malloc.h>
 +#include <mapmem.h>
 +#include <mtd.h>
++#include <part.h>
 +#include <android_ab.h>
 +#include <android_avb/avb_ab_flow.h>
 +#include <android_avb/avb_ops_user.h>
@@ -396,16 +397,32 @@ index 0000000..b2ccf93
 +static int do_ab_sd_update(cmd_tbl_t *cmdtp, int flag, int argc,
 +			   char * const argv[])
 +{
++	struct blk_desc *desc;
 +	char target_suffix[3];
 +	loff_t image_sizes[ARRAY_SIZE(ab_sd_images)] = { 0 };
 +	u32 present = 0;
 +	unsigned int i;
++	int saved_part_type;
 +	int ret;
 +
 +	(void)cmdtp;
 +	(void)flag;
 +	(void)argc;
 +	(void)argv;
++
++	desc = blk_get_devnum_by_type(IF_TYPE_MMC, 1);
++	if (!desc) {
++		printf("Failed to get SD block descriptor\n");
++		return CMD_RET_FAILURE;
++	}
++
++	/*
++	 * The Rockchip block layer may leave the removable card classified as
++	 * RKPARM.  The SD update media uses an MBR/FAT partition, as does the
++	 * vendor script updater, so force DOS parsing only for this command.
++	 */
++	saved_part_type = desc->part_type;
++	desc->part_type = PART_TYPE_DOS;
 +
 +	ab_sd_get_target_suffix(target_suffix, sizeof(target_suffix));
 +	for (i = 0; i < ARRAY_SIZE(ab_sd_images); i++) {
@@ -422,14 +439,16 @@ index 0000000..b2ccf93
 +		if (ret) {
 +			printf("Failed to select SD FAT before probing %s (err = %d)\n",
 +			       image->filename, ret);
-+			return CMD_RET_FAILURE;
++			ret = CMD_RET_FAILURE;
++			goto out_restore;
 +		}
 +
 +		exists = fs_exists(image->filename);
 +		if (exists < 0) {
 +			printf("Failed to probe %s (err = %d)\n", image->filename,
 +			       exists);
-+			return CMD_RET_FAILURE;
++			ret = CMD_RET_FAILURE;
++			goto out_restore;
 +		}
 +		if (!exists)
 +			continue;
@@ -438,7 +457,8 @@ index 0000000..b2ccf93
 +		if (ret) {
 +			printf("Failed to select SD FAT before sizing %s (err = %d)\n",
 +			       image->filename, ret);
-+			return CMD_RET_FAILURE;
++			ret = CMD_RET_FAILURE;
++			goto out_restore;
 +		}
 +
 +		ret = fs_size(image->filename, &size);
@@ -446,7 +466,8 @@ index 0000000..b2ccf93
 +			printf("Invalid %s size %lld (max %lld, err = %d)\n",
 +			       image->filename, (long long)size,
 +			       (long long)image->max_size, ret);
-+			return CMD_RET_FAILURE;
++			ret = CMD_RET_FAILURE;
++			goto out_restore;
 +		}
 +
 +		ab_sd_get_target(image, target_suffix, target, sizeof(target));
@@ -460,9 +481,12 @@ index 0000000..b2ccf93
 +	       ab_sd_should_switch(present) ? "complete" : "incomplete",
 +	       target_suffix, present);
 +	if (!present)
-+		return CMD_RET_SUCCESS;
++		ret = CMD_RET_SUCCESS;
++	else
++		ret = ab_sd_run_transaction(present, image_sizes, target_suffix);
 +
-+	ret = ab_sd_run_transaction(present, image_sizes, target_suffix);
++out_restore:
++	desc->part_type = saved_part_type;
 +	return ret;
 +}
 +

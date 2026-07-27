@@ -10,7 +10,10 @@ import unittest
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-PATCH = ROOT / "vendor/rv1106_sdk_patches/0004-rk-ota.patch"
+PATCHES = tuple(
+    ROOT / "vendor/rv1106_sdk_patches" / name
+    for name in ("0004-rk-ota.patch", "0007-rk-ota-ubi-init.patch")
+)
 SDK_BASELINE = pathlib.Path(
     os.environ.get(
         "RV1106_SDK_BASELINE", "/tmp/rk_dual_backup_ref/RV1106_IPC_SDK"
@@ -45,8 +48,9 @@ def c_function(source, name):
 class RkOtaPolicyTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        if not PATCH.is_file():
-            raise AssertionError(f"missing patch: {PATCH}")
+        for patch in PATCHES:
+            if not patch.is_file():
+                raise AssertionError(f"missing patch: {patch}")
         cls.tempdir = tempfile.TemporaryDirectory()
         cls.sdk_root = pathlib.Path(cls.tempdir.name) / "RV1106_IPC_SDK"
         for relative in TARGETS:
@@ -57,16 +61,17 @@ class RkOtaPolicyTest(unittest.TestCase):
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
 
-        result = subprocess.run(
-            ["patch", "--fuzz=0", "-p1", "-i", str(PATCH)],
-            cwd=cls.sdk_root,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            check=False,
-        )
-        if result.returncode:
-            raise AssertionError(f"0004-rk-ota.patch failed to apply:\n{result.stdout}")
+        for patch in PATCHES:
+            result = subprocess.run(
+                ["patch", "--fuzz=0", "-p1", "-i", str(patch)],
+                cwd=cls.sdk_root,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            if result.returncode:
+                raise AssertionError(f"{patch.name} failed to apply:\n{result.stdout}")
 
         cls.header = (cls.sdk_root / TARGETS[0]).read_text()
         cls.bootloader = (cls.sdk_root / TARGETS[1]).read_text()
@@ -77,7 +82,15 @@ class RkOtaPolicyTest(unittest.TestCase):
         cls.tempdir.cleanup()
 
     def test_patch_is_limited_to_rk_ota_sources(self):
-        targets = re.findall(r"^diff --git a/(\S+) b/(\S+)$", PATCH.read_text(), re.MULTILINE)
+        targets = []
+        for patch in PATCHES:
+            targets.extend(
+                re.findall(
+                    r"^diff --git a/(\S+) b/(\S+)$",
+                    patch.read_text(),
+                    re.MULTILINE,
+                )
+            )
         self.assertTrue(targets)
         self.assertEqual({left for left, right in targets}, {right for left, right in targets})
         self.assertLessEqual({pathlib.Path(left) for left, _ in targets}, set(TARGETS))
@@ -89,8 +102,9 @@ class RkOtaPolicyTest(unittest.TestCase):
         self.assertNotIn("AB_UBOOT_NAME", self.header + self.bootloader)
         self.assertNotIn('AB_ROOTFS_NAME "system"', self.header)
         writer = c_function(self.bootloader, "flash_write")
-        self.assertIn('"%s/uboot.img"', writer)
-        self.assertIn("if (!access(src_uboot_path, F_OK))", writer)
+        for image in ("env.img", "idblock.img", "uboot.img"):
+            self.assertIn(f'"%s/{image}"', writer)
+        self.assertIn("supports only boot.img, rootfs.img and oem.img", writer)
         self.assertIn("--partition=<boot/rootfs/oem/all>", self.main)
         self.assertNotIn("--partition=<uboot", self.main)
         self.assertRegex(
@@ -106,6 +120,8 @@ class RkOtaPolicyTest(unittest.TestCase):
             "src_boot_path",
             "src_rootfs_path",
             "src_oem_path",
+            "src_env_path",
+            "src_idblock_path",
             "src_uboot_path",
         ):
             check = writer.index(f"access({image}")
@@ -138,7 +154,9 @@ class RkOtaPolicyTest(unittest.TestCase):
         is_locked = writer.index("MEMISLOCKED", lock)
         self.assertLess(unlock, writes)
         self.assertLess(writes, sync)
-        self.assertLess(sync, lock)
+        ubi_prepare = writer.index("prepare_ubi_partition", sync)
+        self.assertLess(sync, ubi_prepare)
+        self.assertLess(ubi_prepare, lock)
         self.assertLess(lock, is_locked)
         self.assertIn("goto relock", writer[unlock:lock])
 
@@ -146,6 +164,26 @@ class RkOtaPolicyTest(unittest.TestCase):
         activate = update.index("setSlotActivity()")
         self.assertLess(transaction, activate)
         self.assertIn("return -1", update[transaction:activate])
+
+    def test_ubi_autoresize_is_consumed_before_relock(self):
+        prepare = c_function(self.bootloader, "prepare_ubi_partition")
+        writer = c_function(self.bootloader, "flash_write")
+
+        for snippet in (
+            '#include <mtd/ubi-user.h>',
+            'open("/dev/ubi_ctrl", O_RDWR)',
+            "request.ubi_num = UBI_DEV_NUM_AUTO;",
+            "request.mtd_num = partition->device_index;",
+            "ioctl(control_fd, UBI_IOCATT, &request)",
+            "ioctl(control_fd, UBI_IOCDET, &ubi_num)",
+        ):
+            self.assertIn(snippet, self.bootloader)
+        self.assertIn("mtd_find_partition_by_name", prepare)
+        self.assertIn("write_rootfs", writer)
+        self.assertIn("write_oem", writer)
+        initialize = writer.index("prepare_ubi_partition", writer.index("fsync"))
+        relock = writer.index("MEMLOCK", initialize)
+        self.assertLess(initialize, relock)
 
     def test_target_slot_is_always_the_inactive_suffix(self):
         writer = c_function(self.bootloader, "flash_write")

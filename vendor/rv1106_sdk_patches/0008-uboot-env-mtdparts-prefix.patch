@@ -1,0 +1,18 @@
+diff --git a/project/build.sh b/project/build.sh
+--- a/project/build.sh
++++ b/project/build.sh
+@@ -1459,7 +1459,7 @@ function parse_partition_file()
+ 			;;
+ 		spi_nand)
+ 			storage_dev_prefix=mtd
+-			RK_PARTITION_ARGS="mtdparts=spi-nand0:$RK_PARTITION_CMD_IN_ENV"
++			RK_PARTITION_ARGS="mtdparts=mtdparts=spi-nand0:$RK_PARTITION_CMD_IN_ENV"
+ 			part_num=0
+ 			fit_target_optional_param="preload_none"
+ 			;;
+diff --git a/sysdrv/Makefile b/sysdrv/Makefile
+--- a/sysdrv/Makefile
++++ b/sysdrv/Makefile
+@@ -625 +625 @@ ifneq ($(findstring $(BOOT_MEDIUM),spi_nand slc_nand),)
+-	@echo "mtdparts=rk-nand:$(CONFIG_SYSDRV_PARTITION)" > $(SYSDRV_UBOOT_ENV_CFG_FILE)
++	@echo "mtdparts=mtdparts=spi-nand0:$(CONFIG_SYSDRV_PARTITION)" > $(SYSDRV_UBOOT_ENV_CFG_FILE)

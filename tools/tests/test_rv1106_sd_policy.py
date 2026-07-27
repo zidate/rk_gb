@@ -46,10 +46,10 @@ BASELINE_INPUTS = {
     CMD_MAKEFILE: (PLAN_BASELINE, "c3550590185aa6591614318560c012b5bbdcc172048dcd56422e38b1e955f074"),
 }
 POST_SHA256 = {
-    COMMAND: "32dab5c9512188ae39671fbfe785d33b9f1fb1e27f8fcca60fcddb079e54636b",
+    COMMAND: "6af579be7411602624e56956812487d3bd6b0833e6770e60bb1f5c0edd997857",
     CMD_KCONFIG: "835bf2ebc533dc5c4c359441d566076b1c85023c268811c3f41b9476a669ed9f",
     CMD_MAKEFILE: "89ed26b3e1eaea7914970174262cf0887f2a586ef473ad886cc58f0da7234d14",
-    DEFCONFIG: "ff9b49e216b9991421681488ca7d783ce0291d420e08f835fb397cf99d4dc2df",
+    DEFCONFIG: "78289eee8165ad9c35d3c86e17356ee4b3f9eab8394c4cf84a01150ba10ef798",
 }
 TASK5_PROTECTION_CORE_SHA256 = (
     "a30b5e4ac4898469c0f074ff863dde623d24d1ea9a636f79107beea2badda823"
@@ -150,7 +150,13 @@ class SdPolicyPatchTest(unittest.TestCase):
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, destination)
 
-        for patch_name in ("0001-ab-layout.patch", "0002-uboot-sd-protection.patch"):
+        for patch_name in (
+            "0001-ab-layout.patch",
+            "0002-uboot-sd-protection.patch",
+            "0006-uboot-sd-ubi-init.patch",
+            "0009-uboot-sd-fixed-raw-offset.patch",
+            "0010-uboot-sd-oem-switch.patch",
+        ):
             result = subprocess.run(
                 [
                     "patch",
@@ -197,34 +203,54 @@ class SdPolicyPatchTest(unittest.TestCase):
             self.assertNotEqual(expected_hash, "TODO")
             self.assertEqual(sha256(self.sdk_root / relative), expected_hash, relative)
 
-    def test_all_sixteen_masks_switch_only_with_complete_slot_trio(self):
+    def test_all_sixty_four_masks_switch_when_oem_is_present(self):
         self.assertIsNotNone(self.command)
         bits = {
             name: int(bit)
             for name, bit in re.findall(
-                r"#define AB_SD_(BOOT|ROOTFS|OEM|UBOOT) BIT\((\d)\)",
+                r"#define AB_SD_(ENV|IDBLOCK|UBOOT|BOOT|ROOTFS|OEM) BIT\((\d)\)",
                 self.command,
             )
         }
-        self.assertEqual(bits, {"BOOT": 0, "ROOTFS": 1, "OEM": 2, "UBOOT": 3})
+        self.assertEqual(
+            bits,
+            {"ENV": 0, "IDBLOCK": 1, "UBOOT": 2, "BOOT": 3, "ROOTFS": 4, "OEM": 5},
+        )
         self.assertIn(
-            "return (present & AB_SD_SLOT_TRIO) == AB_SD_SLOT_TRIO;",
+            "#define AB_SD_SLOT_SWITCH_TRIGGER AB_SD_OEM",
             self.command,
         )
-        trio = 0x7
-        for present in range(16):
-            expected = present in (trio, trio | 0x8)
-            actual = (present & trio) == trio
+        self.assertIn(
+            "return (present & AB_SD_SLOT_SWITCH_TRIGGER) != 0;",
+            self.command,
+        )
+        for present in range(64):
+            expected = bool(present & 0x20)
+            actual = bool(present & 0x20)
             with self.subTest(present=present):
                 self.assertEqual(actual, expected)
+        self.assertIn(
+            'printf("SD update %s; target slot %s; present mask 0x%x\\n",',
+            self.command,
+        )
+        self.assertIn('"contains oem"', self.command)
 
     def test_fixed_table_has_exact_files_bits_and_overflow_safe_maxima(self):
+        self.assertIn("#define AB_SD_KIB(n) ((loff_t)(n) * 1024)", self.command)
         self.assertIn("#define AB_SD_MIB(n) ((loff_t)(n) * 1024 * 1024)", self.command)
+        self.assertIn("#define AB_SD_ENV_OFFSET 0", self.command)
+        self.assertIn("#define AB_SD_IDBLOCK_OFFSET AB_SD_KIB(256)", self.command)
+        self.assertIn(
+            "#define AB_SD_UBOOT_OFFSET (AB_SD_IDBLOCK_OFFSET + AB_SD_MIB(1))",
+            self.command,
+        )
         expected_rows = (
-            '{ "uboot.img", "uboot", AB_SD_UBOOT, AB_SD_MIB(1), false },',
-            '{ "boot.img", "boot", AB_SD_BOOT, AB_SD_MIB(4), true },',
-            '{ "rootfs.img", "rootfs", AB_SD_ROOTFS, AB_SD_MIB(10), true },',
-            '{ "oem.img", "oem", AB_SD_OEM, AB_SD_MIB(32), true },',
+            '{ "env.img", "env", AB_SD_ENV, AB_SD_KIB(256), AB_SD_ENV_OFFSET, false },',
+            'AB_SD_IDBLOCK_OFFSET, false },',
+            'AB_SD_UBOOT_OFFSET, false },',
+            '{ "boot.img", "boot", AB_SD_BOOT, AB_SD_MIB(4), 0, true },',
+            '{ "rootfs.img", "rootfs", AB_SD_ROOTFS, AB_SD_MIB(10), 0, true },',
+            '{ "oem.img", "oem", AB_SD_OEM, AB_SD_MIB(32), 0, true },',
         )
         for row in expected_rows:
             self.assertIn(row, self.command)
@@ -240,13 +266,33 @@ class SdPolicyPatchTest(unittest.TestCase):
         ):
             self.assertIn(snippet, self.command)
 
+    def test_sd_scan_forces_dos_partition_parsing_and_restores_descriptor(self):
+        command = c_function(self.command, "do_ab_sd_update")
+        for snippet in (
+            "#include <part.h>",
+            "struct blk_desc *desc;",
+            "desc = blk_get_devnum_by_type(IF_TYPE_MMC, 1);",
+            "saved_part_type = desc->part_type;",
+            "desc->part_type = PART_TYPE_DOS;",
+            "out_restore:",
+            "desc->part_type = saved_part_type;",
+        ):
+            self.assertIn(snippet, self.command)
+
+        force_dos = command.index("desc->part_type = PART_TYPE_DOS;")
+        restore = command.index("desc->part_type = saved_part_type;")
+        self.assertLess(force_dos, command.index('fs_set_blk_dev("mmc", "1"'))
+        self.assertLess(command.index("ab_sd_run_transaction("), restore)
+        self.assertNotIn("return ", command[force_dos:restore])
+        self.assertEqual(command[force_dos:restore].count("goto out_restore;"), 4)
+
     def test_fs_lifecycle_reselects_fat_before_exists_and_size(self):
         select_fat = 'fs_set_blk_dev("mmc", "1", FS_TYPE_FAT)'
         command = c_function(self.command, "do_ab_sd_update")
         loop_start = command.index(
             "for (i = 0; i < ARRAY_SIZE(ab_sd_images); i++)"
         )
-        loop_end = command.index('\n\tprintf("SD slot trio', loop_start)
+        loop_end = command.index('\n\tprintf("SD update', loop_start)
         loop = command[loop_start:loop_end]
 
         self.assertNotIn(select_fat, command[:loop_start])
@@ -269,7 +315,7 @@ class SdPolicyPatchTest(unittest.TestCase):
         self.assertRegex(
             loop[second_select:size],
             r"(?s)fs_set_blk_dev\([^;]+;\s+if \(ret\) \{.*"
-            r"return CMD_RET_FAILURE;\s+\}\s+$",
+            r"ret = CMD_RET_FAILURE;\s+goto out_restore;\s+\}\s+$",
         )
 
     def test_runtime_slot_mapping_is_bounded_and_defaults_invalid_to_a(self):
@@ -297,6 +343,11 @@ class SdPolicyPatchTest(unittest.TestCase):
         )
         defconfig = (self.sdk_root / DEFCONFIG).read_text(encoding="utf-8")
         self.assertIn("CONFIG_CMD_AB_SD_UPDATE=y", defconfig)
+        self.assertIn("CONFIG_CMD_UBI=y", defconfig)
+        self.assertIn(
+            'CONFIG_MTDIDS_DEFAULT="spi-nand0=spi-nand0"', defconfig
+        )
+        self.assertIn("# CONFIG_CMD_UBIFS is not set", defconfig)
         self.assertIn('CONFIG_ROCKCHIP_CMD="ab_sd_update -"', defconfig)
         self.assertIn("# CONFIG_CMD_SCRIPT_UPDATE is not set", defconfig)
         forbidden = (
@@ -352,6 +403,8 @@ class SdPolicyPatchTest(unittest.TestCase):
         for function in (capacity, writer):
             self.assertIn("if (bad < 0)", function)
             self.assertIn("if (bad > 0)", function)
+        self.assertIn("loff_t range_end = range_start + range_size;", capacity)
+        self.assertIn("for (offset = range_start; offset < range_end;", capacity)
         self.assertIn("capacity += mtd->erasesize;", capacity)
         self.assertNotIn("mtd_block_markbad", capacity + writer)
 
@@ -359,11 +412,19 @@ class SdPolicyPatchTest(unittest.TestCase):
         writer = c_function(self.command, "ab_sd_write_image")
 
         for snippet in (
-            "mtd = get_mtd_device_nm(target);",
+            'mtd_name = image->slot_scoped ? target : "spi-nand0";',
+            "mtd = get_mtd_device_nm(mtd_name);",
             "IS_ERR_OR_NULL(mtd)",
+            "range_start = image->slot_scoped ? 0 : image->raw_offset;",
+            "range_size = image->slot_scoped ? mtd->size : image->max_size;",
+            "range_size > mtd->size - range_start",
+            "!IS_ALIGNED(range_start, mtd->erasesize)",
+            "!IS_ALIGNED(range_size, mtd->erasesize)",
+            "range_end = range_start + range_size;",
+            "ab_sd_good_capacity(mtd, range_start, range_size, &good_capacity)",
             "required = ALIGN((u64)image_size, mtd->writesize);",
             "if (required > good_capacity)",
-            "for (offset = 0; offset < mtd->size; offset += mtd->erasesize)",
+            "for (offset = range_start; offset < range_end;",
             "erase.mtd = mtd;",
             "erase.addr = offset;",
             "erase.len = mtd->erasesize;",
@@ -384,6 +445,7 @@ class SdPolicyPatchTest(unittest.TestCase):
             "ret = mtd_read(mtd, offset + page_offset, mtd->writesize,",
             "retlen != mtd->writesize",
             "memcmp(verify_buf, eraseblock_buf + page_offset, mtd->writesize)",
+            'printf("Wrote and verified %s to %s\\n", image->filename, target);',
             "put_mtd_device(mtd);",
         ):
             self.assertIn(snippet, writer)
@@ -403,17 +465,23 @@ class SdPolicyPatchTest(unittest.TestCase):
     def test_transaction_owns_two_buffers_and_orders_relock_before_activation(self):
         transaction = c_function(self.command, "ab_sd_run_transaction")
         slot_writer = c_function(self.command, "ab_sd_write_present_slot_images")
+        fixed_writer = c_function(self.command, "ab_sd_write_present_fixed_images")
         activation = c_function(self.command, "ab_sd_activate_slot")
 
-        self.assertEqual(self.command.count("malloc(master->erasesize)"), 1)
-        self.assertEqual(self.command.count("malloc(master->writesize)"), 1)
+        self.assertEqual(
+            self.command.count("memalign(ARCH_DMA_MINALIGN, master->erasesize)"), 1
+        )
+        self.assertEqual(
+            self.command.count("memalign(ARCH_DMA_MINALIGN, master->writesize)"), 1
+        )
+        self.assertNotIn("malloc(master->", self.command)
         for snippet in (
             "mtd_probe_devices();",
             'master = get_mtd_device_nm("spi-nand0");',
             "IS_ERR_OR_NULL(master)",
             "spinand = mtd_to_spinand(master);",
-            "eraseblock_buf = malloc(master->erasesize);",
-            "verify_buf = malloc(master->writesize);",
+            "eraseblock_buf = memalign(ARCH_DMA_MINALIGN, master->erasesize);",
+            "verify_buf = memalign(ARCH_DMA_MINALIGN, master->writesize);",
             "free(eraseblock_buf);",
             "free(verify_buf);",
             "put_mtd_device(master);",
@@ -424,7 +492,8 @@ class SdPolicyPatchTest(unittest.TestCase):
             "spinand_set_block_lock(spinand, BL_ALL_UNLOCKED)"
         )
         slot_write = transaction.index("ab_sd_write_present_slot_images(")
-        uboot_last = transaction.index("ab_sd_write_image(&ab_sd_images[0]")
+        ubi_prepare = transaction.index("ab_sd_prepare_present_ubi_images(")
+        fixed_write = transaction.index("ab_sd_write_present_fixed_images(")
         relock_label = transaction.index("relock:")
         relock = transaction.index(
             "spinand_set_block_lock(spinand, BL_LOWER_3_4_LOCKED)"
@@ -432,12 +501,13 @@ class SdPolicyPatchTest(unittest.TestCase):
         failed = transaction.index("if (ret)", relock)
         activate = transaction.index("if (ab_sd_should_switch(present))")
         self.assertLess(unlock, slot_write)
-        self.assertLess(slot_write, uboot_last)
-        self.assertLess(uboot_last, relock_label)
+        self.assertLess(slot_write, ubi_prepare)
+        self.assertLess(ubi_prepare, fixed_write)
+        self.assertLess(fixed_write, relock_label)
         self.assertLess(relock_label, relock)
         self.assertLess(relock, failed)
         self.assertLess(failed, activate)
-        self.assertEqual(transaction[unlock:relock_label].count("goto relock;"), 3)
+        self.assertEqual(transaction[unlock:relock_label].count("goto relock;"), 4)
         self.assertRegex(
             transaction,
             r"if \(ab_sd_should_switch\(present\)\)\s+"
@@ -445,17 +515,42 @@ class SdPolicyPatchTest(unittest.TestCase):
         )
 
         ordered_images = [
-            slot_writer.index(f"&ab_sd_images[{index}]") for index in (1, 2, 3)
+            slot_writer.index(f"&ab_sd_images[{index}]")
+            for index in (
+                "AB_SD_IMAGE_BOOT",
+                "AB_SD_IMAGE_ROOTFS",
+                "AB_SD_IMAGE_OEM",
+            )
         ]
         self.assertEqual(ordered_images, sorted(ordered_images))
-        self.assertNotIn("ab_sd_images[0]", slot_writer)
+        self.assertNotIn("AB_SD_IMAGE_ENV", slot_writer)
+        self.assertIn(
+            "AB_SD_IMAGE_ENV,\n\t\tAB_SD_IMAGE_UBOOT,\n\t\tAB_SD_IMAGE_IDBLOCK,",
+            fixed_writer,
+        )
         for snippet in (
             "ops = avb_ops_user_new();",
             "avb_ab_mark_slot_active(ops->ab_ops, slot_number)",
             "avb_ops_user_free(ops);",
             'slot_number = !strcmp(target_suffix, "_b") ? 1 : 0;',
+            'printf("Activated A/B slot %s for next boot\\n", target_suffix);',
         ):
             self.assertIn(snippet, activation)
+
+    def test_ubi_autoresize_is_consumed_while_nand_is_unlocked(self):
+        transaction = c_function(self.command, "ab_sd_run_transaction")
+        prepare = c_function(self.command, "ab_sd_prepare_ubi_image")
+        prepare_present = c_function(self.command, "ab_sd_prepare_present_ubi_images")
+
+        self.assertIn('snprintf(command, sizeof(command), "ubi part %s", target);', prepare)
+        self.assertIn('run_command("ubi detach", 0)', prepare)
+        self.assertIn("AB_SD_IMAGE_ROOTFS", prepare_present)
+        self.assertIn("AB_SD_IMAGE_OEM", prepare_present)
+        unlock = transaction.index("BL_ALL_UNLOCKED")
+        initialize = transaction.index("ab_sd_prepare_present_ubi_images(")
+        relock = transaction.index("BL_LOWER_3_4_LOCKED")
+        self.assertLess(unlock, initialize)
+        self.assertLess(initialize, relock)
 
     def test_scan_persists_sizes_and_starts_one_transaction(self):
         command = c_function(self.command, "do_ab_sd_update")
