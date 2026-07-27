@@ -41,7 +41,7 @@
 #include "ExchangeAL/CommExchange.h"
 #include "ExchangeAL/Exchange.h"
 #include "ExchangeAL/ExchangeKind.h"
-#include "Update/update.h"
+#include "Update/AbUpdate.h"
 
 #include "Ptz/Ptz.h"
 
@@ -56,7 +56,6 @@ extern "C"
 extern void NormalRestart();
 
 extern bool CreateDetachedThread(char *threadName, void *(*route)(void*), void *param, bool scope);
-extern int gb_upgrade_firmware();
 
 #define printf protocol::ProtocolPrintf
 
@@ -79,8 +78,8 @@ namespace
 static protocol::ProtocolManager* g_gb_live_audio_manager = NULL;
 
 static const char* kGbLiveDmcModuleName = "gb28181_live";
-static const char* kGbUpgradePackagePath = "/tmp/upgrade.bin";
-static const char* kGbUpgradePackageTempPath = "/tmp/upgrade.bin.download";
+static const char* kGbUpgradePackagePath = "/tmp/upgrade.tar";
+static const char* kGbUpgradePackageTempPath = "/tmp/upgrade.tar.download";
 static const char* kGbUpgradeConfigPendingKey = "GbPending";
 static const char* kGbUpgradeConfigSessionKey = "GbSessionID";
 static const char* kGbUpgradeConfigFirmwareKey = "GbFirmware";
@@ -4885,19 +4884,11 @@ void* ProtocolManager::GbUpgradeApplyThread(void* arg)
     IEventManager::instance()->notify(kGbUpgradeReleaseEvent, 0, appEventPulse, NULL, NULL, NULL);
     usleep(500 * 1000);
 
-    const int updateRet = DG_update((char*)kGbUpgradePackagePath);
+    const int updateRet = AbUpdateApply(kGbUpgradePackagePath, true);
     printf("[ProtocolManager] gb upgrade apply finish package=%s ret=%d\n",
            kGbUpgradePackagePath,
            updateRet);
     sync();
-
-    if (RunShellCommand("reboot -f") != 0) {
-        printf("[ProtocolManager] gb upgrade reboot command failed package=%s\n",
-               kGbUpgradePackagePath);
-        ClearGbUpgradePendingState("reboot_command_failed");
-        manager->m_gb_upgrade_running.store(false);
-        return NULL;
-    }
 
     manager->m_gb_upgrade_running.store(false);
     return NULL;
@@ -9641,14 +9632,11 @@ int ProtocolManager::HandleGbDeviceUpgradeControl(const DevControlCmd* cmd)
     std::unique_ptr<GbUpgradeThreadContext> threadCtx(new GbUpgradeThreadContext());
     threadCtx->manager = this;
     m_gb_upgrade_running.store(true);
-//    if (!CreateDetachedThread((char*)"gb_upgrade_apply", ProtocolManager::GbUpgradeApplyThread, threadCtx.get(), true)) {
-//        m_gb_upgrade_running.store(false);
-//        return fail(-114, "apply_thread_failed");
-//    }
+    if (!CreateDetachedThread((char*)"gb_upgrade_apply", ProtocolManager::GbUpgradeApplyThread, threadCtx.get(), true)) {
+        m_gb_upgrade_running.store(false);
+        return fail(-114, "apply_thread_failed");
+    }
 
-	gb_upgrade_firmware();
-
-	
     threadCtx.release();
 
     printf("[ProtocolManager] gb upgrade staged firmware=%s manufacturer=%s session=%s force=%d expected_size=%llu actual_size=%llu checksum=%s package=%s gb=%s\n",

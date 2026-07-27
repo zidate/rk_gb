@@ -1,0 +1,33 @@
+diff --git a/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c b/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
+index 12010b4..ebfbe02 100644
+--- a/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
++++ b/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
+@@ -22,6 +22,7 @@
+ #define AB_SD_ROOTFS BIT(4)
+ #define AB_SD_OEM BIT(5)
+ #define AB_SD_SLOT_TRIO (AB_SD_BOOT | AB_SD_ROOTFS | AB_SD_OEM)
++#define AB_SD_SLOT_SWITCH_TRIGGER AB_SD_OEM
+ #define AB_SD_KIB(n) ((loff_t)(n) * 1024)
+ #define AB_SD_MIB(n) ((loff_t)(n) * 1024 * 1024)
+ #define AB_SD_ENV_OFFSET 0
+@@ -59,7 +60,7 @@ static const struct ab_sd_image ab_sd_images[] = {
+ 
+ static bool ab_sd_should_switch(u32 present)
+ {
+-	return (present & AB_SD_SLOT_TRIO) == AB_SD_SLOT_TRIO;
++	return (present & AB_SD_SLOT_SWITCH_TRIGGER) != 0;
+ }
+ 
+ static void ab_sd_get_target_suffix(char *target_suffix, size_t target_len)
+@@ -550,8 +551,9 @@ static int do_ab_sd_update(cmd_tbl_t *cmdtp, int flag, int argc,
+ 		       (long long)size, target);
+ 	}
+ 
+-	printf("SD slot trio %s; target slot %s; present mask 0x%x\n",
+-	       ab_sd_should_switch(present) ? "complete" : "incomplete",
++	printf("SD update %s; target slot %s; present mask 0x%x\n",
++	       (present & AB_SD_SLOT_SWITCH_TRIGGER) ? "contains oem" :
++	       "without oem",
+ 	       target_suffix, present);
+ 	if (!present)
+ 		ret = CMD_RET_SUCCESS;

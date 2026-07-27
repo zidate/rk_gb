@@ -1,0 +1,150 @@
+diff --git a/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c b/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
+index 5493638..12010b4 100644
+--- a/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
++++ b/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
+@@ -24,6 +24,9 @@
+ #define AB_SD_SLOT_TRIO (AB_SD_BOOT | AB_SD_ROOTFS | AB_SD_OEM)
+ #define AB_SD_KIB(n) ((loff_t)(n) * 1024)
+ #define AB_SD_MIB(n) ((loff_t)(n) * 1024 * 1024)
++#define AB_SD_ENV_OFFSET 0
++#define AB_SD_IDBLOCK_OFFSET AB_SD_KIB(256)
++#define AB_SD_UBOOT_OFFSET (AB_SD_IDBLOCK_OFFSET + AB_SD_MIB(1))
+ 
+ enum ab_sd_image_index {
+ 	AB_SD_IMAGE_ENV,
+@@ -39,16 +42,19 @@ struct ab_sd_image {
+ 	const char *partition;
+ 	u32 present_bit;
+ 	loff_t max_size;
++	loff_t raw_offset;
+ 	bool slot_scoped;
+ };
+ 
+ static const struct ab_sd_image ab_sd_images[] = {
+-	{ "env.img", "env", AB_SD_ENV, AB_SD_KIB(256), false },
+-	{ "idblock.img", "idblock", AB_SD_IDBLOCK, AB_SD_MIB(1), false },
+-	{ "uboot.img", "uboot", AB_SD_UBOOT, AB_SD_MIB(1), false },
+-	{ "boot.img", "boot", AB_SD_BOOT, AB_SD_MIB(4), true },
+-	{ "rootfs.img", "rootfs", AB_SD_ROOTFS, AB_SD_MIB(10), true },
+-	{ "oem.img", "oem", AB_SD_OEM, AB_SD_MIB(32), true },
++	{ "env.img", "env", AB_SD_ENV, AB_SD_KIB(256), AB_SD_ENV_OFFSET, false },
++	{ "idblock.img", "idblock", AB_SD_IDBLOCK, AB_SD_MIB(1),
++	  AB_SD_IDBLOCK_OFFSET, false },
++	{ "uboot.img", "uboot", AB_SD_UBOOT, AB_SD_MIB(1),
++	  AB_SD_UBOOT_OFFSET, false },
++	{ "boot.img", "boot", AB_SD_BOOT, AB_SD_MIB(4), 0, true },
++	{ "rootfs.img", "rootfs", AB_SD_ROOTFS, AB_SD_MIB(10), 0, true },
++	{ "oem.img", "oem", AB_SD_OEM, AB_SD_MIB(32), 0, true },
+ };
+ 
+ static bool ab_sd_should_switch(u32 present)
+@@ -84,13 +90,16 @@ static void ab_sd_get_target(const struct ab_sd_image *image,
+ 		strlcpy(target, image->partition, target_len);
+ }
+ 
+-static int ab_sd_good_capacity(struct mtd_info *mtd, u64 *good_capacity)
++static int ab_sd_good_capacity(struct mtd_info *mtd, loff_t range_start,
++			       loff_t range_size, u64 *good_capacity)
+ {
+ 	u64 capacity = 0;
++	loff_t range_end = range_start + range_size;
+ 	loff_t offset;
+ 	int bad;
+ 
+-	for (offset = 0; offset < mtd->size; offset += mtd->erasesize) {
++	for (offset = range_start; offset < range_end;
++	     offset += mtd->erasesize) {
+ 		bad = mtd_block_isbad(mtd, offset);
+ 		if (bad < 0) {
+ 			printf("Failed to check %s block 0x%llx (err = %d)\n",
+@@ -111,22 +120,43 @@ static int ab_sd_write_image(const struct ab_sd_image *image,
+ 			     u8 *eraseblock_buf, u8 *verify_buf)
+ {
+ 	char target[sizeof("rootfs_b")];
++	const char *mtd_name;
+ 	struct mtd_info *mtd;
+ 	u64 good_capacity;
+ 	u64 required;
+ 	loff_t file_offset = 0;
++	loff_t range_start;
++	loff_t range_size;
++	loff_t range_end;
+ 	loff_t offset;
+ 	int ret;
+ 
+ 	ab_sd_get_target(image, target_suffix, target, sizeof(target));
+-	mtd = get_mtd_device_nm(target);
++	mtd_name = image->slot_scoped ? target : "spi-nand0";
++	mtd = get_mtd_device_nm(mtd_name);
+ 	if (IS_ERR_OR_NULL(mtd)) {
+-		printf("MTD partition %s not found (err = %ld)\n", target,
++		printf("MTD device %s for %s not found (err = %ld)\n",
++		       mtd_name, target,
+ 		       PTR_ERR(mtd));
+ 		return CMD_RET_FAILURE;
+ 	}
+ 
+-	ret = ab_sd_good_capacity(mtd, &good_capacity);
++	range_start = image->slot_scoped ? 0 : image->raw_offset;
++	range_size = image->slot_scoped ? mtd->size : image->max_size;
++	if (range_start < 0 || range_start > mtd->size || range_size <= 0 ||
++	    range_size > mtd->size - range_start ||
++	    !IS_ALIGNED(range_start, mtd->erasesize) ||
++	    !IS_ALIGNED(range_size, mtd->erasesize)) {
++		printf("Invalid %s range 0x%llx+0x%llx on %s (size 0x%llx)\n",
++		       target, (unsigned long long)range_start,
++		       (unsigned long long)range_size, mtd_name,
++		       (unsigned long long)mtd->size);
++		ret = -EINVAL;
++		goto out;
++	}
++	range_end = range_start + range_size;
++
++	ret = ab_sd_good_capacity(mtd, range_start, range_size, &good_capacity);
+ 	if (ret)
+ 		goto out;
+ 	required = ALIGN((u64)image_size, mtd->writesize);
+@@ -138,7 +168,8 @@ static int ab_sd_write_image(const struct ab_sd_image *image,
+ 		goto out;
+ 	}
+ 
+-	for (offset = 0; offset < mtd->size; offset += mtd->erasesize) {
++	for (offset = range_start; offset < range_end;
++	     offset += mtd->erasesize) {
+ 		struct erase_info erase = { 0 };
+ 		loff_t chunk_len;
+ 		loff_t actread = 0;
+@@ -226,8 +257,12 @@ static int ab_sd_write_image(const struct ab_sd_image *image,
+ 		file_offset += chunk_len;
+ 	}
+ 
+-	if (file_offset != image_size)
++	if (file_offset != image_size) {
+ 		ret = -ENOSPC;
++		goto out;
++	}
++
++	printf("Wrote and verified %s to %s\n", image->filename, target);
+ 
+ out:
+ 	put_mtd_device(mtd);
+@@ -359,6 +394,8 @@ static int ab_sd_activate_slot(const char *target_suffix)
+ 	if (ret)
+ 		printf("Failed to activate slot %s (err = %d)\n",
+ 		       target_suffix, ret);
++	else
++		printf("Activated A/B slot %s for next boot\n", target_suffix);
+ 	avb_ops_user_free(ops);
+ 	return ret ? CMD_RET_FAILURE : CMD_RET_SUCCESS;
+ }
+@@ -381,8 +418,8 @@ static int ab_sd_run_transaction(u32 present, const loff_t *image_sizes,
+ 	}
+ 	spinand = mtd_to_spinand(master);
+ 
+-	eraseblock_buf = malloc(master->erasesize);
+-	verify_buf = malloc(master->writesize);
++	eraseblock_buf = memalign(ARCH_DMA_MINALIGN, master->erasesize);
++	verify_buf = memalign(ARCH_DMA_MINALIGN, master->writesize);
+ 	if (!eraseblock_buf || !verify_buf) {
+ 		printf("Failed to allocate SPI NAND write buffers\n");
+ 		ret = -ENOMEM;

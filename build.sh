@@ -111,6 +111,7 @@ function image()
 {
 	OSD_FONT_SRC=$ROOT/Middleware/libmpp/rkipc/common/osd/noto_serif_sc_gb2312.otf
 	OSD_FONT_DST=$PACKAGING/oem_ipc/usr/share/noto_serif_sc_gb2312.otf
+	UPGRADE_TAR=$ROOT/Release/upgrade.tar.gz
 	if [ ! -f "$OSD_FONT_SRC" ]; then
 		echo "OSD font not found: $OSD_FONT_SRC"
 		return 1
@@ -118,7 +119,16 @@ function image()
 	mkdir -p "$(dirname "$OSD_FONT_DST")"
 	cp -f "$OSD_FONT_SRC" "$OSD_FONT_DST" || return 1
 	echo "make image ..."
-	make -C $PACKAGING;
+	make -C "$PACKAGING" || return 1
+	for image_name in boot.img rootfs.img oem.img; do
+		if [ ! -f "$PACKAGING/image/$image_name" ]; then
+			echo "OTA image not found: $PACKAGING/image/$image_name"
+			return 1
+		fi
+	done
+	mkdir -p "$ROOT/Release" || return 1
+	tar -cf "$UPGRADE_TAR" -C "$PACKAGING/image" boot.img rootfs.img oem.img || return 1
+	echo "OTA package: $UPGRADE_TAR"
 	echo "make image $PACKAGING $BOARD_TYPE $BLE_TYPE end ..."
 }
 #----------------------------
@@ -126,6 +136,7 @@ function image-clean()
 {
 	echo "clean image ..."
 	make clean -C $PACKAGING;
+	rm -f "$ROOT/Release/upgrade.tar.gz"
 	echo "clean image $PACKAGING $BOARD_TYPE $BLE_TYPE end ..."
 }
 #----------------------------

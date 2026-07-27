@@ -1,0 +1,518 @@
+diff --git a/sysdrv/source/uboot/u-boot/include/linux/mtd/spinand.h b/sysdrv/source/uboot/u-boot/include/linux/mtd/spinand.h
+index b00a1e8..4470d1d 100755
+--- a/sysdrv/source/uboot/u-boot/include/linux/mtd/spinand.h
++++ b/sysdrv/source/uboot/u-boot/include/linux/mtd/spinand.h
+@@ -158,0 +159 @@
++#define BL_LOWER_3_4_LOCKED	0x2a
+@@ -319,0 +321 @@ struct spinand_ecc_info {
++#define SPINAND_HAS_BLOCK_PROTECTION BIT(2)
+@@ -512,0 +515,2 @@ int spinand_select_target(struct spinand_device *spinand, unsigned int target);
++int spinand_get_block_lock(struct spinand_device *spinand, u8 *lock);
++int spinand_set_block_lock(struct spinand_device *spinand, u8 lock);
+diff --git a/sysdrv/source/uboot/u-boot/drivers/mtd/nand/spi/core.c b/sysdrv/source/uboot/u-boot/drivers/mtd/nand/spi/core.c
+index 46b028d..cd0570c 100755
+--- a/sysdrv/source/uboot/u-boot/drivers/mtd/nand/spi/core.c
++++ b/sysdrv/source/uboot/u-boot/drivers/mtd/nand/spi/core.c
+@@ -495,0 +496,21 @@ static int spinand_lock_block(struct spinand_device *spinand, u8 lock)
++int spinand_get_block_lock(struct spinand_device *spinand, u8 *lock)
++{
++	return spinand_read_reg_op(spinand, REG_BLOCK_LOCK, lock);
++}
++
++int spinand_set_block_lock(struct spinand_device *spinand, u8 lock)
++{
++	u8 readback;
++	int ret;
++
++	ret = spinand_write_reg_op(spinand, REG_BLOCK_LOCK, lock);
++	if (ret)
++		return ret;
++
++	ret = spinand_get_block_lock(spinand, &readback);
++	if (ret)
++		return ret;
++
++	return readback == lock ? 0 : -EIO;
++}
++
+@@ -1275 +1296,5 @@ static int spinand_init(struct spinand_device *spinand)
+-		ret = spinand_lock_block(spinand, BL_ALL_UNLOCKED);
++		if (spinand->flags & SPINAND_HAS_BLOCK_PROTECTION) {
++			ret = spinand_set_block_lock(spinand, BL_LOWER_3_4_LOCKED);
++		} else {
++			ret = spinand_set_block_lock(spinand, BL_ALL_UNLOCKED);
++		}
+diff --git a/sysdrv/source/uboot/u-boot/drivers/mtd/nand/spi/chucun.c b/sysdrv/source/uboot/u-boot/drivers/mtd/nand/spi/chucun.c
+index c4f0d34..114613a 100755
+--- a/sysdrv/source/uboot/u-boot/drivers/mtd/nand/spi/chucun.c
++++ b/sysdrv/source/uboot/u-boot/drivers/mtd/nand/spi/chucun.c
+@@ -89 +89 @@ static const struct spinand_info chucun_spinand_table[] = {
+-		     SPINAND_HAS_QE_BIT,
++		     SPINAND_HAS_QE_BIT | SPINAND_HAS_BLOCK_PROTECTION,
+@@ -98 +98 @@ static const struct spinand_info chucun_spinand_table[] = {
+-		     SPINAND_HAS_QE_BIT,
++		     SPINAND_HAS_QE_BIT | SPINAND_HAS_BLOCK_PROTECTION,
+diff --git a/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c b/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
+new file mode 100644
+index 0000000..f1b58f5
+--- /dev/null
++++ b/sysdrv/source/uboot/u-boot/cmd/ab_sd_update.c
+@@ -0,0 +1,434 @@
++// SPDX-License-Identifier: GPL-2.0+
++/* Validate RV1106 A/B update images on the SD card before flash access. */
++
++#include <common.h>
++#include <command.h>
++#include <fs.h>
++#include <malloc.h>
++#include <mapmem.h>
++#include <mtd.h>
++#include <part.h>
++#include <android_ab.h>
++#include <android_avb/avb_ab_flow.h>
++#include <android_avb/avb_ops_user.h>
++#include <linux/bitops.h>
++#include <linux/mtd/mtd.h>
++#include <linux/mtd/spinand.h>
++
++#define AB_SD_BOOT BIT(0)
++#define AB_SD_ROOTFS BIT(1)
++#define AB_SD_OEM BIT(2)
++#define AB_SD_UBOOT BIT(3)
++#define AB_SD_SLOT_TRIO (AB_SD_BOOT | AB_SD_ROOTFS | AB_SD_OEM)
++#define AB_SD_MIB(n) ((loff_t)(n) * 1024 * 1024)
++
++struct ab_sd_image {
++	const char *filename;
++	const char *partition;
++	u32 present_bit;
++	loff_t max_size;
++	bool slot_scoped;
++};
++
++static const struct ab_sd_image ab_sd_images[] = {
++	{ "uboot.img", "uboot", AB_SD_UBOOT, AB_SD_MIB(1), false },
++	{ "boot.img", "boot", AB_SD_BOOT, AB_SD_MIB(4), true },
++	{ "rootfs.img", "rootfs", AB_SD_ROOTFS, AB_SD_MIB(10), true },
++	{ "oem.img", "oem", AB_SD_OEM, AB_SD_MIB(32), true },
++};
++
++static bool ab_sd_should_switch(u32 present)
++{
++	return (present & AB_SD_SLOT_TRIO) == AB_SD_SLOT_TRIO;
++}
++
++static void ab_sd_get_target_suffix(char *target_suffix, size_t target_len)
++{
++	char current_suffix[3] = { 0 };
++
++	if (!ab_get_slot_suffix(current_suffix)) {
++		if (!strcmp(current_suffix, "_a")) {
++			strlcpy(target_suffix, "_b", target_len);
++			return;
++		}
++		if (!strcmp(current_suffix, "_b")) {
++			strlcpy(target_suffix, "_a", target_len);
++			return;
++		}
++	}
++
++	strlcpy(target_suffix, "_a", target_len);
++}
++
++static void ab_sd_get_target(const struct ab_sd_image *image,
++			     const char *target_suffix, char *target,
++			     size_t target_len)
++{
++	if (image->slot_scoped)
++		snprintf(target, target_len, "%s%s", image->partition, target_suffix);
++	else
++		strlcpy(target, image->partition, target_len);
++}
++
++static int ab_sd_good_capacity(struct mtd_info *mtd, u64 *good_capacity)
++{
++	u64 capacity = 0;
++	loff_t offset;
++	int bad;
++
++	for (offset = 0; offset < mtd->size; offset += mtd->erasesize) {
++		bad = mtd_block_isbad(mtd, offset);
++		if (bad < 0) {
++			printf("Failed to check %s block 0x%llx (err = %d)\n",
++			       mtd->name, (unsigned long long)offset, bad);
++			return bad;
++		}
++		if (bad > 0)
++			continue;
++		capacity += mtd->erasesize;
++	}
++
++	*good_capacity = capacity;
++	return 0;
++}
++
++static int ab_sd_write_image(const struct ab_sd_image *image,
++			     loff_t image_size, const char *target_suffix,
++			     u8 *eraseblock_buf, u8 *verify_buf)
++{
++	char target[sizeof("rootfs_b")];
++	struct mtd_info *mtd;
++	u64 good_capacity;
++	u64 required;
++	loff_t file_offset = 0;
++	loff_t offset;
++	int ret;
++
++	ab_sd_get_target(image, target_suffix, target, sizeof(target));
++	mtd = get_mtd_device_nm(target);
++	if (IS_ERR_OR_NULL(mtd)) {
++		printf("MTD partition %s not found (err = %ld)\n", target,
++		       PTR_ERR(mtd));
++		return CMD_RET_FAILURE;
++	}
++
++	ret = ab_sd_good_capacity(mtd, &good_capacity);
++	if (ret)
++		goto out;
++	required = ALIGN((u64)image_size, mtd->writesize);
++	if (required > good_capacity) {
++		printf("Image %s needs %llu good bytes, %s has %llu\n",
++		       image->filename, (unsigned long long)required, target,
++		       (unsigned long long)good_capacity);
++		ret = -ENOSPC;
++		goto out;
++	}
++
++	for (offset = 0; offset < mtd->size; offset += mtd->erasesize) {
++		struct erase_info erase = { 0 };
++		loff_t chunk_len;
++		loff_t actread = 0;
++		size_t page_len;
++		size_t page_offset;
++		int bad;
++
++		bad = mtd_block_isbad(mtd, offset);
++		if (bad < 0) {
++			printf("Failed to check %s block 0x%llx (err = %d)\n",
++			       target, (unsigned long long)offset, bad);
++			ret = bad;
++			goto out;
++		}
++		if (bad > 0)
++			continue;
++
++		erase.mtd = mtd;
++		erase.addr = offset;
++		erase.len = mtd->erasesize;
++		ret = mtd_erase(mtd, &erase);
++		if (ret) {
++			printf("Failed to erase %s block 0x%llx (err = %d)\n",
++			       target, (unsigned long long)offset, ret);
++			goto out;
++		}
++
++		if (file_offset >= image_size)
++			continue;
++
++		chunk_len = min_t(loff_t, image_size - file_offset,
++				      mtd->erasesize);
++		page_len = ALIGN(chunk_len, mtd->writesize);
++		memset(eraseblock_buf, 0xff, mtd->erasesize);
++		/* fs_read() closes the filesystem, so reselect it for each chunk. */
++		ret = fs_set_blk_dev("mmc", "1", FS_TYPE_FAT);
++		if (ret) {
++			printf("Failed to select SD FAT while reading %s (err = %d)\n",
++			       image->filename, ret);
++			goto out;
++		}
++		ret = fs_read(image->filename, map_to_sysmem(eraseblock_buf),
++			      file_offset, chunk_len, &actread);
++		if (ret || actread != chunk_len) {
++			printf("Failed to read %s at %lld (%lld/%lld, err = %d)\n",
++			       image->filename, (long long)file_offset,
++			       (long long)actread, (long long)chunk_len, ret);
++			ret = ret ? ret : -EIO;
++			goto out;
++		}
++		if (page_len > chunk_len)
++			memset(eraseblock_buf + chunk_len, 0xff, page_len - chunk_len);
++
++		for (page_offset = 0; page_offset < page_len;
++		     page_offset += mtd->writesize) {
++			struct mtd_oob_ops ops = { 0 };
++			size_t retlen = 0;
++
++			ops.mode = MTD_OPS_AUTO_OOB;
++			ops.len = mtd->writesize;
++			ops.datbuf = eraseblock_buf + page_offset;
++			ret = mtd_write_oob(mtd, offset + page_offset, &ops);
++			if (ret || ops.retlen != mtd->writesize) {
++				printf("Failed to write %s page 0x%llx (err = %d)\n",
++				       target,
++				       (unsigned long long)(offset + page_offset),
++				       ret);
++				ret = ret ? ret : -EIO;
++				goto out;
++			}
++
++			ret = mtd_read(mtd, offset + page_offset, mtd->writesize,
++				       &retlen, verify_buf);
++			if (ret || retlen != mtd->writesize ||
++			    memcmp(verify_buf, eraseblock_buf + page_offset, mtd->writesize)) {
++				printf("Failed to verify %s page 0x%llx (err = %d)\n",
++				       target,
++				       (unsigned long long)(offset + page_offset),
++				       ret);
++				ret = ret ? ret : -EIO;
++				goto out;
++			}
++		}
++
++		file_offset += chunk_len;
++	}
++
++	if (file_offset != image_size)
++		ret = -ENOSPC;
++
++out:
++	put_mtd_device(mtd);
++	return ret ? CMD_RET_FAILURE : CMD_RET_SUCCESS;
++}
++
++static int ab_sd_write_present_slot_images(u32 present,
++					   const loff_t *image_sizes,
++					   const char *target_suffix,
++					   u8 *eraseblock_buf, u8 *verify_buf)
++{
++	int ret;
++
++	if (present & AB_SD_BOOT) {
++		ret = ab_sd_write_image(&ab_sd_images[1], image_sizes[1],
++					 target_suffix, eraseblock_buf, verify_buf);
++		if (ret)
++			return ret;
++	}
++	if (present & AB_SD_ROOTFS) {
++		ret = ab_sd_write_image(&ab_sd_images[2], image_sizes[2],
++					 target_suffix, eraseblock_buf, verify_buf);
++		if (ret)
++			return ret;
++	}
++	if (present & AB_SD_OEM) {
++		ret = ab_sd_write_image(&ab_sd_images[3], image_sizes[3],
++					 target_suffix, eraseblock_buf, verify_buf);
++		if (ret)
++			return ret;
++	}
++
++	return CMD_RET_SUCCESS;
++}
++
++static int ab_sd_activate_slot(const char *target_suffix)
++{
++	AvbOps *ops;
++	unsigned int slot_number;
++	int ret;
++
++	slot_number = !strcmp(target_suffix, "_b") ? 1 : 0;
++	ops = avb_ops_user_new();
++	if (!ops) {
++		printf("Failed to allocate AVB operations\n");
++		return CMD_RET_FAILURE;
++	}
++
++	ret = avb_ab_mark_slot_active(ops->ab_ops, slot_number);
++	if (ret)
++		printf("Failed to activate slot %s (err = %d)\n",
++		       target_suffix, ret);
++	avb_ops_user_free(ops);
++	return ret ? CMD_RET_FAILURE : CMD_RET_SUCCESS;
++}
++
++static int ab_sd_run_transaction(u32 present, const loff_t *image_sizes,
++				 const char *target_suffix)
++{
++	struct mtd_info *master;
++	struct spinand_device *spinand;
++	u8 *eraseblock_buf = NULL;
++	u8 *verify_buf = NULL;
++	int relock_ret;
++	int ret;
++
++	mtd_probe_devices();
++	master = get_mtd_device_nm("spi-nand0");
++	if (IS_ERR_OR_NULL(master)) {
++		printf("SPI NAND master not found (err = %ld)\n", PTR_ERR(master));
++		return CMD_RET_FAILURE;
++	}
++	spinand = mtd_to_spinand(master);
++
++	eraseblock_buf = malloc(master->erasesize);
++	verify_buf = malloc(master->writesize);
++	if (!eraseblock_buf || !verify_buf) {
++		printf("Failed to allocate SPI NAND write buffers\n");
++		ret = -ENOMEM;
++		goto out;
++	}
++
++	ret = spinand_set_block_lock(spinand, BL_ALL_UNLOCKED);
++	if (ret) {
++		printf("Failed to unlock SPI NAND protection (err = %d)\n", ret);
++		goto relock;
++	}
++
++	ret = ab_sd_write_present_slot_images(present, image_sizes, target_suffix,
++					      eraseblock_buf, verify_buf);
++	if (ret)
++		goto relock;
++
++	if (present & AB_SD_UBOOT) {
++		ret = ab_sd_write_image(&ab_sd_images[0], image_sizes[0],
++					target_suffix, eraseblock_buf, verify_buf);
++		if (ret)
++			goto relock;
++	}
++
++relock:
++	relock_ret = spinand_set_block_lock(spinand, BL_LOWER_3_4_LOCKED);
++	if (relock_ret) {
++		printf("Failed to restore SPI NAND protection (err = %d)\n",
++		       relock_ret);
++		ret = relock_ret;
++	}
++
++out:
++	free(eraseblock_buf);
++	free(verify_buf);
++	put_mtd_device(master);
++	if (ret)
++		return CMD_RET_FAILURE;
++
++	if (ab_sd_should_switch(present))
++		ret = ab_sd_activate_slot(target_suffix);
++	return ret;
++}
++
++static int do_ab_sd_update(cmd_tbl_t *cmdtp, int flag, int argc,
++			   char * const argv[])
++{
++	struct blk_desc *desc;
++	char target_suffix[3];
++	loff_t image_sizes[ARRAY_SIZE(ab_sd_images)] = { 0 };
++	u32 present = 0;
++	unsigned int i;
++	int saved_part_type;
++	int ret;
++
++	(void)cmdtp;
++	(void)flag;
++	(void)argc;
++	(void)argv;
++
++	desc = blk_get_devnum_by_type(IF_TYPE_MMC, 1);
++	if (!desc) {
++		printf("Failed to get SD block descriptor\n");
++		return CMD_RET_FAILURE;
++	}
++
++	/*
++	 * The Rockchip block layer may leave the removable card classified as
++	 * RKPARM.  The SD update media uses an MBR/FAT partition, as does the
++	 * vendor script updater, so force DOS parsing only for this command.
++	 */
++	saved_part_type = desc->part_type;
++	desc->part_type = PART_TYPE_DOS;
++
++	ab_sd_get_target_suffix(target_suffix, sizeof(target_suffix));
++	for (i = 0; i < ARRAY_SIZE(ab_sd_images); i++) {
++		const struct ab_sd_image *image = &ab_sd_images[i];
++		char target[sizeof("rootfs_b")];
++		loff_t size = 0;
++		int exists;
++
++		/*
++		 * fs_exists() closes the filesystem and resets fs_type, so select
++		 * the FAT partition again before every filesystem operation.
++		 */
++		ret = fs_set_blk_dev("mmc", "1", FS_TYPE_FAT);
++		if (ret) {
++			printf("Failed to select SD FAT before probing %s (err = %d)\n",
++			       image->filename, ret);
++			ret = CMD_RET_FAILURE;
++			goto out_restore;
++		}
++
++		exists = fs_exists(image->filename);
++		if (exists < 0) {
++			printf("Failed to probe %s (err = %d)\n", image->filename,
++			       exists);
++			ret = CMD_RET_FAILURE;
++			goto out_restore;
++		}
++		if (!exists)
++			continue;
++
++		ret = fs_set_blk_dev("mmc", "1", FS_TYPE_FAT);
++		if (ret) {
++			printf("Failed to select SD FAT before sizing %s (err = %d)\n",
++			       image->filename, ret);
++			ret = CMD_RET_FAILURE;
++			goto out_restore;
++		}
++
++		ret = fs_size(image->filename, &size);
++		if (ret || size <= 0 || size > image->max_size) {
++			printf("Invalid %s size %lld (max %lld, err = %d)\n",
++			       image->filename, (long long)size,
++			       (long long)image->max_size, ret);
++			ret = CMD_RET_FAILURE;
++			goto out_restore;
++		}
++
++		ab_sd_get_target(image, target_suffix, target, sizeof(target));
++		image_sizes[i] = size;
++		present |= image->present_bit;
++		printf("Validated %s (%lld bytes) for %s\n", image->filename,
++		       (long long)size, target);
++	}
++
++	printf("SD slot trio %s; target slot %s; present mask 0x%x\n",
++	       ab_sd_should_switch(present) ? "complete" : "incomplete",
++	       target_suffix, present);
++	if (!present)
++		ret = CMD_RET_SUCCESS;
++	else
++		ret = ab_sd_run_transaction(present, image_sizes, target_suffix);
++
++out_restore:
++	desc->part_type = saved_part_type;
++	return ret;
++}
++
++U_BOOT_CMD(ab_sd_update, 1, 1, do_ab_sd_update,
++	   "validate RV1106 A/B images on SD before flash access", "");
+diff --git a/sysdrv/source/uboot/u-boot/cmd/Kconfig b/sysdrv/source/uboot/u-boot/cmd/Kconfig
+index 5b359ff..e80f8a4 100755
+--- a/sysdrv/source/uboot/u-boot/cmd/Kconfig
++++ b/sysdrv/source/uboot/u-boot/cmd/Kconfig
+@@ -1083,0 +1084,7 @@ config CMD_SCRIPT_UPDATE
++config CMD_AB_SD_UPDATE
++	bool "ab_sd_update - validate RV1106 A/B images on SD"
++	depends on CMD_MMC && CMD_FAT
++	help
++	  Scan and validate optional RV1106 update images on the SD FAT root.
++	  Flash programming and slot activation are handled separately.
++
+diff --git a/sysdrv/source/uboot/u-boot/cmd/Makefile b/sysdrv/source/uboot/u-boot/cmd/Makefile
+index 9a2d5f8..3fe8a5e 100755
+--- a/sysdrv/source/uboot/u-boot/cmd/Makefile
++++ b/sysdrv/source/uboot/u-boot/cmd/Makefile
+@@ -151,0 +152 @@ obj-$(CONFIG_CMD_SCRIPT_UPDATE) += script_update.o
++obj-$(CONFIG_CMD_AB_SD_UPDATE) += ab_sd_update.o
+diff --git a/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig b/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig
+index f19190a..cdccb57 100755
+--- a/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig
++++ b/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig
+@@ -68,0 +69 @@ CONFIG_CMD_MTD=y
++CONFIG_CMD_AB_SD_UPDATE=y

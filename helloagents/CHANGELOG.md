@@ -10,6 +10,14 @@
 - 根据板端效果反馈将 RV1106 text OSD 自动黑白恢复为每秒重绘，移除局部亮度变化 map 与区域门控；字体画布全透明和 GB OSD `BgAlpha=0/FgAlpha=255` 保持不变，继续去除黑底。
 - 优化 RV1106 text OSD 自动黑白的 CPU 开销并去掉黑底：继续每秒更新低分辨率亮度分类，但仅在某条文字覆盖区域跨过黑/白阈值时重新生成 bitmap；字体背景像素改为全透明，GB OSD RGN 调整为 `BgAlpha=0/FgAlpha=255`。
 - 修复 RV1106 text OSD 在 `font_color_mode=auto` 下不会随画面亮度实时更新的问题：亮度 map 每秒刷新后，所有可见且非空的自定义文字区域会重新生成 ARGB8888 bitmap；固定颜色模式仍仅在配置变化时重绘。
+- 调整 RV1106 SD updater 的切槽策略：只要本次事务包含并成功写入 `oem.img`，即激活目标 A/B 槽；无 `oem.img` 的固定区或其他部分升级保持当前槽，任一失败路径仍不切槽。
+- 修复 RV1106 SD updater 已识别六个镜像却在 `MTD partition env not found (err = -19)` 退出的问题：`env.img/idblock.img/uboot.img` 现通过 `spi-nand0` 主设备按 `0x0/0x40000/0x140000` 的固定物理区间擦写并逐页回读，槽镜像继续使用命名 MTD 分区；全部事务成功后才激活目标 A/B 槽。
+- 修复 RV1106 U-Boot 分块读取 SD 镜像反复打印 `FAT: Misaligned buffer address`：擦除块缓存与校验缓存改为按 `ARCH_DMA_MINALIGN` 分配，并避免 32 位 U-Boot 中会引入 `__aeabi_ldivmod` 的 64 位取模对齐检查。
+- 修复 RV1106 U-Boot `ubi part rootfs_b` 仍报 `mtdparts variable doesn't start with 'mtdparts='` 的问题：正常 `./build.sh env` 的真实入口 `project/build.sh` 与直接 `make -C sysdrv env` 的兼容入口现在都写出 `mtdparts=mtdparts=spi-nand0:...`；前缀看似重复是因为第一层是环境变量名、第二层是旧式 U-Boot parser 要求的变量值前缀。
+- 修复 RV1106 U-Boot SD 升级写完 A/B 三件套后执行 `ubi part rootfs_*` 报 `Error initializing mtdparts` 的问题：板级 defconfig 新增 `CONFIG_MTDIDS_DEFAULT="spi-nand0=spi-nand0"`，为旧式 U-Boot UBI 命令提供 SPI NAND 设备映射；前 96 MiB 常态保护与事务内临时解锁逻辑保持不变。
+- 修复 RV1106 SD/OTA 写入新 rootfs/oem 后立即恢复前 96 MiB 硬件保护、导致 Linux 首启 UBI autoresize 擦除 PEB 返回 `-EIO` 的问题：升级事务现保持 A0=`0x00` 直到目标 UBI 分区完成 attach/detach，再恢复 A0=`0x2A`；SD 同时新增 `env.img/idblock.img` 固定分区升级，网络 OTA 显式只允许 `boot.img`（kernel+DTB）、`rootfs.img`、`oem.img`。
+- 修复 RV1106 A/B SD updater 已验证镜像但仍无法写入的问题：SDK 原始 `mtdparts=spi-nand0:256K...` 被 U-Boot 新 MTD parser 在 `K` 处拒绝；修正版从 `simple_strtoull()` 开始原生识别大小写 `K/M/G`，避免初版基于 `ustrtoull()` 导致单位重复换算，`project/build.sh` 和 `env.img` 保留可读的 `256K/1M` 分区格式。
+- 修复 RV1106 A/B SD 升级在扫描首个 `uboot.img` 前报 `Unrecognized filesystem type` 的问题：`ab_sd_update` 现沿用厂商旧 SD 路径的兼容处理，在整个 FAT 扫描与镜像读取事务中临时将 `mmc 1` 按 `PART_TYPE_DOS` 解析，并在成功、无镜像或任一失败路径恢复原块设备类型。
 - 收口 RV1106 OSD 扩展对 GB28181 的影响：新增字号、颜色、星期和对齐等能力只作为媒体/ExchangeAL 外部接口与 RK OSD 落地能力，`ProtocolManager` 的 GB OSD 协议归一化、比较和日期格式映射恢复到既有兼容字段，避免影响已联调通过的 GB28181 OSD 接口。
 - 修复 RV1106 OSD `font_color_mode=auto` 只落成固定白色的问题：媒体/RK OSD 层现在按子码流 VI NV12 Y 平面生成低分辨率亮度 map，并在现有 ARGB8888 FreeType 绘制路径中逐字符选择黑/白；取帧失败时保留白色兜底，不阻塞 OSD 刷新。
 - 修复 GB28181 与 GAT1400 启动耦合问题：`ProtocolManager::Start()/ReloadExternalConfig()/RestartGbRegisterService()` 现按 `gb_register.enabled` 门控 GB live/replay RTP/PS sender、广播、对讲、listen 和 GB client lifecycle；关闭 GB28181 时不再影响 GAT1400 独立启动。
@@ -39,6 +47,7 @@
 ### 新增
 - 新增持久化云平台选择 `CFG_CLOUD_PLATFORM`：同一固件在启动时只运行 `GB28181` 或 `CMIOT`，缺省为 GB28181，配置修改后重启生效。
 - 新增独立 cmiot OSD 配置 `CFG_CMIOT_OSD` 与 `NormalizedOsdControl` 媒体边界；平台下发的 `0-10000` 坐标保持原值到 RK OSD 最终应用阶段。
+- 整理 `vendor/rv1106_sdk_patches/source/` 下 18 个 RV1106 A/B、SPI NAND 写保护、SD 升级和 `rk_ota` 最终源码快照，并由测试保证完整覆盖 0001～0010 补丁目标。
 - 扩展 OSD 水印外部接口能力：`VideoOsdState`、`CFG_OSD_TIME/CFG_OSD_TEXT`、`AVManager` 和 RV1106 RGN 层现支持 `16/32/64` 字号、`auto/customize #rrggbb` 颜色、日期四种格式、12/24 小时制、星期开关、左右对齐、外部 `0-10000` 坐标，以及最多 `7` 条文本水印真实下发。
 - 新增 GAT1400 注册配置 `server_ipv6/server_ipv6_port`，本地 INI、Web 配置桥、配置 diff/reload 和请求目标构造均已接入。
 - 新增 GAT1400 车牌检测异步上报入口 `ProtocolManager::NotifyGatPlateDetections()`、`GAT1400ClientService::NotifyPlateDetections()` 与 `LOWER_1400_NOTIFY_PLATEDETECTIONS()`，复用 `GAT_1400_Motor` 车牌字段和 `/VIID/MotorVehicles` 资源。

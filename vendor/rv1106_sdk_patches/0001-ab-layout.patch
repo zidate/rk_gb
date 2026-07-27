@@ -1,0 +1,82 @@
+diff --git a/project/cfg/BoardConfig_IPC/BoardConfig-SPI_NAND-NONE-RV1106_IPC38_DEMO_V10-IPC-XWR60440.mk b/project/cfg/BoardConfig_IPC/BoardConfig-SPI_NAND-NONE-RV1106_IPC38_DEMO_V10-IPC-XWR60440.mk
+index 118d4cd..7a770db 100644
+--- a/project/cfg/BoardConfig_IPC/BoardConfig-SPI_NAND-NONE-RV1106_IPC38_DEMO_V10-IPC-XWR60440.mk
++++ b/project/cfg/BoardConfig_IPC/BoardConfig-SPI_NAND-NONE-RV1106_IPC38_DEMO_V10-IPC-XWR60440.mk
+@@ -52 +52 @@
+-export RK_PARTITION_CMD_IN_ENV="256K(env),1M@256K(idblock),1M(uboot),4M(boot),32M(rootfs),48M(oem),-(userdata)"
++export RK_PARTITION_CMD_IN_ENV="256K(env),1M@256K(idblock),1M(uboot),4M(boot_a),4M(boot_b),10M(rootfs_a),10M(rootfs_b),32M(oem_a),32M(oem_b),1792K(reserved),256K(misc),-(userdata)"
+@@ -64 +64 @@
+-export RK_PARTITION_FS_TYPE_CFG=rootfs@IGNORE@squashfs,oem@/oem@squashfs,userdata@/userdata@ubifs
++export RK_PARTITION_FS_TYPE_CFG=rootfs_a@IGNORE@squashfs,oem_a@/oem@squashfs,userdata@/userdata@ubifs
+diff --git a/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig b/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig
+index f1d2207..846a495 100755
+--- a/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig
++++ b/sysdrv/source/uboot/u-boot/configs/rv1106-XWR60440_defconfig
+@@ -14 +14,5 @@
+-CONFIG_ROCKCHIP_CMD="sd_update -"
++CONFIG_ROCKCHIP_CMD="ab_sd_update -"
++CONFIG_AVB_LIBAVB_AB=y
++CONFIG_AVB_LIBAVB_USER=y
++CONFIG_ANDROID_AB=y
++CONFIG_PARTITION_UUIDS=y
+@@ -69 +70 @@
+-CONFIG_CMD_SCRIPT_UPDATE=y
++# CONFIG_CMD_SCRIPT_UPDATE is not set
+diff --git a/sysdrv/source/uboot/u-boot/common/android_ab.c b/sysdrv/source/uboot/u-boot/common/android_ab.c
+index 99c648b..8b27c20 100755
+--- a/sysdrv/source/uboot/u-boot/common/android_ab.c
++++ b/sysdrv/source/uboot/u-boot/common/android_ab.c
+@@ -36,8 +35,0 @@
+-	int i;
+-	const struct android_slot_metadata metadata = {
+-		.priority = 15,
+-		.tries_remaining = 7,
+-		.successful_boot = 0,
+-		.verity_corrupted = 0,
+-		.reserved = 0
+-	};
+@@ -49,3 +41,4 @@
+-	for (i = 0; i < abc->nb_slot; ++i) {
+-		abc->slot_info[i] = metadata;
+-	}
++	memset(abc->slot_info, 0, sizeof(abc->slot_info));
++	abc->slot_info[0].priority = 15;
++	abc->slot_info[0].tries_remaining = 7;
++	abc->slot_info[0].successful_boot = 0;
+@@ -447,0 +441,3 @@
++	char root_part_name[sizeof("rootfs_b")] = {0};
++	char slot_arg[sizeof("androidboot.slot_suffix=_b")] = {0};
++	char slot_suffix[3] = {0};
+@@ -460,2 +456,13 @@
+-	/* Get 'system' partition device number. */
+-	part_num = part_get_info_by_name(dev_desc, ANDROID_PARTITION_SYSTEM, &part_info);
++	if (ab_get_slot_suffix(slot_suffix)) {
++		printf("%s: Failed to get slot suffix.\n", __func__);
++		return;
++	}
++
++	snprintf(slot_arg, sizeof(slot_arg), "androidboot.slot_suffix=%s", slot_suffix);
++	if (env_update("bootargs", slot_arg)) {
++		printf("%s: Failed to update slot suffix in bootargs.\n", __func__);
++		return;
++	}
++
++	snprintf(root_part_name, sizeof(root_part_name), "rootfs%s", slot_suffix);
++	part_num = part_get_info_by_name(dev_desc, root_part_name, &part_info);
+@@ -463 +470 @@
+-		printf("%s: Failed to get partition '%s'.\n", __func__, ANDROID_PARTITION_SYSTEM);
++		printf("%s: Failed to get partition '%s'.\n", __func__, root_part_name);
+diff --git a/sysdrv/source/uboot/u-boot/lib/avb/rk_avb_user/rk_ab_ops_user.c b/sysdrv/source/uboot/u-boot/lib/avb/rk_avb_user/rk_ab_ops_user.c
+index 2cd1562..45c2cde 100755
+--- a/sysdrv/source/uboot/u-boot/lib/avb/rk_avb_user/rk_ab_ops_user.c
++++ b/sysdrv/source/uboot/u-boot/lib/avb/rk_avb_user/rk_ab_ops_user.c
+@@ -148,8 +148,8 @@ void avb_ab_data_init(AvbABData* data)
+         data->slots[0].priority = AVB_AB_MAX_PRIORITY;
+         data->slots[0].tries_remaining = AVB_AB_MAX_TRIES_REMAINING;
+         data->slots[0].successful_boot = 0;
+-        data->slots[1].priority = AVB_AB_MAX_PRIORITY - 1;
+-        data->slots[1].tries_remaining = AVB_AB_MAX_TRIES_REMAINING;
++        data->slots[1].priority = 0;
++        data->slots[1].tries_remaining = 0;
+         data->slots[1].successful_boot = 0;
+ }

@@ -1,0 +1,58 @@
+--- a/sysdrv/source/uboot/u-boot/drivers/mtd/mtdpart.c
++++ b/sysdrv/source/uboot/u-boot/drivers/mtd/mtdpart.c
+@@ -61,6 +61,37 @@
+ }
+ #endif
+ 
++/*
++ * Parse an MTD size or offset with the same binary K/M/G suffixes
++ * accepted by the mtdparts command.  ustrtoull() scales a unit suffix
++ * without consuming its single-letter form, so start from the plain
++ * integer parser and handle both scaling and pointer advancement here.
++ */
++static u64 mtd_memsize_parse(const char *ptr, const char **retptr)
++{
++	u64 value = simple_strtoull(ptr, (char **)retptr, 0);
++
++	switch (**retptr) {
++	case 'G':
++	case 'g':
++		value <<= 10;
++		/* fall through */
++	case 'M':
++	case 'm':
++		value <<= 10;
++		/* fall through */
++	case 'K':
++	case 'k':
++		value <<= 10;
++		(*retptr)++;
++		break;
++	default:
++		break;
++	}
++
++	return value;
++}
++
+ #define MTD_SIZE_REMAINING		(~0LLU)
+ #define MTD_OFFSET_NOT_SPECIFIED	(~0LLU)
+ 
+@@ -106,7 +137,7 @@
+ 		partition->size = MTD_SIZE_REMAINING;
+ 		mtdparts++;
+ 	} else {
+-		partition->size = ustrtoull(mtdparts, (char **)&mtdparts, 0);
++		partition->size = mtd_memsize_parse(mtdparts, &mtdparts);
+ 		if (partition->size < SZ_4K) {
+ 			printf("Minimum partition size 4kiB, %lldB requested\n",
+ 			       partition->size);
+@@ -118,7 +149,7 @@
+ 	partition->offset = MTD_OFFSET_NOT_SPECIFIED;
+ 	if (*mtdparts == '@') {
+ 		mtdparts++;
+-		partition->offset = ustrtoull(mtdparts, (char **)&mtdparts, 0);
++		partition->offset = mtd_memsize_parse(mtdparts, &mtdparts);
+ 	}
+ 
+ 	/* Now look for the name */

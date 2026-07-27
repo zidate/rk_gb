@@ -1,0 +1,102 @@
+diff --git a/sysdrv/tools/board/rk_ota/src/bootloader.cpp b/sysdrv/tools/board/rk_ota/src/bootloader.cpp
+index bf65866..9bb9b6c 100755
+--- a/sysdrv/tools/board/rk_ota/src/bootloader.cpp
++++ b/sysdrv/tools/board/rk_ota/src/bootloader.cpp
+@@ -27,6 +27,7 @@
+ #include <sys/stat.h>
+ #include <sys/types.h>
+ #include <mtd/mtd-user.h>
++#include <mtd/ubi-user.h>
+ 
+ #include "md5sum.h"
+ #include "mtdutils.h"
+@@ -716,6 +717,52 @@ static int flash_write_partition(char *src_path, char *dest_path) {
+     return ret;
+ }
+ 
++static int prepare_ubi_partition(const char *partition_name) {
++    const MtdPartition *partition;
++    struct ubi_attach_req request;
++    int control_fd = -1;
++    int ubi_num;
++    int ret = -1;
++
++    if (mtd_scan_partitions() < 0) {
++        LOGE("Scan MTD partitions before UBI attach failed.\n");
++        return -1;
++    }
++    partition = mtd_find_partition_by_name(partition_name);
++    if (!partition) {
++        LOGE("Can't find UBI MTD partition %s.\n", partition_name);
++        return -1;
++    }
++
++    control_fd = open("/dev/ubi_ctrl", O_RDWR);
++    if (control_fd < 0) {
++        LOGE("Open /dev/ubi_ctrl failed.\n");
++        return -1;
++    }
++
++    memset(&request, 0, sizeof(request));
++    request.ubi_num = UBI_DEV_NUM_AUTO;
++    request.mtd_num = partition->device_index;
++    if (ioctl(control_fd, UBI_IOCATT, &request) < 0) {
++        LOGE("Attach UBI partition %s failed.\n", partition_name);
++        goto out;
++    }
++
++    ubi_num = request.ubi_num;
++    if (ioctl(control_fd, UBI_IOCDET, &ubi_num) < 0) {
++        LOGE("Detach UBI partition %s failed.\n", partition_name);
++        goto out;
++    }
++
++    LOGI("Initialized UBI partition %s before restoring protection.\n",
++         partition_name);
++    ret = 0;
++
++out:
++    close(control_fd);
++    return ret;
++}
++
+ /*
+  * Write selected images to the inactive A/B slot.
+  */
+@@ -731,6 +778,8 @@ static int flash_write(const char *image_dir, const char *partition) {
+     char src_boot_path[128];
+     char src_rootfs_path[128];
+     char src_oem_path[128];
++    char src_env_path[128];
++    char src_idblock_path[128];
+     char src_uboot_path[128];
+     char dest_boot_path[64];
+     char dest_rootfs_path[64];
+@@ -759,9 +808,12 @@ static int flash_write(const char *image_dir, const char *partition) {
+     snprintf(src_boot_path, sizeof(src_boot_path), "%s/%s.img", image_dir, AB_BOOT_NAME);
+     snprintf(src_rootfs_path, sizeof(src_rootfs_path), "%s/%s.img", image_dir, AB_ROOTFS_NAME);
+     snprintf(src_oem_path, sizeof(src_oem_path), "%s/%s.img", image_dir, AB_OEM_NAME);
++    snprintf(src_env_path, sizeof(src_env_path), "%s/env.img", image_dir);
++    snprintf(src_idblock_path, sizeof(src_idblock_path), "%s/idblock.img", image_dir);
+     snprintf(src_uboot_path, sizeof(src_uboot_path), "%s/uboot.img", image_dir);
+-    if (!access(src_uboot_path, F_OK)) {
+-        LOGE("Network OTA does not support uboot.img.\n");
++    if (!access(src_env_path, F_OK) || !access(src_idblock_path, F_OK) ||
++        !access(src_uboot_path, F_OK)) {
++        LOGE("Network OTA supports only boot.img, rootfs.img and oem.img.\n");
+         return -1;
+     }
+     if ((write_boot && access(src_boot_path, F_OK)) ||
+@@ -816,6 +868,12 @@ static int flash_write(const char *image_dir, const char *partition) {
+         LOGE("Sync MTD updates failed.\n");
+         goto relock;
+     }
++    if (mtd_device && write_rootfs &&
++        prepare_ubi_partition(strrchr(dest_rootfs_path, '/') + 1))
++        goto relock;
++    if (mtd_device && write_oem &&
++        prepare_ubi_partition(strrchr(dest_oem_path, '/') + 1))
++        goto relock;
+     ret = 0;
+ 
+ relock:

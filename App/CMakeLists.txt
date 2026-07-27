@@ -242,7 +242,7 @@ aux_source_directory(RtspServer/src/xop RtspServer_xop_SRC)
 
 set(Onvif Onvif/Onvif.cpp)
 #升级烧录模块
-set(Update Update/update.cpp)
+set(Update Update/AbUpdate.cpp)
 set(Protocol_SRC
 	Protocol/ProtocolManager.cpp
 	Protocol/config/LocalConfigProvider.cpp
