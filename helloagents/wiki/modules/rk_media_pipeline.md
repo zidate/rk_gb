@@ -6,7 +6,7 @@
 ## 模块概述
 - **职责:** 说明视频/音频数据如何从 RK 媒体抽象层进入实时预览、录像、回放和协议发送
 - **状态:** ✅稳定
-- **最后更新:** 2026-07-21
+- **最后更新:** 2026-07-27
 - **代码真实来源:** `Middleware/Include/PAL/Capture.h`、`Middleware/Include/PAL/libdmc.h`、`App/Media/*`、`App/Storage/*`、`App/Protocol/ProtocolManager.cpp`
 
 ## 规范
@@ -129,6 +129,8 @@ flowchart TD
 
 RV1106 的 OSD 字体仍走 ARGB8888 FreeType 位图路径。`font_color_mode=auto` 时，RK 层会从 `VIDEO_PIPE_1` 取一帧 NV12，按 Y 平面下采样生成亮/暗 map，再在 `font_factory` 逐字符回调里选择黑色或白色；取不到帧或格式不匹配时不阻塞刷新，字符颜色回退为白色。时间 OSD 和所有可见、非空的 text OSD 都随亮度 map 每秒重绘，优先保证黑白切换的确定性；固定颜色模式下 text OSD 仍只在配置变化时重绘。字体画布背景像素为全透明，GB OSD RGN 使用 `BgAlpha=0/FgAlpha=255`，不再叠加半透明黑底。
 
+时间和 text OSD 的 RGN 创建高度统一按最大字体 `64px` 预留为 `80px`。运行时将字号从 `16/32` 切换到 `64` 时只需要重绘并更新 bitmap，不依赖销毁和重建 RGN，避免 text OSD 因沿用启动时的小高度而裁掉中文底部笔画。
+
 同一固件通过 `CFG_CLOUD_PLATFORM` 在启动时选择唯一云平台，缺省及非法配置均回退 `GB28181`；选择结果在进程生命周期内固定，修改配置后重启生效。`CMIOT` 与 `GB28181` 不同时启动，cmiot SDK 的 `mode=2` 只是水印排版模式，不表示当前云平台为国标。
 
 | 当前平台 | cmiot `osdSwitch` | 生效 OSD |
@@ -167,6 +169,7 @@ cmiot 覆盖期间，本地 OSD 配置仍正常保存并更新 `AVManager` 缓�
 - `App/Protocol/gb28181/GB28181RtpPsSender.*`
 
 ## 变更历史
+- 2026-07-27: text OSD RGN 改为按最大字号预留 `80px` 高度，修复运行时放大字号后中文底部被裁剪的问题。
 - 2026-07-21: 按板端效果反馈撤销 text OSD 局部亮度变化门控，恢复 auto 模式每秒重绘；透明字体画布和 RGN alpha 配置继续保留。
 - 2026-07-20: 优化 text OSD 自动黑白刷新：新增局部亮度分类变化门控，静态区域不再周期重绘；同时将字体画布和 RGN 背景改为全透明，去掉 OSD 黑底。
 - 2026-07-20: 修复 text OSD 在 `font_color_mode=auto` 下只按首次画面选色的问题；亮度 map 周期更新后会同步触发可见 text 区域重绘，固定色刷新策略不变。

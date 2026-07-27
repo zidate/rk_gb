@@ -8366,7 +8366,7 @@ int gb_rkipc_osd_init() {
 	//create_font("/oem/usr/share/noto_serif_sc_gb2312.otf", s_osd_font_size);
 	for (int i = 0; i < 8; i++) {
 		s_rgn_osd_param[i].max_width = 1600;//s_stream_venc_chan_param[0].width;
-		s_rgn_osd_param[i].max_height = UPALIGNTO16(s_osd_font_size) + 16;
+		s_rgn_osd_param[i].max_height = UPALIGNTO16(RKIPC_OSD_MAX_FONT_SIZE) + 16;
 	}
 
 	gb_rkipc_osd_time_create(&s_rgn_osd_param[0]);
