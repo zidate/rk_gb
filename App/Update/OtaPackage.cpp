@@ -1,4 +1,4 @@
-/* 校验 RV1106 OTA 容器，并把固定镜像成员转换成临时 USTAR。 */
+/* 校验 RV1106 OTA 容器，并事务性解析固定的 boot/rootfs/oem 镜像。 */
 
 #include "OtaPackage.h"
 
@@ -34,6 +34,8 @@ const ExpectedImage kExpectedImages[] = {
     {5U, 0x0A40000U, 0x0A00000U, "rootfs.img"},
     {6U, 0x1E40000U, 0x2000000U, "oem.img"},
 };
+
+const size_t kExpectedImageCount = sizeof(kExpectedImages) / sizeof(kExpectedImages[0]);
 
 struct ImageEntry {
     off_t offset;
@@ -108,7 +110,7 @@ bool WriteExact(int fd, const void *buffer, size_t size)
 
 int ExpectedImageIndex(uint32_t type)
 {
-    for (size_t i = 0; i < sizeof(kExpectedImages) / sizeof(kExpectedImages[0]); ++i) {
+    for (size_t i = 0; i < kExpectedImageCount; ++i) {
         if (kExpectedImages[i].type == type)
             return static_cast<int>(i);
     }
@@ -175,48 +177,23 @@ bool ParseImages(int fd, uint32_t package_size, ImageEntry *entries)
     return seen == kExpectedImageMask;
 }
 
-bool WriteOctal(char *field, size_t field_size, uint64_t value)
+bool JoinPath(const char *directory, const char *name, char *path, size_t path_size)
 {
-    const int digits = static_cast<int>(field_size - 1U);
-    const int length = snprintf(field, field_size, "%0*llo", digits,
-                                static_cast<unsigned long long>(value));
-    return length == digits;
+    const int length = snprintf(path, path_size, "%s/%s", directory, name);
+    return length > 0 && static_cast<size_t>(length) < path_size;
 }
 
-bool WriteTarHeader(int output_fd, const ImageEntry &entry)
+bool BuildTempPath(const char *directory, const char *name, char *path, size_t path_size)
 {
-    unsigned char header[512];
-    memset(header, 0, sizeof(header));
-    if (strlen(entry.name) >= 100U)
-        return false;
-    memcpy(header, entry.name, strlen(entry.name));
-    if (!WriteOctal(reinterpret_cast<char *>(header + 100), 8, 0644U) ||
-        !WriteOctal(reinterpret_cast<char *>(header + 108), 8, 0U) ||
-        !WriteOctal(reinterpret_cast<char *>(header + 116), 8, 0U) ||
-        !WriteOctal(reinterpret_cast<char *>(header + 124), 12, entry.size) ||
-        !WriteOctal(reinterpret_cast<char *>(header + 136), 12, 0U))
-        return false;
-    memset(header + 148, ' ', 8);
-    header[156] = '0';
-    memcpy(header + 257, "ustar", 5);
-    memcpy(header + 263, "00", 2);
-    unsigned int checksum = 0;
-    for (size_t i = 0; i < sizeof(header); ++i)
-        checksum += header[i];
-    const int checksum_length = snprintf(reinterpret_cast<char *>(header + 148), 8,
-                                         "%06o", checksum);
-    if (checksum_length != 6)
-        return false;
-    header[154] = '\0';
-    header[155] = ' ';
-    return WriteExact(output_fd, header, sizeof(header));
+    const int length = snprintf(path, path_size, "%s/.%s.XXXXXX", directory, name);
+    return length > 0 && static_cast<size_t>(length) < path_size;
 }
 
-bool CopyTarImage(int package_fd, int output_fd, const ImageEntry &entry)
+bool CopyImage(int package_fd, int output_fd, const ImageEntry &entry)
 {
     unsigned char buffer[kIoBufferSize];
     uint32_t remaining = entry.size;
-    if (lseek(package_fd, entry.offset, SEEK_SET) < 0 || !WriteTarHeader(output_fd, entry))
+    if (lseek(package_fd, entry.offset, SEEK_SET) < 0)
         return false;
     while (remaining > 0U) {
         size_t chunk = sizeof(buffer);
@@ -226,13 +203,7 @@ bool CopyTarImage(int package_fd, int output_fd, const ImageEntry &entry)
             return false;
         remaining -= static_cast<uint32_t>(chunk);
     }
-    const size_t padding = (512U - (entry.size % 512U)) % 512U;
-    if (padding != 0U) {
-        memset(buffer, 0, padding);
-        if (!WriteExact(output_fd, buffer, padding))
-            return false;
-    }
-    return true;
+    return fchmod(output_fd, 0644) == 0 && fsync(output_fd) == 0;
 }
 
 int OpenPackage(const char *package_path)
@@ -247,40 +218,89 @@ int OpenPackage(const char *package_path)
     return open(package_path, flags);
 }
 
+void RemovePaths(char paths[][PATH_MAX], size_t count)
+{
+    for (size_t i = 0; i < count; ++i) {
+        if (paths[i][0] != '\0')
+            unlink(paths[i]);
+    }
+}
+
 }  // 匿名命名空间
 
-int OtaPackageCreateTar(const char *package_path, char *tar_path, size_t tar_path_size)
+void OtaPackageRemoveImages(const char *output_dir)
 {
-    static const char temp_template[] = "/tmp/rk_ota_payload_XXXXXX";
+    if (output_dir == NULL || output_dir[0] == '\0')
+        return;
+    for (size_t i = 0; i < kExpectedImageCount; ++i) {
+        char path[PATH_MAX];
+        if (JoinPath(output_dir, kExpectedImages[i].name, path, sizeof(path)))
+            unlink(path);
+    }
+}
+
+int OtaPackageExtractImages(const char *package_path, const char *output_dir)
+{
     unsigned char header[kPackageHeaderSize];
-    ImageEntry entries[sizeof(kExpectedImages) / sizeof(kExpectedImages[0])];
-    struct stat st;
-    char temp_path[sizeof(temp_template)];
+    ImageEntry entries[kExpectedImageCount];
+    char temp_paths[kExpectedImageCount][PATH_MAX];
+    char final_paths[kExpectedImageCount][PATH_MAX];
+    struct stat package_stat;
+    struct stat directory_stat;
     int package_fd = -1;
-    int output_fd = -1;
+    int directory_fd = -1;
     int result = -1;
+    bool output_directory_valid = false;
     uint32_t magic = 0;
     uint32_t expected_crc = 0;
     uint32_t package_size = 0;
 
-    if (package_path == NULL || package_path[0] == '\0' || tar_path == NULL ||
-        tar_path_size < sizeof(temp_template))
-        return -1;
     memset(entries, 0, sizeof(entries));
-    temp_path[0] = '\0';
+    memset(temp_paths, 0, sizeof(temp_paths));
+    memset(final_paths, 0, sizeof(final_paths));
+    if (package_path == NULL || package_path[0] == '\0' ||
+        output_dir == NULL || output_dir[0] == '\0')
+        return -1;
+
+    directory_fd = open(output_dir, O_RDONLY
+#ifdef O_DIRECTORY
+                        | O_DIRECTORY
+#endif
+#ifdef O_CLOEXEC
+                        | O_CLOEXEC
+#endif
+#ifdef O_NOFOLLOW
+                        | O_NOFOLLOW
+#endif
+    );
+    if (directory_fd < 0 || fstat(directory_fd, &directory_stat) != 0 ||
+        !S_ISDIR(directory_stat.st_mode)) {
+        fprintf(stderr, "OtaPackage: invalid output directory: %s\n", output_dir);
+        goto done;
+    }
+    output_directory_valid = true;
+    for (size_t i = 0; i < kExpectedImageCount; ++i) {
+        if (!JoinPath(output_dir, kExpectedImages[i].name,
+                      final_paths[i], sizeof(final_paths[i])))
+            goto done;
+    }
+    OtaPackageRemoveImages(output_dir);
+
     package_fd = OpenPackage(package_path);
-    if (package_fd < 0 || fstat(package_fd, &st) != 0 || !S_ISREG(st.st_mode) ||
-        st.st_size < static_cast<off_t>(kPackageHeaderSize) ||
+    if (package_fd < 0 || fstat(package_fd, &package_stat) != 0 ||
+        !S_ISREG(package_stat.st_mode) ||
+        package_stat.st_size < static_cast<off_t>(kPackageHeaderSize) ||
         lseek(package_fd, 0, SEEK_SET) < 0 || !ReadExact(package_fd, header, sizeof(header))) {
         fprintf(stderr, "OtaPackage: cannot read a regular OTA package: %s\n", package_path);
         goto done;
     }
+
     magic = ReadBe32(header + 20);
     expected_crc = ReadBe32(header + 24);
     package_size = ReadBe32(header + 28);
     if (!ValidatePlatform(header) || magic != kPackageMagic || package_size == 0U ||
         package_size > kMaxPackagePayloadSize ||
-        static_cast<uint64_t>(st.st_size) != kPackageHeaderSize + package_size) {
+        static_cast<uint64_t>(package_stat.st_size) != kPackageHeaderSize + package_size) {
         fprintf(stderr, "OtaPackage: invalid platform, magic, or package size: %s\n", package_path);
         goto done;
     }
@@ -293,38 +313,43 @@ int OtaPackageCreateTar(const char *package_path, char *tar_path, size_t tar_pat
         goto done;
     }
 
-    memcpy(temp_path, temp_template, sizeof(temp_template));
-    output_fd = mkstemp(temp_path);
-    if (output_fd < 0) {
-        fprintf(stderr, "OtaPackage: cannot create temporary rk_ota archive\n");
-        goto done;
-    }
-    for (size_t i = 0; i < sizeof(entries) / sizeof(entries[0]); ++i) {
-        if (!CopyTarImage(package_fd, output_fd, entries[i])) {
-            fprintf(stderr, "OtaPackage: cannot write temporary member %s\n", entries[i].name);
+    for (size_t i = 0; i < kExpectedImageCount; ++i) {
+        if (!BuildTempPath(output_dir, entries[i].name, temp_paths[i], sizeof(temp_paths[i])))
+            goto done;
+        const int output_fd = mkstemp(temp_paths[i]);
+        if (output_fd < 0) {
+            fprintf(stderr, "OtaPackage: cannot create temporary %s\n", entries[i].name);
+            goto done;
+        }
+        const bool copied = CopyImage(package_fd, output_fd, entries[i]);
+        const bool closed = close(output_fd) == 0;
+        if (!copied || !closed) {
+            fprintf(stderr, "OtaPackage: cannot extract %s\n", entries[i].name);
             goto done;
         }
     }
-    {
-        unsigned char trailer[1024];
-        memset(trailer, 0, sizeof(trailer));
-        if (!WriteExact(output_fd, trailer, sizeof(trailer)) || fsync(output_fd) != 0)
+
+    for (size_t i = 0; i < kExpectedImageCount; ++i) {
+        if (rename(temp_paths[i], final_paths[i]) != 0) {
+            fprintf(stderr, "OtaPackage: cannot publish %s\n", entries[i].name);
+            OtaPackageRemoveImages(output_dir);
             goto done;
+        }
+        temp_paths[i][0] = '\0';
     }
-    if (close(output_fd) != 0) {
-        output_fd = -1;
+    if (fsync(directory_fd) != 0) {
+        OtaPackageRemoveImages(output_dir);
         goto done;
     }
-    output_fd = -1;
-    memcpy(tar_path, temp_path, sizeof(temp_template));
     result = 0;
 
 done:
+    RemovePaths(temp_paths, kExpectedImageCount);
+    if (result != 0 && output_directory_valid)
+        OtaPackageRemoveImages(output_dir);
     if (package_fd >= 0)
         close(package_fd);
-    if (output_fd >= 0)
-        close(output_fd);
-    if (result != 0 && temp_path[0] == '/')
-        unlink(temp_path);
+    if (directory_fd >= 0)
+        close(directory_fd);
     return result;
 }

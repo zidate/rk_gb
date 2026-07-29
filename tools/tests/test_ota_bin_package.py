@@ -3,7 +3,6 @@
 import pathlib
 import struct
 import subprocess
-import tarfile
 import tempfile
 import textwrap
 import unittest
@@ -112,17 +111,11 @@ class OtaBinPackageTest(unittest.TestCase):
                 self.assertEqual(data[: len(image[5])], image[5])
                 self.assertEqual(data[len(image[5]) :], b"\xff" * ((-len(image[5])) % 4))
 
-    def test_parser_converts_valid_package_and_rejects_corruption(self):
+    def test_parser_extracts_valid_package_and_rejects_corruption(self):
         harness_source = r"""
             #include "OtaPackage.h"
-            #include <stdio.h>
-            #include <unistd.h>
             int main(int argc, char **argv) {
-                char tar_path[256];
-                if (argc != 2 || OtaPackageCreateTar(argv[1], tar_path, sizeof(tar_path)) != 0)
-                    return 1;
-                puts(tar_path);
-                return 0;
+                return argc == 3 && OtaPackageExtractImages(argv[1], argv[2]) == 0 ? 0 : 1;
             }
         """
         with tempfile.TemporaryDirectory() as tempdir:
@@ -130,6 +123,8 @@ class OtaBinPackageTest(unittest.TestCase):
             _, package_path = self.build_fixture(temp)
             harness = temp / "parser_harness.cpp"
             binary = temp / "parser_harness"
+            output = temp / "images"
+            output.mkdir()
             harness.write_text(textwrap.dedent(harness_source))
             subprocess.run(
                 [
@@ -148,17 +143,19 @@ class OtaBinPackageTest(unittest.TestCase):
                 check=True,
             )
             result = subprocess.run(
-                [str(binary), str(package_path)], capture_output=True, text=True, check=True
+                [str(binary), str(package_path), str(output)],
+                capture_output=True,
+                text=True,
+                check=True,
             )
-            tar_path = pathlib.Path(result.stdout.strip())
-            try:
-                with tarfile.open(tar_path) as archive:
-                    self.assertEqual(archive.getnames(), ["boot.img", "rootfs.img", "oem.img"])
-                    for _, filename, _, _, _, content in IMAGES:
-                        extracted = archive.extractfile(filename).read()
-                        self.assertEqual(extracted[: len(content)], content)
-            finally:
-                tar_path.unlink(missing_ok=True)
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(
+                sorted(path.name for path in output.iterdir()),
+                ["boot.img", "oem.img", "rootfs.img"],
+            )
+            for _, filename, _, _, _, content in IMAGES:
+                extracted = (output / filename).read_bytes()
+                self.assertEqual(extracted[: len(content)], content)
 
             original = bytearray(package_path.read_bytes())
             header_offsets = []
@@ -216,10 +213,15 @@ class OtaBinPackageTest(unittest.TestCase):
                 with self.subTest(name=name):
                     bad_path = temp / f"bad-{name}.bin"
                     bad_path.write_bytes(contents)
+                    for _, filename, _, _, _, _ in IMAGES:
+                        (output / filename).write_bytes(b"stale")
                     rejected = subprocess.run(
-                        [str(binary), str(bad_path)], capture_output=True, text=True
+                        [str(binary), str(bad_path), str(output)],
+                        capture_output=True,
+                        text=True,
                     )
                     self.assertNotEqual(rejected.returncode, 0)
+                    self.assertEqual(list(output.iterdir()), [])
 
     def test_packager_rejects_oversized_image(self):
         with tempfile.TemporaryDirectory() as tempdir:

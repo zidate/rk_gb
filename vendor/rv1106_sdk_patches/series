@@ -8,3 +8,4 @@
 0008-uboot-env-mtdparts-prefix.patch
 0009-uboot-sd-fixed-raw-offset.patch
 0010-uboot-sd-oem-switch.patch
+0011-rk-ota-prepared-images.patch

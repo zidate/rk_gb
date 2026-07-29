@@ -74,10 +74,12 @@
 - 容器兼容历史 `packaging-update` 格式：32 字节包头包含 20 字节平台名 `rv1106`、网络字节序 magic `0xABCD1234`、payload CRC32 和 payload 长度；每个镜像前有 12 字节网络字节序的类型、对齐后大小和起始地址。
 - 容器类型固定为 boot=4、rootfs=5、oem=6；起始地址固定为 `0x0240000/0x0A40000/0x1E40000`，镜像上限分别为 4/10/32 MiB。`upgrade.ini` 中的物理分区 `type` 不作为容器类型使用。
 - Host `packaging-update` 只接受 `[boot]/[rootfs]/[oem]` 三件套，镜像按 4 字节对齐并补 `0xFF`，对整个镜像头和数据 payload 计算标准 CRC32（多项式 `0xEDB88320`）。
-- 应用 `OtaPackage` 在调用 `rk_ota` 前校验平台、magic、文件总长、CRC、类型唯一性、镜像地址和大小，再以固定成员名生成临时 USTAR；包内数据不能控制文件名或命令参数，底层仍由已验证的 `rk_ota` 完成非活动槽写入、校验和切槽。
+- 应用 `OtaPackage` 在调用 `rk_ota` 前校验平台、magic、文件总长、CRC、类型唯一性、镜像地址和大小，再把三镜像分别写入 `/tmp` 同目录隐藏临时文件；三者全部写入并 `fsync` 成功后，才发布为 `/tmp/boot.img`、`/tmp/rootfs.img`、`/tmp/oem.img`。任一步失败都会清理临时文件和整套固定镜像，旧文件或半套新文件不会进入升级。
+- `AbUpdateApply()` 串行化应用升级事务，并通过 `rk_ota --misc=update --save_dir=/tmp --partition=all` 直接读取已准备镜像；`rk_ota` 仍保留 `--tar_path` 兼容模式，但目录模式不再执行 tar 解包。`rk_ota` 返回后应用清理三镜像。
 - GB 下载路径为 `/tmp/ota.bin.download`，完整性检查通过后原子改名为 `/tmp/ota.bin`。本地 demo 删除 `/tmp/test_ota` 触发文件后调用 `/mnt/sdcard/ota.bin`，避免每秒重复触发。
-- 临时 USTAR 和 `rk_ota` 解包目录会增加升级期间的临时空间占用；量产镜像需按实际 boot/rootfs/oem 文件大小验证 `/tmp` 容量，升级完成或重启后临时内容不作为持久数据。
-- 2026-07-29 验证：80 项 `tools/tests` 回归通过；host packager、host C++11 严格编译以及 ARM GNU 8.3.0 整机交叉编译均成功，最终 `dgiot` 为 32-bit ARM EABI5/uClibc 可执行文件。
+- 中国移动 `demo_upgrade_callback` 对 FW/APP 命令统一按整包 `ota.bin` 处理：回调只校验和复制参数、拒绝并发任务，后台线程使用无 shell 参数拼接的 curl 下载，校验 SDK 下发的 MD5，依次上报下载/安装状态后调用 `AbUpdateApply()`。
+- 直接镜像模式取消了临时 USTAR 和 `rk_ota` 解包副本，但下载文件与三镜像准备期间仍会同时占用 `/tmp`；量产镜像需按实际包和镜像大小验证空间。
+- 2026-07-29 验证：84 项 `tools/tests` 回归通过；OtaPackage/AbUpdate/OtaDownload host 严格编译、ChinaMobile 整文件语法检查、rk_ota ARM 语法检查以及 ARM GNU 8.3.0 整机交叉编译均成功。
 
 ## 写保护
 

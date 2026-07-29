@@ -7,7 +7,7 @@
 ## [Unreleased]
 
 ### 新增
-- 新增 RV1106 `ota.bin` 网络升级全链路：host `packaging-update` 将 boot/rootfs/oem 按历史二进制容器格式打包，应用校验平台、magic、CRC、长度、类型、地址和分区上限后转换为受控临时 USTAR，再复用 `rk_ota` 完成 A/B 写槽；构建与 GB 下载路径同步从 tar 切换到 `ota.bin`，并增加 SD 卡 demo 触发入口和损坏包回归测试。
+- 新增 RV1106 `ota.bin` 网络升级全链路：host `packaging-update` 将 boot/rootfs/oem 按历史二进制容器格式打包；应用完成平台、magic、CRC、长度、类型、地址和分区上限校验后，事务性解析为 `/tmp/boot.img`、`rootfs.img`、`oem.img`，再由 `rk_ota --save_dir=/tmp` 直接完成 A/B 写槽。中国移动升级回调同步补齐异步下载、MD5 校验、状态上报、并发保护和统一安装流程。
 
 ### 修复
 - 根据板端效果反馈将 RV1106 text OSD 自动黑白恢复为每秒重绘，移除局部亮度变化 map 与区域门控；字体画布全透明和 GB OSD `BgAlpha=0/FgAlpha=255` 保持不变，继续去除黑底。

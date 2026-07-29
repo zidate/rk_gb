@@ -2,6 +2,8 @@
 #include "dev_log.h"
 #include "CmiotOsdControl.h"
 #include "Common.h"
+#include "AbUpdate.h"
+#include "OtaDownload.h"
 #include <sys/vfs.h>    /* or <sys/statfs.h> */
 #include <resolv.h>
 
@@ -2764,9 +2766,106 @@ cmiot_int32_t demo_audio_callback(cmiotAudioCmd_e cmd, cmiot_uint32_t streamId, 
 cmiotUpgradeInfo_t g_upgradeInfoFw = {0};
 cmiotUpgradeInfo_t g_upgradeInfoApp = {0};
 cmiot_uint32_t g_upgradeType = 0;
+
+namespace {
+
+const char kCmiotOtaTempPath[] = "/tmp/ota.bin.download";
+const char kCmiotOtaPackagePath[] = "/tmp/ota.bin";
+pthread_mutex_t g_upgradeMutex = PTHREAD_MUTEX_INITIALIZER;
+bool g_upgradeBusy = false;
+
+struct CmiotUpgradeTask {
+    cmiotUpgradeInfo_t info;
+    cmiot_uint32_t type;
+};
+
+bool HasTerminator(const char *value, size_t capacity)
+{
+    return value != NULL && memchr(value, '\0', capacity) != NULL;
+}
+
+bool ValidateUpgradeInfo(const cmiotUpgradeInfo_t *info)
+{
+    return info != NULL && HasTerminator(info->url, sizeof(info->url)) &&
+           HasTerminator(info->checkSum, sizeof(info->checkSum)) &&
+           HasTerminator(info->version, sizeof(info->version)) &&
+           info->url[0] != '\0' && info->checkSum[0] != '\0';
+}
+
+void ReportUpgradeStatus(const CmiotUpgradeTask *task,
+                         cmiotUpgradeStatus_e status,
+                         cmiot_uint32_t current_size,
+                         cmiot_uint32_t total_size)
+{
+    cmiotUpgradeRptInfo_t report;
+    memset(&report, 0, sizeof(report));
+    report.type = task->type;
+    report.status = status;
+    report.devStatus = 1;
+    report.curSize = current_size;
+    report.totalSize = total_size;
+    strncpy(report.version, task->info.version, sizeof(report.version) - 1U);
+    const cmiot_int32_t result = cmiot_report_upgrade_step(&report);
+    DEMO_PRINT("upgrade report type=%u status=%d current=%u total=%u result=%d\n",
+               report.type, report.status, report.curSize, report.totalSize, result);
+}
+
+void FinishUpgradeTask(CmiotUpgradeTask *task)
+{
+    pthread_mutex_lock(&g_upgradeMutex);
+    g_upgradeBusy = false;
+    g_upgradeType = 0;
+    pthread_mutex_unlock(&g_upgradeMutex);
+    free(task);
+}
+
+void *CmiotUpgradeWorker(void *argument)
+{
+    CmiotUpgradeTask *task = static_cast<CmiotUpgradeTask *>(argument);
+    cmiot_uint32_t package_size = 0;
+
+    ReportUpgradeStatus(task, CMIOT_UPGRADE_STATUS_START_DOWNLOAD, 0, 0);
+    ReportUpgradeStatus(task, CMIOT_UPGRADE_STATUS_DOWNLOADING, 0, 0);
+    if (OtaDownloadFile(task->info.url,
+                        kCmiotOtaTempPath,
+                        kCmiotOtaPackagePath,
+                        task->info.checkSum,
+                        &package_size) != 0) {
+        DEMO_PRINT("OTA download or MD5 verification failed\n");
+        ReportUpgradeStatus(task, CMIOT_UPGRADE_STATUS_DOWNLOAD_FAILED, 0, 0);
+        FinishUpgradeTask(task);
+        return NULL;
+    }
+
+    ReportUpgradeStatus(task, CMIOT_UPGRADE_STATUS_DOWNLOAD_COMPLETE,
+                        package_size, package_size);
+    ReportUpgradeStatus(task, CMIOT_UPGRADE_STATUS_START_INSTALL,
+                        package_size, package_size);
+    ReportUpgradeStatus(task, CMIOT_UPGRADE_STATUS_INSTALLING,
+                        package_size, package_size);
+    const int result = AbUpdateApply(kCmiotOtaPackagePath, true);
+    unlink(kCmiotOtaPackagePath);
+    if (result != 0) {
+        DEMO_PRINT("OTA install failed\n");
+        ReportUpgradeStatus(task, CMIOT_UPGRADE_STATUS_INSTALL_FAILED,
+                            package_size, package_size);
+    } else {
+        ReportUpgradeStatus(task, CMIOT_UPGRADE_STATUS_INSTALL_COMPLETE,
+                            package_size, package_size);
+    }
+    FinishUpgradeTask(task);
+    return NULL;
+}
+
+}  // 匿名命名空间
+
 cmiot_int32_t demo_upgrade_callback(cmiotUpgradeCmd_e cmd, cmiot_uint32_t streamId, void* input, void* output)
 {
-    if (!input)
+    (void)streamId;
+    (void)output;
+    const cmiotUpgradeInfo_t *upgrade_info = static_cast<const cmiotUpgradeInfo_t *>(input);
+    cmiot_uint32_t upgrade_type = 0;
+    if (!ValidateUpgradeInfo(upgrade_info))
     {
         DEMO_PRINT("demo_upgrade_callback invalid parameters!\n");
         return -1;
@@ -2775,17 +2874,13 @@ cmiot_int32_t demo_upgrade_callback(cmiotUpgradeCmd_e cmd, cmiot_uint32_t stream
     switch (cmd)
     {
         case CMIOT_CMD_UPGRADE_FW:
-            memcpy(&g_upgradeInfoFw, input, sizeof(cmiotUpgradeInfo_t));
-            g_upgradeType = 1;
+            upgrade_type = 1;
             DEMO_PRINT("get cmd ********** CMIOT_CMD_UPGRADE_FW **********\n");
-            DEMO_PRINT("url = %s, version = %s, checkSum = %s\n", g_upgradeInfoFw.url, g_upgradeInfoFw.version, g_upgradeInfoFw.checkSum);
             break;
 
         case CMIOT_CMD_UPGRADE_APP:
-            g_upgradeType = 2;
-            memcpy(&g_upgradeInfoApp, input, sizeof(cmiotUpgradeInfo_t));
+            upgrade_type = 2;
             DEMO_PRINT("get cmd ********** CMIOT_CMD_UPGRADE_APP **********\n");
-            DEMO_PRINT("url = %s, version = %s, checkSum = %s\n", g_upgradeInfoApp.url, g_upgradeInfoApp.version, g_upgradeInfoApp.checkSum);
             break;
 
         default:
@@ -2793,6 +2888,37 @@ cmiot_int32_t demo_upgrade_callback(cmiotUpgradeCmd_e cmd, cmiot_uint32_t stream
             return -1;
     }
 
+    CmiotUpgradeTask *task = static_cast<CmiotUpgradeTask *>(calloc(1, sizeof(*task)));
+    if (task == NULL)
+        return -1;
+    memcpy(&task->info, upgrade_info, sizeof(task->info));
+    task->type = upgrade_type;
+
+    pthread_mutex_lock(&g_upgradeMutex);
+    if (g_upgradeBusy) {
+        pthread_mutex_unlock(&g_upgradeMutex);
+        free(task);
+        DEMO_PRINT("demo_upgrade_callback rejected: upgrade already running\n");
+        return -1;
+    }
+    g_upgradeBusy = true;
+    g_upgradeType = upgrade_type;
+    if (upgrade_type == 1)
+        memcpy(&g_upgradeInfoFw, &task->info, sizeof(g_upgradeInfoFw));
+    else
+        memcpy(&g_upgradeInfoApp, &task->info, sizeof(g_upgradeInfoApp));
+    pthread_mutex_unlock(&g_upgradeMutex);
+
+    DEMO_PRINT("OTA task accepted: type=%u url=%s version=%s\n",
+               upgrade_type, task->info.url, task->info.version);
+    pthread_t thread;
+    const int create_result = pthread_create(&thread, NULL, CmiotUpgradeWorker, task);
+    if (create_result != 0) {
+        DEMO_PRINT("demo_upgrade_callback worker create failed: %d\n", create_result);
+        FinishUpgradeTask(task);
+        return -1;
+    }
+    pthread_detach(thread);
     return 0;
 }
 

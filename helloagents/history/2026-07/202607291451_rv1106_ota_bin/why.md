@@ -1,5 +1,7 @@
 # 变更提案: RV1106 ota.bin 升级包
 
+> 后续演进：`202607291546_ota_direct_images` 已取消临时 USTAR，改为校验后事务性发布三镜像并由 `rk_ota` 直接读取 `/tmp`；以下内容为当时的历史决策。
+
 ## 需求背景
 当前构建链路把 `boot.img/rootfs.img/oem.img` 直接归档为 `upgrade.tar.gz`，应用再把 tar 交给 `rk_ota`。交付格式需要切换为历史 `packaging-update` 使用的带平台、CRC、镜像类型和地址信息的 `ota.bin`，同时保留底层 `rk_ota` 的 A/B 槽写入事务。
 

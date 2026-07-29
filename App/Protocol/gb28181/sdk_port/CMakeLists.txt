@@ -188,6 +188,7 @@ set(Onvif Onvif/Onvif.cpp)
 #升级烧录模块
 set(Update
 	Update/AbUpdate.cpp
+	Update/OtaDownload.cpp
 	Update/OtaPackage.cpp
 )
 set(Protocol_SRC

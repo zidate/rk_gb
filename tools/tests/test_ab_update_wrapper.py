@@ -51,7 +51,6 @@ extern "C" void FakeExit(int);
 
 HARNESS = r"""
 #include "AbUpdate.h"
-#include <limits.h>
 #include <setjmp.h>
 #include <stdio.h>
 #include <string.h>
@@ -64,29 +63,51 @@ static int exec_called;
 static int exec_args_ok;
 static int exit_status;
 static int wait_status;
-static char captured_tar[PATH_MAX];
+static int images_present_at_wait;
+
+static int file_starts_with(const char *path, const char *expected, size_t size) {
+    FILE *file = fopen(path, "rb");
+    char buffer[16] = {0};
+    if (file == NULL)
+        return 0;
+    const int ok = fread(buffer, 1, size, file) == size &&
+                   !memcmp(buffer, expected, size);
+    fclose(file);
+    return ok;
+}
+
+static int images_are_ready(void) {
+    return file_starts_with("/tmp/boot.img", "boot", 4) &&
+           file_starts_with("/tmp/rootfs.img", "rootfs", 6) &&
+           file_starts_with("/tmp/oem.img", "oem", 3);
+}
+
+static int images_are_removed(void) {
+    return access("/tmp/boot.img", F_OK) != 0 &&
+           access("/tmp/rootfs.img", F_OK) != 0 &&
+           access("/tmp/oem.img", F_OK) != 0;
+}
 
 extern "C" pid_t FakeFork(void) {
     return mode == 0 ? 0 : 42;
 }
 
 extern "C" int FakeExecv(const char *path, char *const argv[]) {
-    static const char prefix[] = "--tar_path=";
     exec_called++;
     exec_args_ok = !strcmp(path, "/oem/usr/bin/rk_ota") &&
                    !strcmp(argv[0], "/oem/usr/bin/rk_ota") &&
                    !strcmp(argv[1], "--misc=update") &&
-                   !strncmp(argv[2], "--tar_path=/tmp/rk_ota_payload_", 31) &&
+                   !strcmp(argv[2], "--save_dir=/tmp") &&
                    !strcmp(argv[3], "--partition=all") &&
                    !strcmp(argv[4], "--reboot") && argv[5] == NULL &&
-                   strstr(path, "/bin/sh") == NULL;
-    snprintf(captured_tar, sizeof(captured_tar), "%s", argv[2] + sizeof(prefix) - 1);
+                   strstr(path, "/bin/sh") == NULL && images_are_ready();
     return -1;
 }
 
 extern "C" pid_t FakeWaitpid(pid_t pid, int *status, int options) {
     if (pid != 42 || options != 0)
         return -1;
+    images_present_at_wait = images_are_ready();
     *status = wait_status;
     return pid;
 }
@@ -101,13 +122,9 @@ static int check_child(const char *package) {
     exec_called = 0;
     exec_args_ok = 0;
     exit_status = 0;
-    captured_tar[0] = '\0';
     if (setjmp(child_jump) == 0)
         (void)AbUpdateApply(package, true);
-    const int tar_exists = captured_tar[0] != '\0' && access(captured_tar, F_OK) == 0;
-    if (captured_tar[0] != '\0')
-        unlink(captured_tar);
-    return exec_called == 1 && exec_args_ok && exit_status == 127 && tar_exists ? 0 : 1;
+    return exec_called == 1 && exec_args_ok && exit_status == 127 && images_are_removed() ? 0 : 1;
 }
 
 int main(int argc, char **argv) {
@@ -119,10 +136,12 @@ int main(int argc, char **argv) {
         return 2;
     mode = 1;
     wait_status = 0;
-    if (AbUpdateApply(argv[1], true) != 0)
+    images_present_at_wait = 0;
+    if (AbUpdateApply(argv[1], true) != 0 || !images_present_at_wait || !images_are_removed())
         return 3;
     wait_status = 7 << 8;
-    if (AbUpdateApply(argv[1], true) == 0)
+    images_present_at_wait = 0;
+    if (AbUpdateApply(argv[1], true) == 0 || !images_present_at_wait || !images_are_removed())
         return 4;
     return 0;
 }
@@ -187,6 +206,7 @@ class AbUpdateWrapperTest(unittest.TestCase):
         for cmake in CMAKE_FILES:
             text = cmake.read_text()
             self.assertIn("Update/AbUpdate.cpp", text)
+            self.assertIn("Update/OtaDownload.cpp", text)
             self.assertIn("Update/OtaPackage.cpp", text)
 
 

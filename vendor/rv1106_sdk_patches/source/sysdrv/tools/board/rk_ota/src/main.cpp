@@ -26,8 +26,8 @@ void display() {
     LOGI("--misc=other                         Linux A/B mode: Setting another partition to bootable.\n");
     LOGI("--misc=update                        Linux A/B mode: Setting the partition to be upgraded.\n");
     LOGI("--misc=display                       Display misc info.\n");
-    LOGI("--tar_path=<path>                    Set upgrade firmware path.\n");
-    LOGI("--save_dir=<path>                    Set the path for saving the image.\n");
+    LOGI("--tar_path=<path>                    Set optional tar firmware path.\n");
+    LOGI("--save_dir=<path>                    Set image directory; without tar_path, read prepared images directly.\n");
     LOGI("--partition=<boot/rootfs/oem/all>    Set the partition to be upgraded.('all' means 'boot', 'rootfs' and 'oem' are included.)\n");
     LOGI("--reboot                             Restart the machine at the end of the program.\n");
     // LOGI("--misc=wipe_userdata   Format data partition.\n");

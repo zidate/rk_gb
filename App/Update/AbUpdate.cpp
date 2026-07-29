@@ -4,8 +4,6 @@
 #include "OtaPackage.h"
 
 #include <errno.h>
-#include <limits.h>
-#include <stdio.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -23,30 +21,40 @@
 #define AB_UPDATE_EXIT _exit
 #endif
 
+namespace {
+
+const char kImageDirectory[] = "/tmp";
+volatile int g_update_running = 0;
+
+void ReleaseUpgradeLock()
+{
+    __sync_lock_release(&g_update_running);
+}
+
+}  // 匿名命名空间
+
 int AbUpdateApply(const char *package_path, bool reboot_after_success)
 {
     static char program[] = "/oem/usr/bin/rk_ota";
     static char misc_arg[] = "--misc=update";
+    static char save_arg[] = "--save_dir=/tmp";
     static char partition_arg[] = "--partition=all";
     static char reboot_arg[] = "--reboot";
-    char tar_path[PATH_MAX];
-    char tar_arg[PATH_MAX + sizeof("--tar_path=")];
     char *argv[6];
-    if (OtaPackageCreateTar(package_path, tar_path, sizeof(tar_path)) != 0)
+    if (__sync_lock_test_and_set(&g_update_running, 1) != 0)
     {
         return -1;
     }
-    const int length = snprintf(tar_arg, sizeof(tar_arg), "--tar_path=%s", tar_path);
-    if (length < 0 ||
-        static_cast<size_t>(length) >= sizeof(tar_arg))
+    OtaPackageRemoveImages(kImageDirectory);
+    if (OtaPackageExtractImages(package_path, kImageDirectory) != 0)
     {
-        unlink(tar_path);
+        ReleaseUpgradeLock();
         return -1;
     }
 
     argv[0] = program;
     argv[1] = misc_arg;
-    argv[2] = tar_arg;
+    argv[2] = save_arg;
     argv[3] = partition_arg;
     argv[4] = reboot_after_success ? reboot_arg : NULL;
     argv[5] = NULL;
@@ -54,12 +62,15 @@ int AbUpdateApply(const char *package_path, bool reboot_after_success)
     const pid_t pid = AB_UPDATE_FORK();
     if (pid < 0)
     {
-        unlink(tar_path);
+        OtaPackageRemoveImages(kImageDirectory);
+        ReleaseUpgradeLock();
         return -1;
     }
     if (pid == 0)
     {
         AB_UPDATE_EXECV(program, argv);
+        OtaPackageRemoveImages(kImageDirectory);
+        ReleaseUpgradeLock();
         AB_UPDATE_EXIT(127);
     }
 
@@ -70,7 +81,8 @@ int AbUpdateApply(const char *package_path, bool reboot_after_success)
         waited = AB_UPDATE_WAITPID(pid, &status, 0);
     } while (waited < 0 && errno == EINTR);
 
-    unlink(tar_path);
+    OtaPackageRemoveImages(kImageDirectory);
+    ReleaseUpgradeLock();
     if (waited != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
     {
         return -1;

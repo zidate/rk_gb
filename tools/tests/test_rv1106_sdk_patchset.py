@@ -41,6 +41,7 @@ class PatchsetTest(unittest.TestCase):
             "0008-uboot-env-mtdparts-prefix.patch",
             "0009-uboot-sd-fixed-raw-offset.patch",
             "0010-uboot-sd-oem-switch.patch",
+            "0011-rk-ota-prepared-images.patch",
         ]
         series = (PATCH_DIR / "series").read_text().splitlines()
         self.assertEqual(series, expected)
@@ -141,7 +142,7 @@ diff --git a/project/Makefile b/project/Makefile
         self.assertFalse(patch_touches_forbidden_product_path(patch_text))
 
     def test_patch_payloads_never_touch_product_driver_uboot(self):
-        for patch_path in sorted(PATCH_DIR.glob("000*.patch")):
+        for patch_path in sorted(PATCH_DIR.glob("[0-9][0-9][0-9][0-9]-*.patch")):
             with self.subTest(patch=patch_path.name):
                 self.assertFalse(
                     patch_touches_forbidden_product_path(patch_path.read_text()),
@@ -150,7 +151,7 @@ diff --git a/project/Makefile b/project/Makefile
 
     def test_complete_source_snapshots_cover_all_patch_targets(self):
         patch_targets = set()
-        for patch_path in sorted(PATCH_DIR.glob("000*.patch")):
+        for patch_path in sorted(PATCH_DIR.glob("[0-9][0-9][0-9][0-9]-*.patch")):
             for path in patch_diff_paths(patch_path.read_text()):
                 prefix, separator, relative = path.partition("/")
                 if separator and prefix == "b":

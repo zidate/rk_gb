@@ -1,5 +1,7 @@
 # 技术设计: RV1106 ota.bin 升级包
 
+> 后续演进：`202607291546_ota_direct_images` 已用事务性 `/tmp/*.img` 解析和 `rk_ota --save_dir` 目录模式替代本方案中的临时 USTAR 适配层；本文件保留首次引入容器时的历史设计记录。
+
 ## 技术方案
 ### 方案取舍
 - **采用:** 保持旧 `packaging-update` 容器的 32 字节包头、12 字节镜像头、网络字节序、4 字节 `0xFF` 对齐和标准 CRC32；重写小型严格 packager/parser。

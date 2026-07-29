@@ -12,7 +12,11 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 PATCHES = tuple(
     ROOT / "vendor/rv1106_sdk_patches" / name
-    for name in ("0004-rk-ota.patch", "0007-rk-ota-ubi-init.patch")
+    for name in (
+        "0004-rk-ota.patch",
+        "0007-rk-ota-ubi-init.patch",
+        "0011-rk-ota-prepared-images.patch",
+    )
 )
 SDK_BASELINE = pathlib.Path(
     os.environ.get(
@@ -164,6 +168,14 @@ class RkOtaPolicyTest(unittest.TestCase):
         activate = update.index("setSlotActivity()")
         self.assertLess(transaction, activate)
         self.assertIn("return -1", update[transaction:activate])
+
+    def test_prepared_image_directory_skips_tar_unpack(self):
+        update = c_function(self.bootloader, "miscUpdate")
+        self.assertIn("tar_path == NULL && save_dir == NULL", update)
+        self.assertIn("if (tar_path != NULL)", update)
+        self.assertIn('LOGI("prepared-image directory mode', update)
+        self.assertIn("flash_write(savedir, partition)", update)
+        self.assertIn("without tar_path, read prepared images directly", self.main)
 
     def test_ubi_autoresize_is_consumed_before_relock(self):
         prepare = c_function(self.bootloader, "prepare_ubi_partition")

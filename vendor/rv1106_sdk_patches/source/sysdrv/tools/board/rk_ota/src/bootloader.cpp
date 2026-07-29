@@ -904,8 +904,8 @@ int miscUpdate(char *tar_path, char *save_dir, char *update_partition) {
     const char *partition;
     struct AvbABData info;
 
-    if (tar_path == NULL) {
-        LOGE("'--tar_path=' must be set.\n");
+    if (tar_path == NULL && save_dir == NULL) {
+        LOGE("'--tar_path=' or '--save_dir=' must be set.\n");
         return -1;
     }
 
@@ -917,16 +917,23 @@ int miscUpdate(char *tar_path, char *save_dir, char *update_partition) {
 
     partition = update_partition == NULL ? "all" : update_partition;
 
-    if (access(savedir, F_OK))
-        mkdir(savedir, 0755);
-
-    sprintf(unpack_tar_cmd, "tar -xf %s -C %s", tar_path, savedir);
-    if (system(unpack_tar_cmd)) {
-        LOGE("Unpack %s failed.\n", tar_path);
-        return -1;
+    if (access(savedir, F_OK)) {
+        if (tar_path == NULL || mkdir(savedir, 0755)) {
+            LOGE("Image directory %s is unavailable.\n", savedir);
+            return -1;
+        }
     }
 
-    LOGI("tar path = %s\n", tar_path);
+    if (tar_path != NULL) {
+        sprintf(unpack_tar_cmd, "tar -xf %s -C %s", tar_path, savedir);
+        if (system(unpack_tar_cmd)) {
+            LOGE("Unpack %s failed.\n", tar_path);
+            return -1;
+        }
+        LOGI("archive mode, tar path = %s\n", tar_path);
+    } else {
+        LOGI("prepared-image directory mode\n");
+    }
     LOGI("save path = %s\n", savedir);
 
     if (flash_write(savedir, partition)) {
