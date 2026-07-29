@@ -10,8 +10,13 @@
 #include "config/ProtocolExternalConfig.h"
 #include "GAT1400ClientService.h"
 #include "Base64Coder.h"
+#include "Update/AbUpdate.h"
 
 #include "web_server.h"
+
+#include <errno.h>
+#include <string.h>
+#include <unistd.h>
 
 
 static bool s_bStartCmiot = true;
@@ -397,7 +402,7 @@ static void *thread_web_server(void *args)
 		
 		//设置参数 注：目前不支持实时更新本地的配置信息，因此需要在web_server启动之前，把相应的信息配置好
 		verify_status.ip_mode = WifiConfig.bStaticIpEnable;
-		strcpy(verify_status.version, "1.0.7"); 	//设备版本号
+		strcpy(verify_status.version, "1.0.9"); 	//设备版本号
 		inet_ntop(AF_INET, &WifiConfig.HostIP.l, verify_status.ip_addr, sizeof(verify_status.ip_addr));	//IP地址
 		inet_ntop(AF_INET, &WifiConfig.Gateway.l, verify_status.gateway, sizeof(verify_status.gateway));	//网关地址
 		inet_ntop(AF_INET, &WifiConfig.Submask.l, verify_status.netmask, sizeof(verify_status.netmask));	//子网掩码
@@ -1577,10 +1582,48 @@ bool CSofia::start()
 
 		if (s_bStartCmiot)
 		{
-			g_NetConfigHook.SetQrcodeEnable(false);
-			cmiot_start();
+			//g_NetConfigHook.SetQrcodeEnable(false);
+			//cmiot_start();
 		}
-		while (1) sleep(1);
+		bool testOtaAttempted = false;
+		while (1)
+		{
+			if (!testOtaAttempted && access("/tmp/test_ota", F_OK) == 0)
+			{
+				const char *packagePath = "/mnt/sdcard/upgrade.tar.gz";
+				testOtaAttempted = true;
+				/* Consume the trigger before starting the updater so a failed
+				 * package cannot be submitted once per second. */
+				if (unlink("/tmp/test_ota") != 0 && errno != ENOENT)
+				{
+					AppErr("test OTA: remove trigger failed: %s\n", strerror(errno));
+				}
+				if (access(packagePath, R_OK) != 0)
+				{
+					AppErr("test OTA: package is not readable: %s (%s)\n",
+					       packagePath, strerror(errno));
+				}
+				else if (access("/oem/usr/bin/rk_ota", X_OK) != 0)
+				{
+					AppErr("test OTA: /oem/usr/bin/rk_ota is not executable (%s)\n",
+					       strerror(errno));
+				}
+				else
+				{
+					AppInfo("test OTA: applying %s\n", packagePath);
+					const int ret = AbUpdateApply(packagePath, true);
+					if (ret != 0)
+					{
+						AppErr("test OTA: rk_ota failed, ret=%d\n", ret);
+					}
+					}
+				}
+			else if (testOtaAttempted && access("/tmp/test_ota", F_OK) != 0)
+			{
+				testOtaAttempted = false;
+			}
+			sleep(1);
+		}
 
 
 		
