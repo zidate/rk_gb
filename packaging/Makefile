@@ -12,7 +12,7 @@ USERDATA_PART_SIZE := 0x1FC0000
 
 .PHONY: all images factory artifacts clean
 
-all: factory artifacts
+all: artifacts
 
 images:
 	$(Q)rm -f $(OEM_DIR)/usr/bin/dgiot
@@ -38,14 +38,14 @@ images:
 factory: images
 	$(Q)$(MAKE) -C $(IMAGE_DIR)
 
-artifacts: images
+artifacts: factory
 	$(Q)mkdir -p $(RELEASE_DIR)/sd
-	$(Q)rm -f $(RELEASE_DIR)/ota_ab.tar $(RELEASE_DIR)/sd/*.img
+	$(Q)rm -f $(RELEASE_DIR)/ota.bin $(RELEASE_DIR)/sd/*.img
 	$(Q)cp $(IMAGE_DIR)/uboot.img $(IMAGE_DIR)/boot.img $(IMAGE_DIR)/rootfs.img $(IMAGE_DIR)/oem.img $(RELEASE_DIR)/sd/
-	$(Q)tar -C $(IMAGE_DIR) -cf $(RELEASE_DIR)/ota_ab.tar boot.img rootfs.img oem.img
+	$(Q)cp $(IMAGE_DIR)/ota.bin $(RELEASE_DIR)/ota.bin
 
 clean:
 	$(Q)rm -rf $(PACKAGING)/userdata $(PACKAGING)/rootfs $(PACKAGING)/oem
-	$(Q)rm -f $(RELEASE_DIR)/ota_ab.tar
+	$(Q)rm -f $(RELEASE_DIR)/ota.bin
 	$(Q)rm -rf $(RELEASE_DIR)/sd
 	$(Q)$(MAKE) clean -C $(IMAGE_DIR)

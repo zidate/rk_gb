@@ -1590,10 +1590,9 @@ bool CSofia::start()
 		{
 			if (!testOtaAttempted && access("/tmp/test_ota", F_OK) == 0)
 			{
-				const char *packagePath = "/mnt/sdcard/upgrade.tar.gz";
+				const char *packagePath = "/mnt/sdcard/ota.bin";
 				testOtaAttempted = true;
-				/* Consume the trigger before starting the updater so a failed
-				 * package cannot be submitted once per second. */
+				/* 启动升级前先消费触发文件，避免失败包每秒重复提交。 */
 				if (unlink("/tmp/test_ota") != 0 && errno != ENOENT)
 				{
 					AppErr("test OTA: remove trigger failed: %s\n", strerror(errno));
@@ -1614,7 +1613,7 @@ bool CSofia::start()
 					const int ret = AbUpdateApply(packagePath, true);
 					if (ret != 0)
 					{
-						AppErr("test OTA: rk_ota failed, ret=%d\n", ret);
+						AppErr("test OTA: apply ota.bin failed, ret=%d\n", ret);
 					}
 					}
 				}

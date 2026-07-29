@@ -78,8 +78,8 @@ namespace
 static protocol::ProtocolManager* g_gb_live_audio_manager = NULL;
 
 static const char* kGbLiveDmcModuleName = "gb28181_live";
-static const char* kGbUpgradePackagePath = "/tmp/upgrade.tar";
-static const char* kGbUpgradePackageTempPath = "/tmp/upgrade.tar.download";
+static const char* kGbUpgradePackagePath = "/tmp/ota.bin";
+static const char* kGbUpgradePackageTempPath = "/tmp/ota.bin.download";
 static const char* kGbUpgradeConfigPendingKey = "GbPending";
 static const char* kGbUpgradeConfigSessionKey = "GbSessionID";
 static const char* kGbUpgradeConfigFirmwareKey = "GbFirmware";

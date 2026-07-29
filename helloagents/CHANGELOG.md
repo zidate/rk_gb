@@ -6,6 +6,9 @@
 
 ## [Unreleased]
 
+### 新增
+- 新增 RV1106 `ota.bin` 网络升级全链路：host `packaging-update` 将 boot/rootfs/oem 按历史二进制容器格式打包，应用校验平台、magic、CRC、长度、类型、地址和分区上限后转换为受控临时 USTAR，再复用 `rk_ota` 完成 A/B 写槽；构建与 GB 下载路径同步从 tar 切换到 `ota.bin`，并增加 SD 卡 demo 触发入口和损坏包回归测试。
+
 ### 修复
 - 根据板端效果反馈将 RV1106 text OSD 自动黑白恢复为每秒重绘，移除局部亮度变化 map 与区域门控；字体画布全透明和 GB OSD `BgAlpha=0/FgAlpha=255` 保持不变，继续去除黑底。
 - 优化 RV1106 text OSD 自动黑白的 CPU 开销并去掉黑底：继续每秒更新低分辨率亮度分类，但仅在某条文字覆盖区域跨过黑/白阈值时重新生成 bitmap；字体背景像素改为全透明，GB OSD RGN 调整为 `BgAlpha=0/FgAlpha=255`。

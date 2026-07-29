@@ -8,6 +8,7 @@
 
 | 时间戳 | 功能名称 | 类型 | 状态 | 方案包路径 |
 |--------|----------|------|------|------------|
+| 202607291451 | rv1106_ota_bin | 开发 | ✅已完成 | [2026-07/202607291451_rv1106_ota_bin](2026-07/202607291451_rv1106_ota_bin/) |
 | 202607241649 | rv1106_sd_oem_switch | 轻量迭代 | ✅已完成 | [2026-07/202607241649_rv1106_sd_oem_switch](2026-07/202607241649_rv1106_sd_oem_switch/) |
 | 202607241536 | rv1106_sd_fixed_raw_write | 轻量迭代 | ✅已完成 | [2026-07/202607241536_rv1106_sd_fixed_raw_write](2026-07/202607241536_rv1106_sd_fixed_raw_write/) |
 | 202607241008 | rv1106_mtdparts_env_prefix | 轻量迭代 | ✅已完成 | [2026-07/202607241008_rv1106_mtdparts_env_prefix](2026-07/202607241008_rv1106_mtdparts_env_prefix/) |
@@ -123,6 +124,7 @@
 
 ### 2026-07
 
+- [202607291451_rv1106_ota_bin](2026-07/202607291451_rv1106_ota_bin/) - 将网络 OTA 交付物切换为带平台、CRC 和镜像表校验的 `ota.bin`，并通过受控临时 USTAR 复用 `rk_ota` A/B 写槽事务
 - [202607241649_rv1106_sd_oem_switch](2026-07/202607241649_rv1106_sd_oem_switch/) - 将 OEM 存在设为 SD 升级切换 A/B 槽的触发条件
 - [202607241536_rv1106_sd_fixed_raw_write](2026-07/202607241536_rv1106_sd_fixed_raw_write/) - 修复固定 env/idblock/U-Boot 命名 MTD 缺失和 FAT 缓冲区未对齐，事务成功后激活非活动 A/B 槽
 - [202607241008_rv1106_mtdparts_env_prefix](2026-07/202607241008_rv1106_mtdparts_env_prefix/) - 修复 SPI NAND `env.img` 中 `mtdparts` 变量值缺少旧式 U-Boot parser 前缀的问题；正常 `./build.sh env` 与直接 sysdrv 构建入口均已覆盖

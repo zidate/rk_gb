@@ -208,7 +208,7 @@ class FullPhysicalLayoutTest(unittest.TestCase):
         self.assert_full_layout("merge.ini")
 
 
-class DeprecatedUpgradeInputTest(unittest.TestCase):
+class OtaUpgradeInputTest(unittest.TestCase):
     def test_upgrade_ini_contains_only_generic_a_slot_payloads(self):
         config = read_ini("upgrade.ini")
         self.assertEqual(config.sections(), ["global", "boot", "rootfs", "oem"])
@@ -230,8 +230,8 @@ class DeprecatedUpgradeInputTest(unittest.TestCase):
         }
         self.assertEqual(actual, expected)
 
-    def test_makefile_does_not_actively_package_deprecated_upgrade_input(self):
-        self.assertFalse(
+    def test_makefile_packages_ota_from_upgrade_input(self):
+        self.assertTrue(
             makefile_references_upgrade_ini(
                 (IMAGE_DIR / "Makefile").read_text(encoding="utf-8")
             )
@@ -246,7 +246,10 @@ class DeprecatedUpgradeInputTest(unittest.TestCase):
 
     def test_makefile_declares_all_and_clean_phony(self):
         makefile_lines = (IMAGE_DIR / "Makefile").read_text(encoding="utf-8").splitlines()
-        self.assertIn(".PHONY: all clean", makefile_lines)
+        self.assertTrue(
+            any(line.startswith(".PHONY:") and "all" in line and "clean" in line
+                for line in makefile_lines)
+        )
 
     def test_makefile_is_not_executable(self):
         self.assertEqual((IMAGE_DIR / "Makefile").stat().st_mode & 0o111, 0)
@@ -264,12 +267,12 @@ class PackagingArtifactsTest(unittest.TestCase):
         for image in ("rootfs", "oem", "userdata"):
             self.assertIn(f"/{image}.img", makefile)
         self.assertIn("RELEASE_DIR := $(ROOT)/Release", makefile)
-        self.assertIn("$(RELEASE_DIR)/ota_ab.tar", makefile)
+        self.assertIn("$(RELEASE_DIR)/ota.bin", makefile)
         self.assertIn("$(RELEASE_DIR)/sd", makefile)
-        self.assertRegex(makefile, r"tar .*boot\.img rootfs\.img oem\.img")
+        self.assertNotIn("ota_ab.tar", makefile)
         self.assertNotIn("sd_update.txt", makefile)
         image_makefile = (IMAGE_DIR / "Makefile").read_text(encoding="utf-8")
-        self.assertNotIn("./packaging-update", image_makefile)
+        self.assertIn("./packaging-update ./upgrade.ini ./ota.bin", image_makefile)
 
     def test_raw_packer_declares_exact_ordered_sections(self):
         source = RAW_PACKER_SOURCE.read_text(encoding="utf-8")

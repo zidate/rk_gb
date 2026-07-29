@@ -68,6 +68,17 @@
 - `misc` CRC 无效时默认 A 可启动、B 不可启动。
 - 单副本 U-Boot 擦写期间断电仍有无法启动的固有风险。
 
+## 2026-07-29 ota.bin 网络 OTA 容器
+
+- 网络 OTA 交付物统一为 `Release/ota.bin`，构建链路不再生成 `upgrade.tar.gz` 或 `ota_ab.tar`；SD 工厂镜像目录仍保留独立的 `uboot.img/boot.img/rootfs.img/oem.img`。
+- 容器兼容历史 `packaging-update` 格式：32 字节包头包含 20 字节平台名 `rv1106`、网络字节序 magic `0xABCD1234`、payload CRC32 和 payload 长度；每个镜像前有 12 字节网络字节序的类型、对齐后大小和起始地址。
+- 容器类型固定为 boot=4、rootfs=5、oem=6；起始地址固定为 `0x0240000/0x0A40000/0x1E40000`，镜像上限分别为 4/10/32 MiB。`upgrade.ini` 中的物理分区 `type` 不作为容器类型使用。
+- Host `packaging-update` 只接受 `[boot]/[rootfs]/[oem]` 三件套，镜像按 4 字节对齐并补 `0xFF`，对整个镜像头和数据 payload 计算标准 CRC32（多项式 `0xEDB88320`）。
+- 应用 `OtaPackage` 在调用 `rk_ota` 前校验平台、magic、文件总长、CRC、类型唯一性、镜像地址和大小，再以固定成员名生成临时 USTAR；包内数据不能控制文件名或命令参数，底层仍由已验证的 `rk_ota` 完成非活动槽写入、校验和切槽。
+- GB 下载路径为 `/tmp/ota.bin.download`，完整性检查通过后原子改名为 `/tmp/ota.bin`。本地 demo 删除 `/tmp/test_ota` 触发文件后调用 `/mnt/sdcard/ota.bin`，避免每秒重复触发。
+- 临时 USTAR 和 `rk_ota` 解包目录会增加升级期间的临时空间占用；量产镜像需按实际 boot/rootfs/oem 文件大小验证 `/tmp` 容量，升级完成或重启后临时内容不作为持久数据。
+- 2026-07-29 验证：80 项 `tools/tests` 回归通过；host packager、host C++11 严格编译以及 ARM GNU 8.3.0 整机交叉编译均成功，最终 `dgiot` 为 32-bit ARM EABI5/uClibc 可执行文件。
+
 ## 写保护
 
 - 升级解锁：A0=`0x00`。
