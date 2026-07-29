@@ -10,8 +10,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/wait.h>
 #include <unistd.h>
+
+#include <curl/curl.h>
 
 extern "C" {
 #include <libavutil/md5.h>
@@ -40,42 +41,51 @@ bool NormalizeMd5(const char *source, char output[33])
     return false;
 }
 
-int WaitForChild(pid_t pid)
+bool EnsureCurlInitialized()
 {
-    int status = 0;
-    pid_t waited;
-    do {
-        waited = waitpid(pid, &status, 0);
-    } while (waited < 0 && errno == EINTR);
-    return waited == pid && WIFEXITED(status) && WEXITSTATUS(status) == 0 ? 0 : -1;
+    static const CURLcode result = curl_global_init(CURL_GLOBAL_DEFAULT);
+    return result == CURLE_OK;
 }
 
 int DownloadByCurl(const char *url, const char *output_path)
 {
-    const pid_t pid = fork();
-    if (pid < 0)
+    FILE *output = NULL;
+    CURL *handle = NULL;
+    CURLcode result = CURLE_FAILED_INIT;
+    char error_buffer[CURL_ERROR_SIZE] = {0};
+
+    if (!EnsureCurlInitialized())
         return -1;
-    if (pid == 0) {
-        char *const arguments[] = {
-            const_cast<char *>("curl"),
-            const_cast<char *>("--fail"),
-            const_cast<char *>("--location"),
-            const_cast<char *>("--silent"),
-            const_cast<char *>("--show-error"),
-            const_cast<char *>("--connect-timeout"),
-            const_cast<char *>("15"),
-            const_cast<char *>("--max-time"),
-            const_cast<char *>("600"),
-            const_cast<char *>("--output"),
-            const_cast<char *>(output_path),
-            const_cast<char *>("--"),
-            const_cast<char *>(url),
-            NULL,
-        };
-        execvp(arguments[0], arguments);
-        _exit(127);
-    }
-    return WaitForChild(pid);
+    output = fopen(output_path, "wb");
+    handle = curl_easy_init();
+    if (output == NULL || handle == NULL)
+        goto done;
+
+    if (curl_easy_setopt(handle, CURLOPT_URL, url) != CURLE_OK ||
+        curl_easy_setopt(handle, CURLOPT_WRITEDATA, output) != CURLE_OK ||
+        curl_easy_setopt(handle, CURLOPT_ERRORBUFFER, error_buffer) != CURLE_OK ||
+        curl_easy_setopt(handle, CURLOPT_FAILONERROR, 1L) != CURLE_OK ||
+        curl_easy_setopt(handle, CURLOPT_FOLLOWLOCATION, 1L) != CURLE_OK ||
+        curl_easy_setopt(handle, CURLOPT_CONNECTTIMEOUT, 15L) != CURLE_OK ||
+        curl_easy_setopt(handle, CURLOPT_TIMEOUT, 600L) != CURLE_OK ||
+        curl_easy_setopt(handle, CURLOPT_NOSIGNAL, 1L) != CURLE_OK ||
+        curl_easy_setopt(handle, CURLOPT_PROTOCOLS_STR, "http,https") != CURLE_OK ||
+        curl_easy_setopt(handle, CURLOPT_REDIR_PROTOCOLS_STR, "http,https") != CURLE_OK)
+        goto done;
+
+    result = curl_easy_perform(handle);
+    if (result != CURLE_OK)
+        fprintf(stderr, "[OtaDownload] download failed: %s\n",
+                error_buffer[0] != '\0' ? error_buffer : curl_easy_strerror(result));
+
+done:
+    if (handle != NULL)
+        curl_easy_cleanup(handle);
+    if (output != NULL && (fflush(output) != 0 || fsync(fileno(output)) != 0))
+        result = CURLE_WRITE_ERROR;
+    if (output != NULL && fclose(output) != 0)
+        result = CURLE_WRITE_ERROR;
+    return result == CURLE_OK ? 0 : -1;
 }
 
 int CalculateFileMd5(const char *path, char output[33], uint32_t *file_size)

@@ -10,6 +10,7 @@
 - 新增 RV1106 `ota.bin` 网络升级全链路：host `packaging-update` 将 boot/rootfs/oem 按历史二进制容器格式打包；应用完成平台、magic、CRC、长度、类型、地址和分区上限校验后，事务性解析为 `/tmp/boot.img`、`rootfs.img`、`oem.img`，再由 `rk_ota --save_dir=/tmp` 直接完成 A/B 写槽。中国移动升级回调同步补齐异步下载、MD5 校验、状态上报、并发保护和统一安装流程。
 
 ### 修复
+- 修复中国移动 OTA 下载误依赖固件外部 `curl` 命令的问题：`OtaDownload` 改为直接调用已链接的 libcurl 7.88.1 easy API，并限制下载及重定向协议为 HTTP/HTTPS；同步补齐与静态库版本匹配的公开头文件。
 - 根据板端效果反馈将 RV1106 text OSD 自动黑白恢复为每秒重绘，移除局部亮度变化 map 与区域门控；字体画布全透明和 GB OSD `BgAlpha=0/FgAlpha=255` 保持不变，继续去除黑底。
 - 优化 RV1106 text OSD 自动黑白的 CPU 开销并去掉黑底：继续每秒更新低分辨率亮度分类，但仅在某条文字覆盖区域跨过黑/白阈值时重新生成 bitmap；字体背景像素改为全透明，GB OSD RGN 调整为 `BgAlpha=0/FgAlpha=255`。
 - 修复 RV1106 text OSD 在 `font_color_mode=auto` 下不会随画面亮度实时更新的问题：亮度 map 每秒刷新后，所有可见且非空的自定义文字区域会重新生成 ARGB8888 bitmap；固定颜色模式仍仅在配置变化时重绘。

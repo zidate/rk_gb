@@ -77,9 +77,9 @@
 - 应用 `OtaPackage` 在调用 `rk_ota` 前校验平台、magic、文件总长、CRC、类型唯一性、镜像地址和大小，再把三镜像分别写入 `/tmp` 同目录隐藏临时文件；三者全部写入并 `fsync` 成功后，才发布为 `/tmp/boot.img`、`/tmp/rootfs.img`、`/tmp/oem.img`。任一步失败都会清理临时文件和整套固定镜像，旧文件或半套新文件不会进入升级。
 - `AbUpdateApply()` 串行化应用升级事务，并通过 `rk_ota --misc=update --save_dir=/tmp --partition=all` 直接读取已准备镜像；`rk_ota` 仍保留 `--tar_path` 兼容模式，但目录模式不再执行 tar 解包。`rk_ota` 返回后应用清理三镜像。
 - GB 下载路径为 `/tmp/ota.bin.download`，完整性检查通过后原子改名为 `/tmp/ota.bin`。本地 demo 删除 `/tmp/test_ota` 触发文件后调用 `/mnt/sdcard/ota.bin`，避免每秒重复触发。
-- 中国移动 `demo_upgrade_callback` 对 FW/APP 命令统一按整包 `ota.bin` 处理：回调只校验和复制参数、拒绝并发任务，后台线程使用无 shell 参数拼接的 curl 下载，校验 SDK 下发的 MD5，依次上报下载/安装状态后调用 `AbUpdateApply()`。
+- 中国移动 `demo_upgrade_callback` 对 FW/APP 命令统一按整包 `ota.bin` 处理：回调只校验和复制参数、拒绝并发任务，后台线程直接调用已静态链接的 libcurl 7.88.1 easy API 下载，不依赖固件中的 `curl` 可执行文件；下载仅允许 HTTP/HTTPS 及同协议重定向，校验 SDK 下发的 MD5 后依次上报下载/安装状态并调用 `AbUpdateApply()`。
 - 直接镜像模式取消了临时 USTAR 和 `rk_ota` 解包副本，但下载文件与三镜像准备期间仍会同时占用 `/tmp`；量产镜像需按实际包和镜像大小验证空间。
-- 2026-07-29 验证：84 项 `tools/tests` 回归通过；OtaPackage/AbUpdate/OtaDownload host 严格编译、ChinaMobile 整文件语法检查、rk_ota ARM 语法检查以及 ARM GNU 8.3.0 整机交叉编译均成功。
+- 2026-07-29 验证：84 项 `tools/tests` 回归通过；OtaPackage/AbUpdate/OtaDownload 严格编译、ChinaMobile 整文件语法检查、rk_ota ARM 语法检查以及 ARM GNU 8.3.0 整机交叉编译均成功。libcurl 修正后又使用现有 libcurl/mbedTLS/libavutil 静态库生成 ARM/uClibc ELF，确认下载相关符号全部解析。
 
 ## 写保护
 

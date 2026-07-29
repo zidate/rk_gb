@@ -38,10 +38,15 @@ class ChinaMobileOtaCallbackTest(unittest.TestCase):
             self.assertIn(status, source)
         self.assertIn("cmiot_report_upgrade_step(&report)", source)
 
-    def test_downloader_uses_exec_arguments_and_md5_before_rename(self):
+    def test_downloader_uses_libcurl_and_md5_before_rename(self):
         source = DOWNLOADER.read_text()
-        self.assertIn('const_cast<char *>("--")', source)
-        self.assertIn("execvp(arguments[0], arguments)", source)
+        self.assertIn("#include <curl/curl.h>", source)
+        self.assertIn("curl_easy_init()", source)
+        self.assertIn("curl_easy_perform(handle)", source)
+        self.assertIn('CURLOPT_PROTOCOLS_STR, "http,https"', source)
+        self.assertIn('CURLOPT_REDIR_PROTOCOLS_STR, "http,https"', source)
+        self.assertNotIn("execvp(", source)
+        self.assertNotIn("fork()", source)
         self.assertNotIn("system(", source)
         digest = source.index("CalculateFileMd5(temporary_path")
         publish = source.index("rename(temporary_path, final_path)")

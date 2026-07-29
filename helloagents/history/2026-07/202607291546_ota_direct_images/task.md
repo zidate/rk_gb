@@ -13,6 +13,7 @@
 ## 3. 中国移动回调
 - [√] 3.1 增加安全下载与 MD5 校验 helper
 - [√] 3.2 将 demo_upgrade_callback 改为异步完整升级流程
+- [√] 3.3 根据板端运行时约束将下载从外部 `curl` 命令改为静态 libcurl easy API
 
 ## 4. 测试和文档
 - [√] 4.1 更新 OTA、wrapper、rk_ota 和 callback 回归测试
