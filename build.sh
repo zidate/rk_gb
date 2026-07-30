@@ -24,6 +24,7 @@ BLE_TYPE=ATBM6062
 
 
 PACKAGING=$ROOT/packaging
+SD_IMAGE_NAMES=(env.img idblock.img uboot.img boot.img rootfs.img oem.img)
 
 # BLE_TYPE=ATBM6132
 #BLE_TYPE=AIC8800DL
@@ -112,6 +113,33 @@ function image()
 	OSD_FONT_SRC=$ROOT/Middleware/libmpp/rkipc/common/osd/noto_serif_sc_gb2312.otf
 	OSD_FONT_DST=$PACKAGING/oem_ipc/usr/share/noto_serif_sc_gb2312.otf
 	OTA_PACKAGE=$ROOT/Release/ota.bin
+	if [ -z "${RV1106_SDK_DIR:-}" ]; then
+		echo "RV1106_SDK_DIR is required for fresh env/idblock/uboot images"
+		return 1
+	fi
+	SDK_IMAGE_DIR=$RV1106_SDK_DIR/output/image
+	SDK_ENV_IMAGE=$SDK_IMAGE_DIR/env.img
+	for fixed_image in "$SDK_ENV_IMAGE" "$SDK_IMAGE_DIR/idblock.img" \
+		"$SDK_IMAGE_DIR/uboot.img"; do
+		if [ ! -f "$fixed_image" ]; then
+			echo "RV1106 SDK artifact not found: $fixed_image"
+			return 1
+		fi
+	done
+	if ! python3 "$ROOT/tools/verify_uboot_env.py" "$SDK_ENV_IMAGE"; then
+		echo "RV1106 SDK env.img is invalid; run SDK ./build.sh env after uboot"
+		return 1
+	fi
+	if [ "$(stat -c %s "$SDK_IMAGE_DIR/idblock.img")" -le 0 ] ||
+	   [ "$(stat -c %s "$SDK_IMAGE_DIR/idblock.img")" -gt $((1024 * 1024)) ] ||
+	   [ "$(stat -c %s "$SDK_IMAGE_DIR/uboot.img")" -le 0 ] ||
+	   [ "$(stat -c %s "$SDK_IMAGE_DIR/uboot.img")" -gt $((1024 * 1024)) ]; then
+		echo "RV1106 SDK fixed image size validation failed"
+		return 1
+	fi
+	cp -f "$SDK_ENV_IMAGE" "$PACKAGING/image/env.img" || return 1
+	cp -f "$SDK_IMAGE_DIR/idblock.img" "$PACKAGING/image/idblock.img" || return 1
+	cp -f "$SDK_IMAGE_DIR/uboot.img" "$PACKAGING/image/uboot.img" || return 1
 	if [ ! -f "$OSD_FONT_SRC" ]; then
 		echo "OSD font not found: $OSD_FONT_SRC"
 		return 1
@@ -120,7 +148,7 @@ function image()
 	cp -f "$OSD_FONT_SRC" "$OSD_FONT_DST" || return 1
 	echo "make image ..."
 	make -C "$PACKAGING" || return 1
-	for image_name in boot.img rootfs.img oem.img ota.bin; do
+	for image_name in "${SD_IMAGE_NAMES[@]}" ota.bin; do
 		if [ ! -f "$PACKAGING/image/$image_name" ]; then
 			echo "OTA image not found: $PACKAGING/image/$image_name"
 			return 1

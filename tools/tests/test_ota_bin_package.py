@@ -18,6 +18,7 @@ OTA_INCLUDE = ROOT / "App/Update"
 BUILD_SCRIPT = ROOT / "build.sh"
 PACKAGING_MAKEFILE = ROOT / "packaging/Makefile"
 MAIN_SOURCE = ROOT / "App/Main.cpp"
+ENV_VERIFIER = ROOT / "tools/verify_uboot_env.py"
 
 IMAGES = (
     ("boot", "boot.img", 4, 0x0240000, 0x0400000, b"boot-data"),
@@ -67,6 +68,65 @@ class OtaBinPackageTest(unittest.TestCase):
         main_source = MAIN_SOURCE.read_text(encoding="utf-8-sig", errors="ignore")
         self.assertIn('/mnt/sdcard/ota.bin', main_source)
         self.assertNotIn('/mnt/sdcard/upgrade.tar.gz', main_source)
+
+    def test_sd_release_requires_fresh_sdk_fixed_images_and_six_image_set(self):
+        build_script = BUILD_SCRIPT.read_text()
+        packaging_makefile = PACKAGING_MAKEFILE.read_text()
+        six_images = "env.img idblock.img uboot.img boot.img rootfs.img oem.img"
+
+        self.assertIn(f"SD_IMAGE_NAMES=({six_images})", build_script)
+        self.assertIn('RV1106_SDK_DIR is required', build_script)
+        self.assertIn('SDK_IMAGE_DIR=$RV1106_SDK_DIR/output/image', build_script)
+        self.assertIn('SDK_ENV_IMAGE=$SDK_IMAGE_DIR/env.img', build_script)
+        self.assertIn('tools/verify_uboot_env.py', build_script)
+        self.assertIn(f"SD_IMAGES := {six_images}", packaging_makefile)
+        self.assertIn("cp $(SD_IMAGE_PATHS) $(RELEASE_DIR)/sd/", packaging_makefile)
+        self.assertIn("stat -c %s $(IMAGE_DIR)/env.img", packaging_makefile)
+        self.assertNotIn(
+            "cp $(IMAGE_DIR)/uboot.img $(IMAGE_DIR)/boot.img",
+            packaging_makefile,
+        )
+
+    def test_env_verifier_checks_crc_size_and_required_ab_values(self):
+        self.assertTrue(ENV_VERIFIER.is_file())
+
+        def build_env(entries):
+            payload = b"\0".join(entries) + b"\0\0"
+            payload += b"\0" * (256 * 1024 - 4 - len(payload))
+            return struct.pack("<I", zlib.crc32(payload) & 0xFFFFFFFF) + payload
+
+        complete_entries = (
+            b"mtdparts=mtdparts=spi-nand0:256K(env),1M(idblock),1M(uboot),"
+            b"4M(boot_a),4M(boot_b),256K(misc),-(userdata)",
+            b"sys_bootargs= rootfstype=squashfs",
+            b"sd_parts=mmcblk0:16K@512(env)",
+        )
+        with tempfile.TemporaryDirectory() as tempdir:
+            temp = pathlib.Path(tempdir)
+            valid = temp / "valid.img"
+            valid.write_bytes(build_env(complete_entries))
+            subprocess.run(["python3", str(ENV_VERIFIER), str(valid)], check=True)
+
+            bad_crc = temp / "bad-crc.img"
+            corrupted = bytearray(valid.read_bytes())
+            corrupted[-1] ^= 1
+            bad_crc.write_bytes(corrupted)
+
+            missing = temp / "missing.img"
+            missing.write_bytes(build_env(complete_entries[:-1]))
+
+            bad_size = temp / "bad-size.img"
+            bad_size.write_bytes(valid.read_bytes()[:-1])
+
+            for invalid in (bad_crc, missing, bad_size):
+                with self.subTest(invalid=invalid.name):
+                    result = subprocess.run(
+                        ["python3", str(ENV_VERIFIER), str(invalid)],
+                        capture_output=True,
+                        text=True,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("verify_uboot_env:", result.stderr)
 
     def build_fixture(self, temp: pathlib.Path):
         packager = temp / "packaging-update"

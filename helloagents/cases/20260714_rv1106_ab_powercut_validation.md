@@ -14,7 +14,7 @@
 
 1. 保留串口完整日志，记录固件版本、测试时间、当前槽和每次上电原因。
 2. 准备只包含 `boot.img/rootfs.img/oem.img` 的 `ota_ab.tar`。
-3. 准备 FAT 格式 SD 卡，根目录按用例放置 `uboot.img/boot.img/rootfs.img/oem.img`，不放 `sd_update.txt`。
+3. 准备 FAT 格式 SD 卡，根目录按用例放置 `env.img/idblock.img/uboot.img/boot.img/rootfs.img/oem.img`，不放 `sd_update.txt`；部分镜像用例按测试目标删除对应文件。
 4. 确认板端有 `rk_ota`、`sha256sum`、`flash_lock`、`flash_erase`；涉及 U-Boot 正常升级前准备 Maskrom/USB 恢复条件和已验证的原始镜像。
 5. 每条用例开始前执行 `sync`，记录 `rk_ota --misc=display`，确认当前槽处于可启动状态。
 

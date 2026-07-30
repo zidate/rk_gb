@@ -24,6 +24,7 @@
 namespace {
 
 const char kImageDirectory[] = "/tmp";
+char kRkOtaProgram[] = "/oem/usr/bin/rk_ota";
 volatile int g_update_running = 0;
 
 void ReleaseUpgradeLock()
@@ -31,11 +32,42 @@ void ReleaseUpgradeLock()
     __sync_lock_release(&g_update_running);
 }
 
+int RunRkOta(char *const argv[], bool remove_images_on_exec_failure)
+{
+    const pid_t pid = AB_UPDATE_FORK();
+    if (pid < 0)
+    {
+        return -1;
+    }
+    if (pid == 0)
+    {
+        AB_UPDATE_EXECV(kRkOtaProgram, argv);
+        if (remove_images_on_exec_failure)
+        {
+            OtaPackageRemoveImages(kImageDirectory);
+        }
+        ReleaseUpgradeLock();
+        AB_UPDATE_EXIT(127);
+    }
+
+    int status = 0;
+    pid_t waited;
+    do
+    {
+        waited = AB_UPDATE_WAITPID(pid, &status, 0);
+    } while (waited < 0 && errno == EINTR);
+
+    if (waited != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    {
+        return -1;
+    }
+    return 0;
+}
+
 }  // 匿名命名空间
 
 int AbUpdateApply(const char *package_path, bool reboot_after_success)
 {
-    static char program[] = "/oem/usr/bin/rk_ota";
     static char misc_arg[] = "--misc=update";
     static char save_arg[] = "--save_dir=/tmp";
     static char partition_arg[] = "--partition=all";
@@ -52,40 +84,29 @@ int AbUpdateApply(const char *package_path, bool reboot_after_success)
         return -1;
     }
 
-    argv[0] = program;
+    argv[0] = kRkOtaProgram;
     argv[1] = misc_arg;
     argv[2] = save_arg;
     argv[3] = partition_arg;
     argv[4] = reboot_after_success ? reboot_arg : NULL;
     argv[5] = NULL;
 
-    const pid_t pid = AB_UPDATE_FORK();
-    if (pid < 0)
-    {
-        OtaPackageRemoveImages(kImageDirectory);
-        ReleaseUpgradeLock();
-        return -1;
-    }
-    if (pid == 0)
-    {
-        AB_UPDATE_EXECV(program, argv);
-        OtaPackageRemoveImages(kImageDirectory);
-        ReleaseUpgradeLock();
-        AB_UPDATE_EXIT(127);
-    }
-
-    int status = 0;
-    pid_t waited;
-    do
-    {
-        waited = AB_UPDATE_WAITPID(pid, &status, 0);
-    } while (waited < 0 && errno == EINTR);
-
+    const int result = RunRkOta(argv, true);
     OtaPackageRemoveImages(kImageDirectory);
     ReleaseUpgradeLock();
-    if (waited != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    return result;
+}
+
+int AbUpdateMarkBootSuccessful()
+{
+    static char misc_arg[] = "--misc=now";
+    char *argv[] = {kRkOtaProgram, misc_arg, NULL};
+
+    if (__sync_lock_test_and_set(&g_update_running, 1) != 0)
     {
         return -1;
     }
-    return 0;
+    const int result = RunRkOta(argv, false);
+    ReleaseUpgradeLock();
+    return result;
 }

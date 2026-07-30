@@ -70,7 +70,7 @@
 
 ## 2026-07-29 ota.bin 网络 OTA 容器
 
-- 网络 OTA 交付物统一为 `Release/ota.bin`，构建链路不再生成 `upgrade.tar.gz` 或 `ota_ab.tar`；SD 工厂镜像目录仍保留独立的 `uboot.img/boot.img/rootfs.img/oem.img`。
+- 网络 OTA 交付物统一为 `Release/ota.bin`，构建链路不再生成 `upgrade.tar.gz` 或 `ota_ab.tar`；SD 升级目录固定发布 `env.img/idblock.img/uboot.img/boot.img/rootfs.img/oem.img` 六件套。
 - 容器兼容历史 `packaging-update` 格式：32 字节包头包含 20 字节平台名 `rv1106`、网络字节序 magic `0xABCD1234`、payload CRC32 和 payload 长度；每个镜像前有 12 字节网络字节序的类型、对齐后大小和起始地址。
 - 容器类型固定为 boot=4、rootfs=5、oem=6；起始地址固定为 `0x0240000/0x0A40000/0x1E40000`，镜像上限分别为 4/10/32 MiB。`upgrade.ini` 中的物理分区 `type` 不作为容器类型使用。
 - Host `packaging-update` 只接受 `[boot]/[rootfs]/[oem]` 三件套，镜像按 4 字节对齐并补 `0xFF`，对整个镜像头和数据 payload 计算标准 CRC32（多项式 `0xEDB88320`）。
@@ -80,6 +80,15 @@
 - 中国移动 `demo_upgrade_callback` 对 FW/APP 命令统一按整包 `ota.bin` 处理：回调只校验和复制参数、拒绝并发任务，后台线程直接调用已静态链接的 libcurl 7.88.1 easy API 下载，不依赖固件中的 `curl` 可执行文件；下载仅允许 HTTP/HTTPS 及同协议重定向，校验 SDK 下发的 MD5 后依次上报下载/安装状态并调用 `AbUpdateApply()`。
 - 直接镜像模式取消了临时 USTAR 和 `rk_ota` 解包副本，但下载文件与三镜像准备期间仍会同时占用 `/tmp`；量产镜像需按实际包和镜像大小验证空间。
 - 2026-07-29 验证：84 项 `tools/tests` 回归通过；OtaPackage/AbUpdate/OtaDownload 严格编译、ChinaMobile 整文件语法检查、rk_ota ARM 语法检查以及 ARM GNU 8.3.0 整机交叉编译均成功。libcurl 修正后又使用现有 libcurl/mbedTLS/libavutil 静态库生成 ARM/uClibc ELF，确认下载相关符号全部解析。
+
+## 2026-07-30 启动健康确认与固定镜像交付
+
+- A/B 默认槽位不存放在 ENV。`misc + 2 KiB` 元数据无效时由 U-Boot 初始化 A priority=15/tries=7、B priority=0/tries=0；写入 `env.img` 不得重置活动槽。
+- 现场日志中 `_a` 已正确挂载 `rootfs_a/oem_a`，但状态为 `successful=0, tries-remain=2`。根因是设计要求的 `rk_ota --misc=now` 没有应用侧调用；在 SDK 默认 `RETRY_BOOT` 模式下，该命令把健康槽的 tries 恢复到 7。
+- 正常模式完成音视频关键初始化后启动延迟健康确认线程：进程持续存活 30 秒后，以固定参数、无 shell 方式调用 `/oem/usr/bin/rk_ota --misc=now`；失败最多重试 6 次，并与 OTA 升级事务共用进程内锁。
+- 仓库根 `build.sh` 不负责编译完整 SDK。生成发布镜像时必须设置 `RV1106_SDK_DIR`，脚本从 SDK 的 `output/image/` 统一导入 `env/idblock/uboot`，并直接检查 `env.img` 的 256 KiB 大小、小端 CRC32 以及 A/B `mtdparts`、`sys_bootargs`、`sd_parts`。
+- SDK 任一构建目标都会先运行分区解析并把 `.env.txt` 重写为只有 `mtdparts` 的一行，因此该文本文件不能单独证明最终 `env.img` 不完整。推荐在已应用当前补丁的完整 SDK 内先执行 `./build.sh uboot`、再执行 `./build.sh env`，最后执行 `RV1106_SDK_DIR=/path/to/RV1106_IPC_SDK ./build.sh all`。缺少 SDK 路径、`env.img` 内容不完整、固定镜像缺失或大小越界都会使根构建失败。
+- `packaging/Makefile` 清理旧 `Release/sd/*.img` 后只从校验过的镜像目录复制六件套；网络 OTA 的 `Release/ota.bin` 仍只包含 boot/rootfs/oem。
 
 ## 写保护
 
@@ -117,3 +126,7 @@
 - Flash 数据手册：`/home/jerry/silver/FLASH_CHUCUN-C5F1GMxE-DS(2)(1).pdf`。
 - 参考 SDK：`/home/jerry/lhy/cmiot/RV1106_IPC_SDK.tar.gz`。
 - 详细设计：`docs/superpowers/specs/2026-07-14-rv1106-ab-upgrade-spinand-write-protection-design.md`。
+
+## 变更历史
+
+- [202607301819_ab_health_sd_delivery](../../history/2026-07/202607301819_ab_health_sd_delivery/) - 增加应用延迟健康确认、SDK 固定镜像产物校验与 SD 六件套交付。

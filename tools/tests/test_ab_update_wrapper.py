@@ -64,6 +64,7 @@ static int exec_args_ok;
 static int exit_status;
 static int wait_status;
 static int images_present_at_wait;
+static int expected_exec;
 
 static int file_starts_with(const char *path, const char *expected, size_t size) {
     FILE *file = fopen(path, "rb");
@@ -94,13 +95,19 @@ extern "C" pid_t FakeFork(void) {
 
 extern "C" int FakeExecv(const char *path, char *const argv[]) {
     exec_called++;
-    exec_args_ok = !strcmp(path, "/oem/usr/bin/rk_ota") &&
-                   !strcmp(argv[0], "/oem/usr/bin/rk_ota") &&
-                   !strcmp(argv[1], "--misc=update") &&
-                   !strcmp(argv[2], "--save_dir=/tmp") &&
-                   !strcmp(argv[3], "--partition=all") &&
-                   !strcmp(argv[4], "--reboot") && argv[5] == NULL &&
-                   strstr(path, "/bin/sh") == NULL && images_are_ready();
+    const int common_ok = !strcmp(path, "/oem/usr/bin/rk_ota") &&
+                          !strcmp(argv[0], "/oem/usr/bin/rk_ota") &&
+                          strstr(path, "/bin/sh") == NULL;
+    if (expected_exec == 0) {
+        exec_args_ok = common_ok && !strcmp(argv[1], "--misc=update") &&
+                       !strcmp(argv[2], "--save_dir=/tmp") &&
+                       !strcmp(argv[3], "--partition=all") &&
+                       !strcmp(argv[4], "--reboot") && argv[5] == NULL &&
+                       images_are_ready();
+    } else {
+        exec_args_ok = common_ok && !strcmp(argv[1], "--misc=now") &&
+                       argv[2] == NULL;
+    }
     return -1;
 }
 
@@ -119,12 +126,24 @@ extern "C" void FakeExit(int status) {
 
 static int check_child(const char *package) {
     mode = 0;
+    expected_exec = 0;
     exec_called = 0;
     exec_args_ok = 0;
     exit_status = 0;
     if (setjmp(child_jump) == 0)
         (void)AbUpdateApply(package, true);
     return exec_called == 1 && exec_args_ok && exit_status == 127 && images_are_removed() ? 0 : 1;
+}
+
+static int check_mark_child(void) {
+    mode = 0;
+    expected_exec = 1;
+    exec_called = 0;
+    exec_args_ok = 0;
+    exit_status = 0;
+    if (setjmp(child_jump) == 0)
+        (void)AbUpdateMarkBootSuccessful();
+    return exec_called == 1 && exec_args_ok && exit_status == 127 ? 0 : 1;
 }
 
 int main(int argc, char **argv) {
@@ -135,6 +154,7 @@ int main(int argc, char **argv) {
     if (check_child(argv[2]))
         return 2;
     mode = 1;
+    expected_exec = 0;
     wait_status = 0;
     images_present_at_wait = 0;
     if (AbUpdateApply(argv[1], true) != 0 || !images_present_at_wait || !images_are_removed())
@@ -143,6 +163,16 @@ int main(int argc, char **argv) {
     images_present_at_wait = 0;
     if (AbUpdateApply(argv[1], true) == 0 || !images_present_at_wait || !images_are_removed())
         return 4;
+    if (check_mark_child())
+        return 5;
+    mode = 1;
+    expected_exec = 1;
+    wait_status = 0;
+    if (AbUpdateMarkBootSuccessful() != 0)
+        return 6;
+    wait_status = 7 << 8;
+    if (AbUpdateMarkBootSuccessful() == 0)
+        return 7;
     return 0;
 }
 """
@@ -188,8 +218,22 @@ class AbUpdateWrapperTest(unittest.TestCase):
         self.assertIn("AB_UPDATE_FORK()", source)
         self.assertIn("AB_UPDATE_EXECV", source)
         self.assertIn("AB_UPDATE_WAITPID", source)
+        self.assertIn("AbUpdateMarkBootSuccessful", source)
+        self.assertIn('"--misc=now"', source)
         self.assertNotIn("system(", source)
         self.assertNotIn("/bin/sh", source)
+
+    def test_normal_start_uses_delayed_ab_health_confirmation(self):
+        main = (ROOT / "App/Main.cpp").read_text(
+            encoding="utf-8-sig", errors="ignore"
+        )
+        self.assertIn("thread_confirm_ab_boot", main)
+        self.assertIn("kAbBootHealthDelaySeconds = 30", main)
+        self.assertIn("AbUpdateMarkBootSuccessful()", main)
+        self.assertLess(
+            main.index("g_AVManager.VideoInit();"),
+            main.index('CreateDetachedThread((char*)"thread_confirm_ab_boot"'),
+        )
 
     def test_protocol_and_both_builds_use_ota_wrapper(self):
         protocol = PROTOCOL.read_text()

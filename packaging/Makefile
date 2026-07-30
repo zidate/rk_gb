@@ -9,6 +9,8 @@ RELEASE_DIR := $(ROOT)/Release
 ROOTFS_PART_SIZE := 10*0x100000
 OEM_PART_SIZE := 32*0x100000
 USERDATA_PART_SIZE := 0x1FC0000
+SD_IMAGES := env.img idblock.img uboot.img boot.img rootfs.img oem.img
+SD_IMAGE_PATHS := $(addprefix $(IMAGE_DIR)/,$(SD_IMAGES))
 
 .PHONY: all images factory artifacts clean
 
@@ -41,7 +43,15 @@ factory: images
 artifacts: factory
 	$(Q)mkdir -p $(RELEASE_DIR)/sd
 	$(Q)rm -f $(RELEASE_DIR)/ota.bin $(RELEASE_DIR)/sd/*.img
-	$(Q)cp $(IMAGE_DIR)/uboot.img $(IMAGE_DIR)/boot.img $(IMAGE_DIR)/rootfs.img $(IMAGE_DIR)/oem.img $(RELEASE_DIR)/sd/
+	$(Q)test -f $(IMAGE_DIR)/env.img
+	$(Q)test -f $(IMAGE_DIR)/idblock.img
+	$(Q)test -f $(IMAGE_DIR)/uboot.img
+	$(Q)test $$(stat -c %s $(IMAGE_DIR)/env.img) -eq $$((256 * 1024))
+	$(Q)test $$(stat -c %s $(IMAGE_DIR)/idblock.img) -gt 0
+	$(Q)test $$(stat -c %s $(IMAGE_DIR)/idblock.img) -le $$((1024 * 1024))
+	$(Q)test $$(stat -c %s $(IMAGE_DIR)/uboot.img) -gt 0
+	$(Q)test $$(stat -c %s $(IMAGE_DIR)/uboot.img) -le $$((1024 * 1024))
+	$(Q)cp $(SD_IMAGE_PATHS) $(RELEASE_DIR)/sd/
 	$(Q)cp $(IMAGE_DIR)/ota.bin $(RELEASE_DIR)/ota.bin
 
 clean:
