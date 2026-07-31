@@ -8,10 +8,11 @@
 
 ### 新增
 - 新增 RV1106 `ota.bin` 网络升级全链路：host `packaging-update` 将 boot/rootfs/oem 按历史二进制容器格式打包；应用完成平台、magic、CRC、长度、类型、地址和分区上限校验后，事务性解析为 `/tmp/boot.img`、`rootfs.img`、`oem.img`，再由 `rk_ota --save_dir=/tmp` 直接完成 A/B 写槽。中国移动升级回调同步补齐异步下载、MD5 校验、状态上报、并发保护和统一安装流程。
+- 更新 `packaging.7z` 为 A/B 固定镜像归档，包含双层 `mtdparts` 的 `env.img`、已验证的 `idblock.img/uboot.img/boot.img` 和幂等版 ARM `rk_ota`；构建时从归档恢复固定镜像，仅重新生成 `rootfs.img/oem.img`。
 
 ### 修复
-- 修复 RV1106 A/B 新槽正常启动后没有刷新尝试次数的问题：应用正常模式完成关键音视频初始化并持续存活 30 秒后，通过无 shell 的 `rk_ota --misc=now` 确认当前槽，失败有限重试并与 OTA 事务共用并发锁。
-- 修复根构建复用旧固定镜像且 SD 发布遗漏 `env.img/idblock.img` 的问题：构建现在要求通过 `RV1106_SDK_DIR` 从完整 SDK `output/image/` 导入本次 `env/idblock/uboot` 产物，直接校验 `env.img` 的大小、CRC 和关键环境项，并强制发布、校验 SD 六件套。
+- 修复 RV1106 A/B 新槽健康确认时机和 misc 磨损：`S20linkmount` 在 OEM 成功挂载后、`S21appinit` 启动前执行 `rk_ota --misc=now`；`rk_ota` 先校验 misc A/B magic/CRC，再将当前槽标记为 `successful_boot=1/tries_remaining=0`，状态未变化时跳过整块 misc 重写，损坏数据不再被 Linux 侧覆盖。
+- 修复根构建强制依赖完整 SDK 固定镜像的问题：构建现在从包含 A/B 固定镜像的 `packaging.7z` 恢复 `env/idblock/uboot/boot`，仅由当前源码重新生成 `rootfs.img/oem.img`，并继续校验 ENV CRC、A/B 分区项和 SD 六件套。
 - 修复中国移动 OTA 下载误依赖固件外部 `curl` 命令的问题：`OtaDownload` 改为直接调用已链接的 libcurl 7.88.1 easy API，并限制下载及重定向协议为 HTTP/HTTPS；同步补齐与静态库版本匹配的公开头文件。
 - 根据板端效果反馈将 RV1106 text OSD 自动黑白恢复为每秒重绘，移除局部亮度变化 map 与区域门控；字体画布全透明和 GB OSD `BgAlpha=0/FgAlpha=255` 保持不变，继续去除黑底。
 - 优化 RV1106 text OSD 自动黑白的 CPU 开销并去掉黑底：继续每秒更新低分辨率亮度分类，但仅在某条文字覆盖区域跨过黑/白阈值时重新生成 bitmap；字体背景像素改为全透明，GB OSD RGN 调整为 `BgAlpha=0/FgAlpha=255`。

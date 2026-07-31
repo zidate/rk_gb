@@ -16,6 +16,7 @@ PATCHES = tuple(
         "0004-rk-ota.patch",
         "0007-rk-ota-ubi-init.patch",
         "0011-rk-ota-prepared-images.patch",
+        "0012-rk-ota-idempotent-health.patch",
     )
 )
 SDK_BASELINE = pathlib.Path(
@@ -203,6 +204,20 @@ class RkOtaPolicyTest(unittest.TestCase):
         self.assertIn("? 'b' : 'a'", writer)
         for name in ("AB_BOOT_NAME", "AB_ROOTFS_NAME", "AB_OEM_NAME"):
             self.assertIn(name, writer)
+
+    def test_health_confirmation_marks_success_and_skips_unchanged_misc(self):
+        health = c_function(self.bootloader, "setSlotSucceed")
+        magic_check = health.index("avb_safe_memcmp")
+        crc_check = health.index("info.crc32 != expected_crc")
+        slot_select = health.index("get_current_slot")
+        self.assertLess(magic_check, crc_check)
+        self.assertLess(crc_check, slot_select)
+        self.assertIn('printf("A/B metadata CRC is incorrect', health)
+        self.assertIn("tries_remaining = 0", health)
+        self.assertIn("successful_boot = 1", health)
+        self.assertIn("bool metadata_changed = false", health)
+        self.assertIn("if (!metadata_changed)", health)
+        self.assertNotIn("RETRY_BOOT", health)
 
 
 if __name__ == "__main__":

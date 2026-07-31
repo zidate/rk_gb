@@ -85,9 +85,10 @@
 
 - A/B 默认槽位不存放在 ENV。`misc + 2 KiB` 元数据无效时由 U-Boot 初始化 A priority=15/tries=7、B priority=0/tries=0；写入 `env.img` 不得重置活动槽。
 - 现场日志中 `_a` 已正确挂载 `rootfs_a/oem_a`，但状态为 `successful=0, tries-remain=2`。根因是设计要求的 `rk_ota --misc=now` 没有应用侧调用；在 SDK 默认 `RETRY_BOOT` 模式下，该命令把健康槽的 tries 恢复到 7。
-- 正常模式完成音视频关键初始化后启动延迟健康确认线程：进程持续存活 30 秒后，以固定参数、无 shell 方式调用 `/oem/usr/bin/rk_ota --misc=now`；失败最多重试 6 次，并与 OTA 升级事务共用进程内锁。
-- 仓库根 `build.sh` 不负责编译完整 SDK。生成发布镜像时必须设置 `RV1106_SDK_DIR`，脚本从 SDK 的 `output/image/` 统一导入 `env/idblock/uboot`，并直接检查 `env.img` 的 256 KiB 大小、小端 CRC32 以及 A/B `mtdparts`、`sys_bootargs`、`sd_parts`。
-- SDK 任一构建目标都会先运行分区解析并把 `.env.txt` 重写为只有 `mtdparts` 的一行，因此该文本文件不能单独证明最终 `env.img` 不完整。推荐在已应用当前补丁的完整 SDK 内先执行 `./build.sh uboot`、再执行 `./build.sh env`，最后执行 `RV1106_SDK_DIR=/path/to/RV1106_IPC_SDK ./build.sh all`。缺少 SDK 路径、`env.img` 内容不完整、固定镜像缺失或大小越界都会使根构建失败。
+- 健康确认已移到 rootfs 的 `S20linkmount`：`mount_part oem` 成功后、`S21appinit` 启动应用前调用 `/oem/usr/bin/rk_ota --misc=now`；OEM 挂载成功作为新槽升级完成的判断点，应用层不再启动延迟确认线程。
+- `rk_ota --misc=now` 现在先校验 magic 和 CRC，再将当前槽写成 `successful_boot=1、tries_remaining=0`，并比较 priority、last_boot 和槽状态；元数据已经一致时直接返回，避免重复擦写整个 misc MTD 分区。逻辑数据 CRC 损坏时，U-Boot 会重建默认 A priority=15/tries=7、B priority=0/tries=0，因此通常仍能从 A 槽启动，但会丢失当前槽和回滚状态；若 misc 因不可纠正 ECC/坏块而无法读取或写回，则可能无法完成槽选择并阻断启动。Linux 健康确认检测到 magic/CRC 异常时返回失败，不再覆盖损坏数据。
+- 根 `build.sh` 不再要求 `RV1106_SDK_DIR`，而是从仓库 `packaging.7z` 恢复并校验 A/B `env.img/idblock.img/uboot.img/boot.img`；`env.img` 的双层 `mtdparts=`、256 KiB 大小和 CRC 是发布前硬门禁，`rootfs.img/oem.img` 仍由当前源码重新生成。
+- 当前验证的固定镜像 SHA-256：`env.img`=`dfdcd3d0ec875806f7ee489e2cd933249c83064585974dabbe4d15a75ca5ad3f`、`idblock.img`=`40463c554c5a14ae612307518cec71e1a69a611ba059896a8a133039ca8e0c20`、`uboot.img`=`1c783213ba3807597d7df9d66d9869ab1b3e516a88b876ef2c450121de274e81`、`boot.img`=`eaddad612f01b9346daa713127658e127f1f3f924e3a368147cc4b723615083a`；归档内 ARM EABI5/uClibc `rk_ota`=`268edc73f7f4ff5ea275faa9de4de01d7882fb1bafb5326aba07d76ffeb8dd41`。
 - `packaging/Makefile` 清理旧 `Release/sd/*.img` 后只从校验过的镜像目录复制六件套；网络 OTA 的 `Release/ota.bin` 仍只包含 boot/rootfs/oem。
 
 ## 写保护

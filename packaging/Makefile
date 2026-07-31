@@ -17,6 +17,7 @@ SD_IMAGE_PATHS := $(addprefix $(IMAGE_DIR)/,$(SD_IMAGES))
 all: artifacts
 
 images:
+	$(Q)test -x $(OEM_DIR)/usr/bin/rk_ota
 	$(Q)rm -f $(OEM_DIR)/usr/bin/dgiot
 	$(Q)rm -f $(ROOTFS_DIR)/usr/bin/daemon
 	$(Q)rm -f $(ROOTFS_DIR)/usr/bin/burntool

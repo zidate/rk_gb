@@ -21,28 +21,6 @@
 
 static bool s_bStartCmiot = true;
 
-static const unsigned int kAbBootHealthDelaySeconds = 30;
-static const unsigned int kAbBootConfirmRetrySeconds = 10;
-static const int kAbBootConfirmMaxAttempts = 6;
-
-static void *thread_confirm_ab_boot(void *)
-{
-	sleep(kAbBootHealthDelaySeconds);
-	for (int attempt = 1; attempt <= kAbBootConfirmMaxAttempts; ++attempt)
-	{
-		if (AbUpdateMarkBootSuccessful() == 0)
-		{
-			AppInfo("A/B boot health confirmed\n");
-			return NULL;
-		}
-		AppErr("A/B boot health confirmation failed, attempt=%d\n", attempt);
-		if (attempt < kAbBootConfirmMaxAttempts)
-			sleep(kAbBootConfirmRetrySeconds);
-	}
-	return NULL;
-}
-
-
 #if 01
 int g_test_enc_type_change; //for debug
 int g_test_enc_type[2]; //for debug
@@ -1513,8 +1491,6 @@ bool CSofia::start()
 		}
 		g_AVManager.VideoParamInit();//掉了这个接口，帧率码率等参数使用CFG_VIDEO的配置，不掉的话使用/oem/usr/bin/rkipc.ini的配置
 		g_AVManager.VideoInit();
-		CreateDetachedThread((char*)"thread_confirm_ab_boot", thread_confirm_ab_boot,
-					     (void *)NULL, true);
 
 		// 初始化白光灯灭
 		g_Camera;

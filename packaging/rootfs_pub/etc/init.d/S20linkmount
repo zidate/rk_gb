@@ -216,11 +216,24 @@ case $bootmedium in
 esac
 fi
 }
+confirm_ab_boot(){
+	rk_ota_path=$OEM_MOUNTPOINT/usr/bin/rk_ota
+	if [ ! -x "$rk_ota_path" ]; then
+		echo "A/B health confirmation tool is missing: $rk_ota_path" >&2
+		return 1
+	fi
+	"$rk_ota_path" --misc=now || {
+		echo "A/B health confirmation failed" >&2
+		return 1
+	}
+	echo "A/B health confirmed after OEM mount"
+}
 case "$1" in
 start)
 	linkdev || exit 1
 	mount_part rootfs IGNORE squashfs || exit 1
 	mount_part oem "$OEM_MOUNTPOINT" squashfs || exit 1
+	confirm_ab_boot || exit 1
 	mount_part userdata "$USERDATA_MOUNTPOINT" ubifs || exit 1
 	;;
 linkdev)

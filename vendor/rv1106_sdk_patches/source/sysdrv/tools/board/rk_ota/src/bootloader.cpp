@@ -606,39 +606,46 @@ int setSlotSucceed() {
     if (readABMisc(&info) == -1) {
         return -1;
     }
+    unsigned int expected_crc;
+    if (avb_safe_memcmp(info.magic, AVB_AB_MAGIC, AVB_AB_MAGIC_LEN) != 0) {
+        printf("Magic is incorrect.\n");
+        return -1;
+    }
+    expected_crc = avb_htobe32(avb_crc32(
+        (const unsigned char*)&info, sizeof(struct AvbABData) - sizeof(unsigned int)));
+    if (info.crc32 != expected_crc) {
+        printf("A/B metadata CRC is incorrect: expected %x, found %x.\n",
+               expected_crc, info.crc32);
+        return -1;
+    }
+
     int now_slot = get_current_slot(&info);
     if (now_slot == -1) {
         return -1;
     }
-
-    for (size_t i = 0; i < 4; i++)
-    {
-        printf("info.mafic is %x\n",info.magic[i]);
-    }
-    if (avb_safe_memcmp(info.magic, AVB_AB_MAGIC, AVB_AB_MAGIC_LEN) != 0) {
-        printf("Magic is incorrect.\n");
-        return false;
-    }
+    bool metadata_changed = false;
     if (info.slots[now_slot].priority != AVB_AB_MAX_PRIORITY) {
         /* Something could be wrong, correct it because this slot is bootable */
         printf("Warning: current slot priorty is %d != %d, Correct it!\n",
                info.slots[now_slot].priority, AVB_AB_MAX_PRIORITY);
         info.slots[now_slot].priority = AVB_AB_MAX_PRIORITY;
+        metadata_changed = true;
     }
-    #ifdef SUCCESSFUL_BOOT
-    info.slots[now_slot].tries_remaining = 0;
-    info.slots[now_slot].successful_boot = 1;
-    #endif
-    #ifdef RETRY_BOOT
-    info.slots[now_slot].tries_remaining = AVB_AB_MAX_TRIES_REMAINING;
-    /* Clear suc boot flag anyway. Because it's chance that an older slot
-     * used succ mode without this patch applied, while the other one
-     * (new OTA slot) uses tries mode. We need to make sure not to confuse
-     * u-boot, otherwise this slot will be unbootable.
-     */
-    info.slots[now_slot].successful_boot = 0;
-    #endif
-    info.last_boot = now_slot;
+    if (info.slots[now_slot].tries_remaining != 0 ||
+        info.slots[now_slot].successful_boot != 1) {
+        info.slots[now_slot].tries_remaining = 0;
+        info.slots[now_slot].successful_boot = 1;
+        metadata_changed = true;
+    }
+    if (info.last_boot != now_slot) {
+        info.last_boot = now_slot;
+        metadata_changed = true;
+    }
+
+    /* A healthy slot is already persistent; avoid another full misc rewrite. */
+    if (!metadata_changed) {
+        return 0;
+    }
 
     AvbABData_update_crc(&info);
 

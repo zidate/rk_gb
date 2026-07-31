@@ -69,17 +69,21 @@ class OtaBinPackageTest(unittest.TestCase):
         self.assertIn('/mnt/sdcard/ota.bin', main_source)
         self.assertNotIn('/mnt/sdcard/upgrade.tar.gz', main_source)
 
-    def test_sd_release_requires_fresh_sdk_fixed_images_and_six_image_set(self):
+    def test_sd_release_uses_ab_fixed_images_from_packaging_archive(self):
         build_script = BUILD_SCRIPT.read_text()
         packaging_makefile = PACKAGING_MAKEFILE.read_text()
         six_images = "env.img idblock.img uboot.img boot.img rootfs.img oem.img"
 
         self.assertIn(f"SD_IMAGE_NAMES=({six_images})", build_script)
-        self.assertIn('RV1106_SDK_DIR is required', build_script)
-        self.assertIn('SDK_IMAGE_DIR=$RV1106_SDK_DIR/output/image', build_script)
-        self.assertIn('SDK_ENV_IMAGE=$SDK_IMAGE_DIR/env.img', build_script)
+        self.assertIn("PACKAGING_ARCHIVE=$ROOT/packaging.7z", build_script)
+        self.assertIn("python3 -m py7zr x", build_script)
+        self.assertIn("packaging/image/env.img", build_script)
+        self.assertIn('rm -f "$ROOT/$fixed_image_member"', build_script)
+        self.assertIn('fixed image missing from packaging.7z', build_script)
+        self.assertNotIn("RV1106_SDK_DIR is required", build_script)
         self.assertIn('tools/verify_uboot_env.py', build_script)
         self.assertIn(f"SD_IMAGES := {six_images}", packaging_makefile)
+        self.assertIn("test -x $(OEM_DIR)/usr/bin/rk_ota", packaging_makefile)
         self.assertIn("cp $(SD_IMAGE_PATHS) $(RELEASE_DIR)/sd/", packaging_makefile)
         self.assertIn("stat -c %s $(IMAGE_DIR)/env.img", packaging_makefile)
         self.assertNotIn(

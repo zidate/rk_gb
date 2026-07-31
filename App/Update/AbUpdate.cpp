@@ -96,17 +96,3 @@ int AbUpdateApply(const char *package_path, bool reboot_after_success)
     ReleaseUpgradeLock();
     return result;
 }
-
-int AbUpdateMarkBootSuccessful()
-{
-    static char misc_arg[] = "--misc=now";
-    char *argv[] = {kRkOtaProgram, misc_arg, NULL};
-
-    if (__sync_lock_test_and_set(&g_update_running, 1) != 0)
-    {
-        return -1;
-    }
-    const int result = RunRkOta(argv, false);
-    ReleaseUpgradeLock();
-    return result;
-}

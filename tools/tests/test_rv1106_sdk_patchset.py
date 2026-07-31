@@ -42,6 +42,7 @@ class PatchsetTest(unittest.TestCase):
             "0009-uboot-sd-fixed-raw-offset.patch",
             "0010-uboot-sd-oem-switch.patch",
             "0011-rk-ota-prepared-images.patch",
+            "0012-rk-ota-idempotent-health.patch",
         ]
         series = (PATCH_DIR / "series").read_text().splitlines()
         self.assertEqual(series, expected)

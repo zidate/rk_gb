@@ -707,9 +707,18 @@ class LinkMountSlotSelectionTest(unittest.TestCase):
             "linkdev || exit 1",
             "mount_part rootfs IGNORE squashfs || exit 1",
             'mount_part oem "$OEM_MOUNTPOINT" squashfs || exit 1',
+            "confirm_ab_boot || exit 1",
             'mount_part userdata "$USERDATA_MOUNTPOINT" ubifs || exit 1',
         ):
             self.assertIn(command, self.script)
+        self.assertLess(
+            self.script.index('mount_part oem "$OEM_MOUNTPOINT" squashfs || exit 1'),
+            self.script.index("confirm_ab_boot || exit 1"),
+        )
+        self.assertLess(
+            self.script.index("confirm_ab_boot || exit 1"),
+            self.script.index('mount_part userdata "$USERDATA_MOUNTPOINT" ubifs || exit 1'),
+        )
         self.assertIn("printf '%s\\n' \"stop $0 finished\"", self.script)
         self.assertIn("printf 'Usage: %s {start|linkdev|stop}\\n' \"$0\" >&2", self.script)
 
@@ -725,6 +734,14 @@ class LinkMountSlotSelectionTest(unittest.TestCase):
             oem_mountpoint.mkdir()
             userdata_mountpoint.mkdir()
             stub_bin.mkdir()
+            confirm_log = root / "rk_ota.args"
+            rk_ota = oem_mountpoint / "usr/bin/rk_ota"
+            rk_ota.parent.mkdir(parents=True)
+            rk_ota.write_text(
+                "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$CONFIRM_LOG\"\n",
+                encoding="utf-8",
+            )
+            rk_ota.chmod(0o755)
 
             stubs = {
                 "mountpoint": "#!/bin/sh\nprintf '/dev/ubiblock5_0 / squashfs rw 0 0\\n'\n",
@@ -752,6 +769,7 @@ printf '/dev/ubi11_0 on userdata type ubifs\\n'
                     "BY_NAME_DIR": str(by_name),
                     "OEM_MOUNTPOINT": str(oem_mountpoint),
                     "USERDATA_MOUNTPOINT": str(userdata_mountpoint),
+                    "CONFIRM_LOG": str(confirm_log),
                     "PATH": f"{stub_bin}:{env['PATH']}",
                 }
             )
@@ -765,7 +783,9 @@ printf '/dev/ubi11_0 on userdata type ubifs\\n'
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             self.assertIn("rootfs mount on /dev/ubiblock5_0", result.stdout)
             self.assertIn("oem has been mounted", result.stdout)
+            self.assertIn("A/B health confirmed after OEM mount", result.stdout)
             self.assertIn("userdata has been mounted", result.stdout)
+            self.assertEqual(confirm_log.read_text(encoding="utf-8").strip(), "--misc=now")
 
 
 if __name__ == "__main__":

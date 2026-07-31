@@ -25,6 +25,13 @@ BLE_TYPE=ATBM6062
 
 PACKAGING=$ROOT/packaging
 SD_IMAGE_NAMES=(env.img idblock.img uboot.img boot.img rootfs.img oem.img)
+PACKAGING_ARCHIVE=$ROOT/packaging.7z
+PACKAGING_FIXED_IMAGE_MEMBERS=(
+	packaging/image/env.img
+	packaging/image/idblock.img
+	packaging/image/uboot.img
+	packaging/image/boot.img
+)
 
 # BLE_TYPE=ATBM6132
 #BLE_TYPE=AIC8800DL
@@ -113,33 +120,34 @@ function image()
 	OSD_FONT_SRC=$ROOT/Middleware/libmpp/rkipc/common/osd/noto_serif_sc_gb2312.otf
 	OSD_FONT_DST=$PACKAGING/oem_ipc/usr/share/noto_serif_sc_gb2312.otf
 	OTA_PACKAGE=$ROOT/Release/ota.bin
-	if [ -z "${RV1106_SDK_DIR:-}" ]; then
-		echo "RV1106_SDK_DIR is required for fresh env/idblock/uboot images"
+	if [ ! -f "$PACKAGING_ARCHIVE" ]; then
+		echo "packaging archive not found: $PACKAGING_ARCHIVE"
 		return 1
 	fi
-	SDK_IMAGE_DIR=$RV1106_SDK_DIR/output/image
-	SDK_ENV_IMAGE=$SDK_IMAGE_DIR/env.img
-	for fixed_image in "$SDK_ENV_IMAGE" "$SDK_IMAGE_DIR/idblock.img" \
-		"$SDK_IMAGE_DIR/uboot.img"; do
-		if [ ! -f "$fixed_image" ]; then
-			echo "RV1106 SDK artifact not found: $fixed_image"
+	for fixed_image_member in "${PACKAGING_FIXED_IMAGE_MEMBERS[@]}"; do
+		rm -f "$ROOT/$fixed_image_member" || return 1
+	done
+	python3 -m py7zr x "$PACKAGING_ARCHIVE" "$ROOT" \
+		--files "${PACKAGING_FIXED_IMAGE_MEMBERS[@]}" || return 1
+	for fixed_image_member in "${PACKAGING_FIXED_IMAGE_MEMBERS[@]}"; do
+		if [ ! -f "$ROOT/$fixed_image_member" ]; then
+			echo "fixed image missing from packaging.7z: $fixed_image_member"
 			return 1
 		fi
 	done
-	if ! python3 "$ROOT/tools/verify_uboot_env.py" "$SDK_ENV_IMAGE"; then
-		echo "RV1106 SDK env.img is invalid; run SDK ./build.sh env after uboot"
+	if ! python3 "$ROOT/tools/verify_uboot_env.py" "$PACKAGING/image/env.img"; then
+		echo "packaging.7z env.img is not a valid A/B environment image"
 		return 1
 	fi
-	if [ "$(stat -c %s "$SDK_IMAGE_DIR/idblock.img")" -le 0 ] ||
-	   [ "$(stat -c %s "$SDK_IMAGE_DIR/idblock.img")" -gt $((1024 * 1024)) ] ||
-	   [ "$(stat -c %s "$SDK_IMAGE_DIR/uboot.img")" -le 0 ] ||
-	   [ "$(stat -c %s "$SDK_IMAGE_DIR/uboot.img")" -gt $((1024 * 1024)) ]; then
-		echo "RV1106 SDK fixed image size validation failed"
+	if [ "$(stat -c %s "$PACKAGING/image/idblock.img")" -le 0 ] ||
+	   [ "$(stat -c %s "$PACKAGING/image/idblock.img")" -gt $((1024 * 1024)) ] ||
+	   [ "$(stat -c %s "$PACKAGING/image/uboot.img")" -le 0 ] ||
+	   [ "$(stat -c %s "$PACKAGING/image/uboot.img")" -gt $((1024 * 1024)) ] ||
+	   [ "$(stat -c %s "$PACKAGING/image/boot.img")" -le 0 ] ||
+	   [ "$(stat -c %s "$PACKAGING/image/boot.img")" -gt $((4 * 1024 * 1024)) ]; then
+		echo "packaging.7z fixed image size validation failed"
 		return 1
 	fi
-	cp -f "$SDK_ENV_IMAGE" "$PACKAGING/image/env.img" || return 1
-	cp -f "$SDK_IMAGE_DIR/idblock.img" "$PACKAGING/image/idblock.img" || return 1
-	cp -f "$SDK_IMAGE_DIR/uboot.img" "$PACKAGING/image/uboot.img" || return 1
 	if [ ! -f "$OSD_FONT_SRC" ]; then
 		echo "OSD font not found: $OSD_FONT_SRC"
 		return 1
